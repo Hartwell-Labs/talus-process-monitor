@@ -58,7 +58,7 @@ parking_lot = { version = "0.12", optional = true }
 # TLS for web dashboard
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
-rcgen = { version = "0.13", optional = true }
+rcgen = { version = "0.14", optional = true }
 
 # hyper-util server builder for the TLS accept loop (axum enables only
 # `server` + `service`; the `auto` conn builder additionally needs http1/http2)
