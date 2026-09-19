@@ -200,10 +200,21 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
   </div>
 </div>
 
+<!-- Real demo GIF -->
+<div class="terminal reveal" style="margin-top:1rem">
+  <div class="terminal-header">
+    <div class="terminal-dot r"></div><div class="terminal-dot y"></div><div class="terminal-dot g"></div>
+    <span class="terminal-title">talus — ransomware detected &amp; killed (live demo)</span>
+  </div>
+  <div style="padding:0">
+    <img src="assets/talus-demo.gif" alt="Talus detecting and killing a ransomware-like process live" style="width:100%;display:block">
+  </div>
+</div>
+
 <!-- Features -->
 <section class="section">
   <h2 class="reveal">Built for the kernel</h2>
-  <p class="sub reveal">eBPF tracepoints. Per-CPU perf buffers. Ratatui TUI. Zero-copy from kernel to screen.</p>
+  <p class="sub reveal">eBPF tracepoints. Per-CPU perf buffers. FrankenTUI interface. Zero-copy from kernel to screen.</p>
   <div class="grid">
     <div class="card reveal reveal-delay-1">
       <div class="card-icon y">🔬</div>
@@ -213,7 +224,7 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
     <div class="card reveal reveal-delay-2">
       <div class="card-icon c">📊</div>
       <h3>7-Panel TUI Dashboard</h3>
-      <p>Live terminal interface with Events, Processes, Network, TopFiles, Extensions, Alerts, and Ransomware Heatmap. Built with Ratatui.</p>
+      <p>Live terminal interface with Events, Processes, Network, TopFiles, Extensions, Alerts, and Ransomware Heatmap. Built with FrankenTUI.</p>
     </div>
     <div class="card reveal reveal-delay-3">
       <div class="card-icon r">🛡️</div>
@@ -242,7 +253,7 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
 <div class="stats reveal">
   <div class="stat"><div class="number">~0%</div><div class="label">CPU overhead (idle)</div></div>
   <div class="stat"><div class="number">&lt;1μs</div><div class="label">Event latency</div></div>
-  <div class="stat"><div class="number">36</div><div class="label">Tests passing</div></div>
+  <div class="stat"><div class="number">214</div><div class="label">Tests passing</div></div>
   <div class="stat"><div class="number">4/20</div><div class="label">Enterprise level</div></div>
 </div>
 
@@ -257,7 +268,7 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
     <div class="arch-arrow">→</div>
     <div class="arch-box us"><div class="label">Userspace</div><div class="name">Rust + aya</div></div>
     <div class="arch-arrow">→</div>
-    <div class="arch-box tui"><div class="label">Display</div><div class="name">Ratatui TUI</div></div>
+    <div class="arch-box tui"><div class="label">Display</div><div class="name">FrankenTUI</div></div>
   </div>
 </section>
 
@@ -274,11 +285,11 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
 
 <span class="comment"># Run (requires root for eBPF)</span>
 <span class="cmd">$</span> sudo ./target/release/process-monitor
-<span class="output">🔬 Talus Process Monitor v0.1.0</span>
+<span class="output">🔬 Talus Process Monitor v0.8.0</span>
 <span class="output">   eBPF programs loaded. Tracing syscalls...</span>
 
 <span class="comment"># Docker</span>
-<span class="cmd">$</span> docker run --privileged -it ghcr.io/bartoszosiej/talus:latest
+<span class="cmd">$</span> docker run --privileged --pid=host -v /sys/kernel/btf:/sys/kernel/btf:ro ghcr.io/bartoszosiej/talus-process-monitor:latest
   </div>
 </section>
 
@@ -313,6 +324,9 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
 <section class="section">
   <h2 class="reveal">Enterprise Ready</h2>
   <p class="sub reveal">Level 4 of 20 towards full enterprise maturity. Supply chain security, build provenance, code hardening, and quality gates — all automated.</p>
+  <div class="grid">
+    <div class="card reveal reveal-delay-1">
+      <div class="card-icon g">✅</div>
       <h3>Supply Chain Security</h3>
       <p>cargo-deny license & advisory gates, CycloneDX SBOM, gitleaks secret scanning, dependency review on every PR.</p>
     </div>
@@ -329,7 +343,7 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
     <div class="card reveal reveal-delay-1">
       <div class="card-icon r">🧪</div>
       <h3>Quality Gates</h3>
-      <p>36 unit tests (+177%), edge cases, monitor invariants, clippy clean with -D warnings.</p>
+      <p>214 unit tests, edge cases, monitor invariants, clippy clean with -D warnings.</p>
     </div>
   </div>
   <div style="text-align:center;margin-top:3rem">

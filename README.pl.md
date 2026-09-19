@@ -1,411 +1,142 @@
-# Talus Process Monitor
+# 🛡️ Talus — wykrywanie ransomware na poziomie jądra (eBPF + Rust)
 
-> **Telemetria procesów, operacji plikowych i sieci w czasie rzeczywistym dla Linuksa, oparta na eBPF.**
+**[English README](README.md)** · [Architektura](ARCHITECTURE.md) · [Artykuł: jak działa detekcja](https://dev.to/bartoszosiej/detecting-ransomware-with-ebpf-in-rust-4779)
 
-Talus Process Monitor śledzi syscalle `execve`, `openat`, `connect`, `accept`, `sendto` i `recvfrom` na poziomie jądra przez tracepointy eBPF, strumieniuje zdarzenia do przestrzeni użytkownika przez bufor per-CPU perf, i prezentuje je w zaawansowanym terminalowym TUI na żywo — jednocześnie oceniając tempo otwierania plików przez każdy proces w ruchomym oknie, aby wykrywać masowy dostęp do plików w stylu ransomware.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        PRZESTRZEŃ JĄDRA (eBPF)                 │
-│                                                                 │
-│  sys_enter_execve ──┐                                           │
-│  sys_enter_openat  ──┤                                           │
-│  sys_enter_connect ──┤   ProcessEvent    PerfEventArray         │
-│  sys_enter_accept  ──┼──► (map)    ────► (bufory per-CPU)      │
-│  sys_enter_sendto  ──┤                                           │
-│  sys_enter_recvfrom ─┘                                           │
-└──────────────────────────────────┬──────────────────────────────┘
-                                   │
-┌──────────────────────────────────▼──────────────────────────────┐
-│                  PRZESTRZEŃ UŻYTKOWNIKA (Rust)                  │
-│                                                                 │
-│  wątek czytający ──► kanał ──► Monitor ──► TUI / JSON / Web    │
-│       │                  │         │                            │
-│       │                  │    ruchome okno                      │
-│       │                  │    + alerty                          │
-│       │                  │    + drzewo procesów                 │
-│       │                  │    + ranking plików                  │
-│       │                  │    + śledzenie sieci                 │
-│       │                  │    + heatmapa                        │
-│       └──► perf buffer   └──► szukanie/filtrowanie             │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Wersja angielska
-
-**[English README](README.md)** · [Nowe funkcje v0.4](docs/NEW_FEATURES.md) · [Architektura](ARCHITECTURE.md)
-
-## Funkcje
-
-| Możliwość | Opis |
-|---|---|
-| **Śledzenie na poziomie jądra** | Tracepointy `execve`, `openat`, `connect`, `accept`, `sendto`, `recvfrom` |
-| **Kod jądra bezpieczny dla verifiera** | Wskaźniki przestrzeni użytkownika czytane wyłącznie przez `bpf_probe_read_user` |
-| **Potok zdarzeń zero-copy** | Rekordy `ProcessEvent` o stałym rozmiarze przez bufory per-CPU `PerfEventArray` |
-| **Ultra-zaawansowane TUI** | 7 paneli: Zdarzenia, Procesy, Sieć, Pliki, Rozszerzenia, Alerty, Heatmapa |
-| **Szukanie i filtrowanie** | Wyszukiwanie tekstu w zdarzeniach (`/` aby aktywować) |
-| **Widok szczegółów procesu** | Pełna hierarchia drzewa procesów ze statystykami (`Enter`) |
-| **Nakładka pomocy** | Kompletna lista skrótów klawiszowych (`?` aby pokazać) |
-| **Zmiana rozmiaru paneli** | Przesuwanie granic kolumn `[`/`]` i `{`/`}` |
-| **Panel sieci** | Podgląd connect/accept/sendto/recvfrom z IP:port |
-| **Sparkline'y tempa** | Wizualizacje exec/s, open/s, net/s, alert/s (120s) |
-| **Heatmapa** | Wizualizacja częstotliwości syscalli |
-| **Śledzenie typów plików** | Częstotliwość otwarć per rozszerzenie z kolorowymi kategoriami |
-| **Ranking plików** | Pliki posortowane wg liczby otwarć, z entropią Shannona |
-| **Heurystyka ruchomego okna** | 1-sekundowe okno per PID; alert przy przekroczeniu progu |
-| **Wiele trybów wyjścia** | TUI, JSON, plain text, autodiagnostyka, dashboard webowy |
-| **Dashboard webowy** | REST API + WebSocket + metryki Prometheus (opcjonalny build) |
-| **Agent Go** | Lekki CLI łączący się z daemonem przez HTTP/WebSocket |
-| **Biblioteka C FFI** | `libtalus.so` z C bindings dla integracji międzyjęzykowej |
-| **Kubernetes** | Manifesty DaemonSet + Service + ConfigMap + ServiceMonitor |
-| **Schemat Protobuf** | Definicja usługi gRPC dla komunikacji między komponentami |
-| **Liczenie utraconych zdarzeń** | Przepełnienia bufora perf liczone i raportowane |
-| **Pojedynczy statyczny binarny** | Pełne LTO, `panic = "abort"`, usunięte symbole |
-
-## Budowanie
+**eBPF-owy agent detect-and-respond dla Linuksa**: tracepointy eBPF hakują syscalle na poziomie jądra, ruchome okno 1 s ocenia tempo otwierania plików per PID, a warstwa odpowiedzi **ubija podejrzany proces (`SIGKILL`)** w chwili werdyktu. Zmierzono na żywym desktopie: **~280 000 zdarzeń/s przy ~7,6% CPU** (bufory per-CPU, zero-copy do silnika detekcji w Ruście).
 
 ```bash
-# TUI-only (domyślne, 1.7MB) — zalecane
-./build.sh
-# lub
-cargo build --release
-
-# Z serwerem webowym (2.5MB) — z REST API, WebSocket, Prometheus
-./build.sh --web
-# lub
-cargo build --release --features web
-
-# Oba warianty
-./build.sh --all
+# Wykryj + zareaguj w jednej linii (build ~2 min)
+./build.sh && sudo ./target/release/process-monitor monitor --auto-kill
 ```
 
-### Rozmiary binarek (release)
+<div align="center">
 
-| Wariant | Rozmiar | Zależności |
-|---|---|---|
-| `process-monitor-tui` | 1.7MB | aya, frankentui (ftui), chrono, crossterm |
-| `process-monitor-web` | 2.5MB | +axum, tokio, tower-http, prometheus-client |
+**Demo na żywo — TUI ze śledzeniem jądra w akcji:**
+
+![Demo Talus: ransomware wykryty i zabity](assets/talus-demo.gif)
+
+</div>
+
+---
+
+## Szybki start (30 sekund)
+
+```bash
+git clone https://github.com/BartoszOsiej/talus-process-monitor
+cd talus-process-monitor
+./build.sh                      # lub: ./install.sh --system
+
+# tryb monitorowania (bez auto-kill)
+sudo ./target/release/process-monitor monitor
+
+# pełny tryb EDR: detekcja + automatyczna odpowiedź
+sudo ./target/release/process-monitor monitor --auto-kill
+```
+
+**Docker (jedna linia):**
+
+```bash
+# --privileged jest wymagany: tracepointy eBPF potrzebują dostępu do jądra (CAP_BPF/CAP_SYS_ADMIN)
+docker run --privileged --pid=host -v /sys/kernel/btf:/sys/kernel/btf:ro \
+  ghcr.io/bartoszosiej/talus-process-monitor:latest
+```
+
+Gotowe binarki: [Releases](https://github.com/BartoszOsiej/talus-process-monitor/releases).
+
+---
+
+## Zobacz, jak łapie ransomware
+
+Powtórz demo z góry w dwóch terminalach:
+
+```bash
+# Terminal 1 — Talus z niskim progiem i auto-kill
+sudo ./target/release/process-monitor monitor --alert-threshold 50 --auto-kill
+
+# Terminal 2 — symulacja masowego "szyfrowania" plików
+for i in $(seq 1 500); do touch /tmp/victim$i.enc && cat /tmp/victim$i.enc >/dev/null; done
+```
+
+Oczekiwany wynik: w ciągu **~1 sekundy** Talus odpala alert i wysyła `SIGKILL` do pętli — panel ALERTS pokazuje werdykt na czerwono.
+
+---
+
+## Co robi
+
+| Możliwość | Jak |
+|---|---|
+| **Śledzenie na poziomie jądra** | Tracepointy eBPF: `execve`, `openat`, `connect`, `accept`, `sendto`, `recvfrom`, `mkdir`, `unlinkat`, `kill`, `fchmodat` |
+| **Detekcja ransomware** | Ruchome okno 1 s per PID; alert przy przekroczeniu progu otwierań |
+| **Automatyczna odpowiedź** | `--auto-kill` wysyła `SIGKILL` do procesu wywołującego alert |
+| **Telemetria sieci** | Parsowanie `sockaddr` w jądrze — IPv4/IPv6/Unix na connect/accept/send/recv |
+| **Potok zdarzeń** | Perf buffer jądra → zero-copy → silnik detekcji → TUI / JSON / WebSocket / Prometheus |
+| **Ranking plików** | Najczęściej otwierane pliki z entropią Shannona (wykrywa losowe/szyfrowane nazwy) |
+| **Pojedyncza binarka** | Pełne LTO, `panic = "abort"`, bez symboli — 1,7 MB TUI, 2,5 MB z webem |
+| **SIEM** | Kafka (lz4), ClickHouse (MergeTree), MemGraph (grafy procesów, Cypher) |
+| **Silnik neuronowy MeMLP** | Opcjonalny `--memlp`: MLP budowany od zera, trening online, checkpointy JSON |
 
 ## Wymagania
 
 | Wymaganie | Uwagi |
 |---|---|
-| Jądro Linux **5.8+** | wsparcie eBPF + tracepointów |
-| **root** (`CAP_BPF` / `CAP_SYS_ADMIN`) | wymagane do załadowania programów eBPF |
-| Rust **nightly** + `rust-src` | buduje program eBPF z `-Z build-std` |
-| `bpf-linker`, `clang` | toolchain linkowania eBPF |
-| BTF (`/sys/kernel/btf/vmlinux`) | zalecane dla zgodności CO-RE |
-
-## Szybki start
-
-```bash
-# Instalacja systemowa do /usr/local
-./install.sh --system
-
-# Instalacja lokalna do ~/.local
-./install.sh
-
-# Budowanie ręczne
-./build.sh
-sudo target/release/process-monitor-tui
-```
-
-## Użycie
-
-```bash
-# TUI (domyślnie)
-sudo process-monitor
-
-# Podnieś próg alertu
-sudo process-monitor --alert-threshold 100
-
-# Filtruj wg rozszerzenia
-sudo process-monitor --filter-ext pdf
-
-# Wyjście JSON
-sudo process-monitor --json | jq .
-
-# Dashboard webowy (wymaga --features web)
-sudo process-monitor --web 0.0.0.0:8080
-
-# Silnik neuronowy MeMLP (trening online + checkpointy JSON)
-sudo process-monitor --memlp
-sudo process-monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
-```
+| Jądro Linux **5.8+** | eBPF + tracepointy |
+| **root** (`CAP_BPF` / `CAP_SYS_ADMIN`) | ładowanie programów eBPF |
+| Rust **nightly** + `rust-src`, `bpf-linker`, `clang` | toolchain eBPF (`./build.sh` zainstaluje sam) |
+| BTF (`/sys/kernel/btf/vmlinux`) | zalecane dla CO-RE |
 
 ## Klawisze TUI
 
-### Nawigacja
-
 | Klawisz | Akcja |
 |---|---|
-| `q` / `Esc` | Wyjście (lub wyczyść scroll) |
+| `q` / `Esc` | Wyjście |
 | `p` | Pauza / wznowienie |
-| `c` | Wyczyść wszystkie panele |
-| `↑`/`↓` / `k`/`j` | Przewijanie |
-| `PgUp`/`PgDn` | Szybsze przewijanie |
-| `g` / `Home` | Skok na górę |
-| `G` / `End` | Skok na dół |
+| `Tab` / `1`-`7` | Panel następny / skok do panelu |
+| `/` | Szukanie w zdarzeniach |
+| `?` | Pomoc |
 
-### Panele
+**7 paneli:** EVENTS · PROCESSES · NETWORK · TOP FILES · FILE TYPES · ALERTS · HEATMAP
 
-| Klawisz | Akcja |
-|---|---|
-| `Tab` | Następny panel |
-| `Shift+Tab` | Poprzedni panel |
-| `1`-`7` | Skocz do panelu numerem |
-| `Enter` | Otwórz szczegóły procesu |
-
-### Szukanie
-
-| Klawisz | Akcja |
-|---|---|
-| `/` | Tryb szukania |
-| `Esc` | Anuluj szukanie |
-| `Enter` | Zastosuj filtr |
-
-### Układ
-
-| Klawisz | Akcja |
-|---|---|
-| `[` / `]` | Zmień rozmiar lewego panelu |
-| `{` / `}` | Zmień rozmiar środkowego panelu |
-
-### Inne
-
-| Klawisz | Akcja |
-|---|---|
-| `?` / `h` | Nakładka pomocy |
-| `Ctrl+C` | Wymuś wyjście |
-
-### Panele TUI (7)
-
-| # | Panel | Opis |
-|---|---|---|
-| 1 | **EVENTS** | Dziennik zdarzeń z szukaniem/filtrowaniem |
-| 2 | **PROCESSES** | Hierarchiczne drzewo procesów z mini-paskami |
-| 3 | **NETWORK** | Połączenia sieciowe na żywo (connect/accept/send/recv) |
-| 4 | **TOP FILES** | Najczęściej otwierane pliki z entropią Shannona |
-| 5 | **FILE TYPES** | Częstotliwość rozszerzeń z kolorowymi paskami |
-| 6 | **ALERTS** | Historia alertów z czasami |
-| 7 | **HEATMAP** | Wizualizacja częstotliwości syscalli |
-
-## Śledzenie sieci
-
-Nowe w v0.4 — śledzenie syscalli sieciowych:
-
-| Syscall | Typ zdarzenia | Przechwytuje |
-|---|---|---|
-| `connect` | `Connect` | Adres zdalny IPv4/IPv6/Unix |
-| `accept` | `Accept` | Adres zdalny |
-| `sendto` | `SendTo` | Cel + wysłane bajty |
-| `recvfrom` | `RecvFrom` | Źródło + odebrane bajty |
-
-## Dashboard webowy
-
-Opcjonalny build z `--features web`:
+## Dashboard webowy (opcjonalny)
 
 ```bash
-cargo build --release --features web
-sudo process-monitor --web 0.0.0.0:8080
+./build.sh --web
+sudo ./target/release/process-monitor monitor --web 0.0.0.0:8080
 ```
 
-### Endpoints
-
-| Endpoint | Metoda | Opis |
-|---|---|---|
-| `/` | GET | Dashboard webowy cyberpunk |
-| `/ws` | WebSocket | Strumień zdarzeń na żywo |
-| `/api/v1/stats` | GET | Statystyki globalne |
-| `/api/v1/processes` | GET | Śledzone procesy |
-| `/api/v1/files` | GET | Najczęściej otwierane pliki |
-| `/api/v1/extensions` | GET | Częstotliwość rozszerzeń |
-| `/api/v1/threshold` | POST | Zmień próg w czasie rzeczywistym |
-| `/metrics` | GET | Metryki Prometheus |
-
-## Agent Go
-
-Lekki CLI łączący się z daemonem:
-
-```bash
-cd go-agent && go build -o talus-agent .
-./talus-agent stats
-./talus-agent processes
-./talus-agent watch    # WebSocket na żywo
-```
-
-## Biblioteka C FFI
-
-C-compatible library do integracji z innymi językami:
-
-```c
-#include "talus.h"
-
-talus_monitor_t* monitor;
-talus_monitor_create("/path/to/bpf.o", 50, &monitor);
-
-talus_event_t events[100];
-uint32_t count;
-talus_monitor_poll(monitor, events, 100, &count);
-
-for (uint32_t i = 0; i < count; i++) {
-    printf("[%d] %s\n", events[i].pid, events[i].comm);
-    talus_free_string(events[i].comm);
-}
-talus_free_events(events, count);
-talus_monitor_destroy(monitor);
-```
-
-## Kubernetes
-
-Wdróż Talus jako DaemonSet na każdym węźle:
-
-```bash
-kubectl create namespace observability
-kubectl apply -f k8s/
-```
-
-### Komponenty
-
-| Zasób | Opis |
-|---|---|
-| `DaemonSet` | Uruchamia Talus na każdym węźle z dostępem do eBPF |
-| `Service` | Serwis ClusterIP dla dostępu do API |
-| `ConfigMap` | Konfiguracja (próg, poziom logowania, etc.) |
-| `ServiceMonitor` | Integracja z operatorem Prometheus |
-
-## Schemat JSON
-
-```jsonc
-{"ts": "14:09:16.531", "type": "open", "pid": 29645, "uid": 1000, "comm": "process-monitor", "file": "/dev/tty"}
-{"ts": "14:09:16.973", "type": "alert", "pid": 2126, "uid": 1000, "comm": "Cache2 I/O", "opens_in_1s": 50}
-{"ts": "14:09:17.100", "type": "connect", "pid": 1234, "uid": 1000, "comm": "curl", "file": "93.184.216.34:443"}
-```
-
-## Struktura projektu
-
-```
-talus-process-monitor/
-├── process-monitor/          # Przestrzeń użytkownika: rdzeń + TUI + web + FFI
-│   └── src/
-│       ├── main.rs           # CLI, wybór trybu, obsługa sygnałów
-│       ├── monitor.rs        # Ładowanie eBPF, czytnik perf, ruchome okno
-│       ├── tui.rs            # Ultra-zaawansowany interfejs frankentui (ftui)
-│       ├── web.rs            # Serwer axum (opcjonalny, --features web)
-│       └── ffi.md            # C FFI bindings (libtalus)
-├── process-monitor-ebpf/     # Strona jądra (#![no_std], aya-ebpf)
-│   └── src/
-│       ├── main.rs           # Tracepointy execve/openat → PerfEventArray
-│       └── network.rs        # Tracepointy connect/accept/sendto/recvfrom
-├── go-agent/                 # Agent Go (klient HTTP/WebSocket)
-├── c-api/                    # Nagłówek C dla libtalus
-├── k8s/                      # Manifesty Kubernetes
-├── proto/                    # Schemat Protobuf (definicja usługi gRPC)
-├── build.sh                  # Skrypt budowania (--web, --all)
-├── install.sh                # Instalator rozpoznający dystrybucję
-├── docs/NEW_FEATURES.md      # Dokumentacja funkcji v0.4
-└── Cargo.toml                # Definicja workspace'a
-```
-
-## Bezpieczeństwo
-
-- Instalator nie wykonuje **żadnych uwierzytelnionych żądań sieciowych**
-- Zależności z oficjalnych repozytoriów dystrybucji + `rustup.rs`
-- Kod jądra przestrzega ścisłych zasad eBPF: `bpf_probe_read_user` tylko
-- Programy eBPF wymagają root
-
-## Docker
-
-```bash
-docker build -t talus-process-monitor .
-docker run --privileged -v /sys/kernel/btf:/sys/kernel/btf \
-    talus-process-monitor process-monitor
-```
+REST API + WebSocket (strumień na żywo) + `/metrics` dla Prometheusa.
 
 ## Rozwiązywanie problemów
 
 ```bash
-sudo process-monitor --diagnose    # 5-sekundowa autodiagnostyka
+sudo ./target/release/process-monitor monitor --diagnose   # 5-sekundowa autodiagnostyka
 ```
 
-- **Brak zdarzeń** → sprawdź tracepointy w `/sys/kernel/tracing/events/syscalls/`
-- **Błąd ładowania eBPF** → podaj `--bpf` jawnie lub uruchom `./install.sh` ponownie
+- **Brak zdarzeń** → sprawdź `/sys/kernel/tracing/events/syscalls/`
+- **Błąd ładowania eBPF** → podaj `--bpf` jawnie albo odpal `./build.sh`
 - **Brak root** → wymagane `CAP_BPF` lub `CAP_SYS_ADMIN`
 
-## Dezinstalacja
+## Licencjonowanie
 
-```bash
-./install.sh --uninstall            # lokalna
-./install.sh --uninstall --system   # systemowa
-```
+Dwie edycje — **Community** (darmowa, MIT) i **Enterprise** (jednorazowa płatność, klucze podpisane Ed25519, aktywacja online z automatycznym failoverem).
 
-## Licencjonowanie i ceny
-
-Talus występuje w dwóch edycjach — **Community** (darmowa, MIT) oraz
-**Enterprise** (płatna, z kluczami podpisanymi Ed25519 i aktywacją online).
-
-| Funkcja | Community (darmowa) | Enterprise |
-|---------|:---:|:---:|
-| Monitorowanie procesów eBPF | ✅ | ✅ |
-| Dashboard TUI (7 paneli) | ✅ | ✅ |
-| Wyjście JSON / plain text | ✅ | ✅ |
+| Funkcja | Community | Enterprise |
+|---|:---:|:---:|
+| Monitorowanie eBPF + TUI (7 paneli) | ✅ | ✅ |
 | Alerty ransomware | ✅ | ✅ |
 | Auto-kill (tryb EDR) | ❌ | ✅ |
-| Dashboard webowy i REST API | ❌ | ✅ |
-| Strumieniowanie Kafka | ❌ | ✅ |
-| Analityka ClickHouse | ❌ | ✅ |
-| Grafy procesów MemGraph | ❌ | ✅ |
-| Biblioteka C FFI | ❌ | ✅ |
-| Priorytetowe wsparcie | ❌ | ✅ |
+| Dashboard webowy + REST API | ❌ | ✅ |
+| Kafka / ClickHouse / MemGraph | ❌ | ✅ |
+| Sandbox agenta (seccomp/caps/Landlock) + podpisany audit log | ❌ | ✅ |
 
-### Jak działa licencjonowanie
-
-```
-talus-keygen issue ──► podpisany klucz (Ed25519) ──► klient
-                                                     │
-                                           talus license activate <KEY>
-                                                     ▼
-             Cloudflare Worker + D1 (darmowy tier) ── weryfikacja podpisu,
-             wygasanie, cofnięcia, limity stanowisk ──► token aktywacji
-```
-
-- Klucze są **podpisane Ed25519**; binarka osadza wyłącznie klucz publiczny
-- **Serwer aktywacyjny** (`license-server/`) też zna tylko klucz publiczny —
-  klucz prywatny nigdy nie opuszcza maszyny właściciela
-- **Limity stanowisk egzekwowane po stronie serwera**; przenosiny maszyny to
-  `deactivate` → `activate`
-- Cofnięte i wygasłe klucze są odrzucane przy aktywacji; lokalny cache jest
-  przy każdym uruchomieniu weryfikowany względem podpisu
-
-### Aktywacja
+Przy pierwszym uruchomieniu włącza się **30-dniowy trial Enterprise** — bez karty i rejestracji.
 
 ```bash
-talus license activate <KLUCZ>
-talus license show
+process-monitor license activate <KLUCZ>
+sudo process-monitor monitor --auto-kill --web 0.0.0.0:8443
 ```
 
-Przewodnik dla kupującego:
-[docs/customer-activation-guide.md](docs/customer-activation-guide.md)
-(EN) · warunki licencji: [docs/EULA.txt](docs/EULA.txt) · struktura cen:
-[docs/pricing-tiers.md](docs/pricing-tiers.md) (bez kwot — ustala je
-właściciel przy sprzedaży).
-
-### Panel administracyjny (tylko właściciel)
-
-Worker serwuje panel administracyjny pod adresem
-[`/admin`](https://talus-license-server.metaforicmail.workers.dev/admin).
-Logowanie dwuskładnikowe: kod autoryzacyjny (`ADMIN_TOKEN`) + 6-cyfrowy kod
-TOTP z Google Authenticator. Sesja ważna 12 h; wykorzystany kod TOTP nie może
-być użyty ponownie. Dostępna jest też wariant lokalny w
-[`admin-panel/`](admin-panel/) (token nie opuszcza Twojej maszyny).
-Włączenie TOTP (jednorazowo): `scripts/setup-totp.sh`.
-
-### 30-dniowy trial Enterprise
-
-Przy pierwszym uruchomieniu Talus włącza **30-dniowy trial Enterprise** —
-wszystkie funkcje Enterprise są dostępne bez aktywacji.
+Szczegóły (EN): [README.md](README.md) · przewodnik kupującego: [docs/customer-activation-guide.md](docs/customer-activation-guide.md) · warunki: [docs/EULA.txt](docs/EULA.txt)
 
 ## Licencja
 
-Kod źródłowy edycji Community: MIT (patrz [LICENSE](LICENSE)).
-Edycja Enterprise objęta jest odrębną umową: [docs/EULA.txt](docs/EULA.txt).
+Community: MIT ([LICENSE](LICENSE)). Enterprise: [docs/EULA.txt](docs/EULA.txt).

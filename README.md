@@ -1,4 +1,4 @@
-# 🛡️ Talus — Endpoint Security Agent
+# 🛡️ Talus — eBPF Ransomware Detection & Response for Linux
 
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-2021-DEA584?style=flat-square&logo=rust)
@@ -7,23 +7,37 @@
 ![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&logo=docker)
 ![Enterprise](https://img.shields.io/badge/Enterprise-Level%204%2F20-blue?style=flat-square)
 
-**eBPF-based endpoint security agent for Linux — detect ransomware behaviour, respond at the kernel edge.**
+**Kernel-level ransomware detection in Rust: a sliding-window heuristic over eBPF syscalls — with automated response.**
 
-Talus is not a passive monitor. It is a **detect-and-respond** agent that hooks syscalls at the kernel level via eBPF tracepoints, scores per-process file-open rates in real-time, and **terminates** offending processes the instant a heuristic verdict fires. It processes ~500k events/sec through per-CPU perf buffers with zero-copy handoff to a userspace detection engine built in Rust.
+Talus is not a passive monitor. It is a **detect-and-respond** agent: eBPF tracepoints hook syscalls at the kernel level, a per-PID sliding window scores file-open rates in real time, and the response layer **terminates** the offending process (`SIGKILL`) the moment a verdict fires. Measured on a live desktop: **~280,000 events/s sustained with ~7.6% CPU** through per-CPU perf buffers and zero-copy handoff to the userspace detection engine.
 
-> 🇵🇱 [Wersja polska](README.pl.md) · [Architecture](ARCHITECTURE.md) · [📄 Enterprise Report (PDF)](docs/talus-enterprise-maturity-report.pdf) · [Enterprise Maturity](MATURITY.md)
+```bash
+# Detect + respond in one line (build takes ~2 min)
+./build.sh && sudo ./target/release/process-monitor monitor --auto-kill
+```
+
+<div align="center">
+
+**Live demo — TUI with kernel tracing in action:**
+
+![Talus live demo: ransomware load detected and killed](assets/talus-demo.gif)
+
+[Architecture](ARCHITECTURE.md) · [Detection article](https://dev.to/bartoszosiej/detecting-ransomware-with-ebpf-in-rust-4779) · [🇵🇱 Wersja polska](README.pl.md) · [📄 Enterprise Report (PDF)](docs/talus-enterprise-maturity-report.pdf) · [Enterprise Maturity](MATURITY.md)
+
+</div>
 
 ---
 
 ## Table of Contents
 
 - [What It Does](#what-it-does)
+- [Quick Start (30 seconds)](#quick-start-30-seconds)
+- [See It Catch Ransomware](#see-it-catch-ransomware)
 - [Architecture / Data Flow](#architecture--data-flow)
 - [Network Visibility](#network-visibility)
 - [Detection & Response](#detection--response)
 - [Storage & Pipeline](#storage--pipeline)
 - [Requirements](#requirements)
-- [Quick Start](#quick-start)
 - [Usage](#usage)
 - [Build Variants](#build-variants)
 - [TUI Controls](#tui-controls)
@@ -33,7 +47,8 @@ Talus is not a passive monitor. It is a **detect-and-respond** agent that hooks 
 - [Tested Live on Linux](#tested-live-on-linux)
 - [Docker / Kubernetes](#docker--kubernetes)
 - [Security & Hardening](#security--hardening)
-- [License](#license)
+- [Enterprise Maturity](#enterprise-maturity)
+- [Licensing & Pricing](#licensing--pricing)
 
 ---
 
@@ -55,6 +70,48 @@ Talus is not a passive monitor. It is a **detect-and-respond** agent that hooks 
 
 ---
 
+## Quick Start (30 seconds)
+
+```bash
+# 1. Get it
+git clone https://github.com/BartoszOsiej/talus-process-monitor
+cd talus-process-monitor
+./build.sh                      # or: ./install.sh --system
+
+# 2. Run it — monitor-only mode
+sudo ./target/release/process-monitor monitor
+
+# 3. Or full EDR mode: detect + auto-kill
+sudo ./target/release/process-monitor monitor --auto-kill
+```
+
+Pre-built binaries and container images: see [Releases](https://github.com/BartoszOsiej/talus-process-monitor/releases) (`process-monitor` static binary) and [Docker / Kubernetes](#docker--kubernetes).
+
+> **Docker one-liner:**
+> ```bash
+> # --privileged is required: eBPF tracepoints need kernel access (CAP_BPF/CAP_SYS_ADMIN)
+> docker run --privileged --pid=host -v /sys/kernel/btf:/sys/kernel/btf:ro \
+>   ghcr.io/bartoszosiej/talus-process-monitor:latest
+> ```
+
+---
+
+## See It Catch Ransomware
+
+Reproduce the demo above in two terminals:
+
+```bash
+# Terminal 1 — Talus with a low threshold and auto-kill
+sudo ./target/release/process-monitor monitor --alert-threshold 50 --auto-kill
+
+# Terminal 2 — simulate ransomware-like mass file encryption
+for i in $(seq 1 500); do touch /tmp/victim$i.enc && cat /tmp/victim$i.enc >/dev/null; done
+```
+
+Expected: within **~1 second** of the loop starting, Talus fires an alert and `SIGKILL`s the loop — the TUI shows the verdict in red in the ALERTS panel. That is the whole story: kernel tracing → heuristic verdict → response, no agent, no daemon restart, nothing to install on "the host".
+
+---
+
 ## Architecture / Data Flow
 
 Talus follows a **pipeline architecture** — kernel ingestion → userspace detection → operator response:
@@ -66,7 +123,7 @@ Talus follows a **pipeline architecture** — kernel ingestion → userspace det
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
 │  │ sys_enter_   │  │ sys_enter_   │  │ sys_enter_   │                  │
 │  │ execve       │  │ openat       │  │ connect      │ ... 10 total     │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬──────┘                   │
 │         │                 │                 │                            │
 │         ▼                 ▼                 ▼                            │
 │  ┌─────────────────────────────────────────────────────┐               │
@@ -106,7 +163,7 @@ Talus follows a **pipeline architecture** — kernel ingestion → userspace det
 
 | Stage | Component | Throughput | Mechanism |
 |---|---|---|---|
-| **1. Ingest** | eBPF tracepoints | ~500k events/s | `bpf_perf_event_output` per-CPU |
+| **1. Ingest** | eBPF tracepoints | ~280k events/s sustained | `bpf_perf_event_output` per-CPU |
 | **2. Transport** | PerfEventArray | zero-copy | `PerfEventArrayBuffer::read_events` |
 | **3. Detect** | Sliding window engine | real-time | 1s rolling window, configurable threshold |
 | **4. Respond** | `kill(2)` / cgroup | < 1ms latency | `SIGKILL` on heuristic verdict |
@@ -122,16 +179,16 @@ Talus supports pluggable storage backends for event persistence and downstream a
 
 ```bash
 # Stream events to Kafka
-sudo talus --kafka-brokers localhost:9092 --kafka-topic talus-events
+sudo process-monitor monitor --kafka-brokers localhost:9092 --kafka-topic talus-events
 
 # Store events in ClickHouse for analytics
-sudo talus --clickhouse http://localhost:8123
+sudo process-monitor monitor --clickhouse http://localhost:8123
 
 # Build process relationship graph in MemGraph
-sudo talus --memgraph http://localhost:7474
+sudo process-monitor monitor --memgraph http://localhost:7474
 
 # Combine all backends
-sudo talus \
+sudo process-monitor monitor \
   --kafka-brokers localhost:9092 --kafka-topic talus-events \
   --clickhouse http://localhost:8123 \
   --memgraph http://localhost:7474
@@ -151,7 +208,7 @@ Events are sent to a configurable topic with `lz4` compression and partitioned b
 Events are batch-inserted into a `MergeTree` table partitioned by date:
 
 ```sql
-CREATE TABLE talus.events (
+CREATE TABLE process_monitor.events (
     ts DateTime64(3),
     kind LowCardinality(String),
     pid UInt32, uid UInt32,
@@ -231,10 +288,10 @@ The threshold is configurable at runtime via the API or CLI:
 
 ```bash
 # Lower threshold for high-security environments
-sudo process-monitor --alert-threshold 20
+sudo process-monitor monitor --alert-threshold 20
 
 # Filter by extension (e.g. detect .enc/.pdf mass opens)
-sudo process-monitor --filter-ext enc
+sudo process-monitor monitor --filter-ext enc
 ```
 
 ### Response: automated termination
@@ -243,7 +300,7 @@ With `--auto-kill`, Talus sends `SIGKILL` to the offending process immediately o
 
 ```bash
 # EDR mode: detect + respond
-sudo process-monitor --alert-threshold 50 --auto-kill
+sudo process-monitor monitor --alert-threshold 50 --auto-kill
 ```
 
 ```rust
@@ -283,10 +340,10 @@ The engine **trains online**: every alert performs a backpropagation step (cross
 
 ```bash
 # Enable the neural engine (checkpoint auto-saves every 30s)
-sudo process-monitor --memlp
+sudo process-monitor monitor --memlp
 
 # Explicit checkpoint location (loaded on start, saved on shutdown + autosave)
-sudo process-monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
+sudo process-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
 ```
 
 Alerts carry the neural verdict in every output channel:
@@ -314,55 +371,36 @@ Alerts carry the neural verdict in every output channel:
 
 ---
 
-## Quick Start
-
-```bash
-# Distro-aware installer
-./install.sh --system    # System-wide to /usr/local
-./install.sh             # User-local to ~/.local
-
-# Or build manually
-./build.sh
-
-# Run in EDR mode (detect + auto-respond)
-sudo target/release/process-monitor --auto-kill
-
-# Run in monitor-only mode (no auto-kill)
-sudo target/release/process-monitor
-```
-
----
-
 ## Usage
 
 ```bash
 # EDR mode — detect and auto-kill
-sudo process-monitor --auto-kill
+sudo process-monitor monitor --auto-kill
 
 # Lower threshold for stricter detection
-sudo process-monitor --auto-kill --alert-threshold 20
+sudo process-monitor monitor --auto-kill --alert-threshold 20
 
 # Monitor only (no kill)
-sudo process-monitor
+sudo process-monitor monitor
 
 # Filter by extension
-sudo process-monitor --filter-ext pdf
+sudo process-monitor monitor --filter-ext pdf
 
 # JSON output for external pipelines
-sudo process-monitor --json | jq .
+sudo process-monitor monitor --json | jq .
 
 # Plain text log
-sudo process-monitor --plain
+sudo process-monitor monitor --plain
 
 # Web dashboard (requires --features web build)
-sudo process-monitor --web 0.0.0.0:8080
+sudo process-monitor monitor --web 0.0.0.0:8080
 
 # MeMLP neural detection engine (online training + JSON checkpoints)
-sudo process-monitor --memlp
-sudo process-monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
+sudo process-monitor monitor --memlp
+sudo process-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
 
 # Self-diagnostic
-sudo process-monitor --diagnose
+sudo process-monitor monitor --diagnose
 ```
 
 ### CLI Reference
@@ -436,7 +474,7 @@ Optional build with `--features web`:
 
 ```bash
 cargo build --release --features web
-sudo process-monitor --web 0.0.0.0:8080
+sudo process-monitor monitor --web 0.0.0.0:8080
 ```
 
 | Endpoint | Method | Description |
@@ -487,7 +525,7 @@ talus-process-monitor/
 ├── go-agent/                 # Go CLI agent (HTTP/WebSocket client)
 ├── go-web/                   # Go web frontend (main.go)
 ├── c-api/                    # C header for libtalus
-├── talus-tauri/            # Tauri desktop dashboard (React + Rust)
+├── talus-tauri/              # Tauri desktop dashboard (React + Rust)
 ├── k8s/                      # Kubernetes manifests (DaemonSet, Service)
 ├── proto/                    # Protobuf schema (gRPC)
 ├── fuzz/                     # Fuzzing harness
@@ -511,14 +549,14 @@ Talus has been **deployed and tested on real hardware** running Linux:
 ls /sys/kernel/tracing/events/syscalls/sys_enter_execve/id
 
 # Load and attach eBPF programs
-sudo process-monitor --diagnose
+sudo process-monitor monitor --diagnose
 
 # Watch live events in another terminal
 ls -la /tmp
 # → Talus shows: 14:09:16 OPEN [29645] bash → /tmp
 
 # Test auto-kill
-sudo process-monitor --alert-threshold 3 --auto-kill
+sudo process-monitor monitor --alert-threshold 3 --auto-kill
 # In another terminal: for i in $(seq 1 100); do touch /tmp/f$i; done
 # → Talus kills the process after 3 opens in 1s
 
@@ -532,9 +570,9 @@ bpftool map dump name events  # shows perf event array
 ## Docker / Kubernetes
 
 ```bash
-# Docker
-docker build -t talus .
-docker run --privileged -v /sys/kernel/btf:/sys/kernel/btf talus
+# Docker (--privileged: eBPF needs kernel access; BTF mounted read-only for CO-RE)
+docker build -t talus-process-monitor .
+docker run --privileged --pid=host -v /sys/kernel/btf:/sys/kernel/btf:ro talus-process-monitor
 
 # Kubernetes (DaemonSet on every node)
 kubectl apply -f k8s/
@@ -598,8 +636,8 @@ Each entry = SHA-256(HMAC(machine_key, prev_hash + timestamp + event + license_i
 | `TRANSFER` | License transferred to another machine |
 
 ```bash
-talus license audit-log          # Show last 20 entries
-talus license verify-audit       # Verify hash chain integrity
+process-monitor license audit-log          # Show last 20 entries
+process-monitor license verify-audit       # Verify hash chain integrity
 ```
 
 ### License Security (`license.rs`)
@@ -665,29 +703,18 @@ Talus is available in two editions:
 | TLS + API auth on dashboard | ❌ | ✅ |
 | Priority support | ❌ | ✅ |
 
-### Quick Start
-
-```bash
-# Community (free, no license needed)
-sudo talus monitor
-
-# Enterprise (requires license)
-talus license activate <YOUR-LICENSE-KEY>
-sudo talus monitor --auto-kill
-```
-
 ### License Management
 
 ```bash
-talus license show              # View license status
-talus license activate <KEY>    # Activate online
-talus license deactivate        # Deactivate
-talus license export-json       # Export as JSON
-talus license backup license.json       # Backup
-talus license restore license.json      # Restore
-talus license transfer          # Transfer to another machine
-talus license audit-log          # View audit trail
-talus license verify             # Verify validity
+process-monitor license show              # View license status
+process-monitor license activate <KEY>    # Activate online
+process-monitor license deactivate        # Deactivate
+process-monitor license export-json       # Export as JSON
+process-monitor license backup license.json       # Backup
+process-monitor license restore license.json      # Restore
+process-monitor license transfer          # Transfer to another machine
+process-monitor license audit-log         # View audit trail
+process-monitor license verify            # Verify validity
 ```
 
 ### 30-Day Enterprise Trial
@@ -711,9 +738,9 @@ Enterprise licenses are sold directly by the author:
 ```
 talus-keygen issue ──► signed key (Ed25519) ──► customer
                                                   │
-                                        talus license activate <KEY>
+                                        process-monitor license activate <KEY>
                                                   ▼
-              Cloudflare Worker + Turso (primary, free tier) ── signature
+              Cloudflare Worker + D1 (primary, free tier) ── signature
               check, expiry, revocation, seat limits ──► activation token
               (automatic failover: talus-license-failover worker —
                same shared storage, transparent for the client)
@@ -721,7 +748,7 @@ talus-keygen issue ──► signed key (Ed25519) ──► customer
 
 **Buying from a store (Polar / Gumroad / Lemon Squeezy)?** You don't need a
 special Talus key at all — paste the license key you received from the
-store straight into `talus license activate <KEY>`. The activation server
+store straight into `process-monitor license activate <KEY>`. The activation server
 recognizes store purchases and translates the store key into your Talus
 license automatically (signing happens offline; store keys are stored only
 as hashes).
@@ -731,8 +758,8 @@ as hashes).
   the signing key never leaves the owner's machine
 - **Automatic failover**: activation, deactivation and store-key redemption
   try the primary server first, then the failover worker — both serve the
-  same shared storage (Turso), so seats and revocations are identical
-  everywhere. Override with `TALUS_LICENSE_SERVER` (primary) and
+  same shared storage, so seats and revocations are identical everywhere.
+  Override with `TALUS_LICENSE_SERVER` (primary) and
   `TALUS_LICENSE_SERVER_FAILOVER` (comma-separated endpoints; set it to an
   empty string to disable failover)
 - **Seats are enforced server-side**; moving a machine is
@@ -764,10 +791,6 @@ scripts/health-check.sh         # is the server up
 MIT (see [LICENSE](LICENSE) for details)
 
 ---
-
-## 📺 Demo
-
-![talus Demo](assets/talus-demo.gif)
 
 ## Deep Dives
 
