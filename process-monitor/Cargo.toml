@@ -22,7 +22,7 @@ chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
 colored = "3.1"
 crossterm = "0.29"
-dirs = "5"
+dirs = "7"
 ed25519-dalek = "2.1"
 hostname = "0.4"
 libc = "0.2"
