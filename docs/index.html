@@ -149,7 +149,6 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
   "@type": "SoftwareApplication",
   "@id": "https://bartoszosiej.github.io/talus/#software",
   "name": "talus-process-monitor",
-  "alternateName": "Halcyon Process Monitor",
   "applicationCategory": "SecurityApplication",
   "applicationSubCategory": "Endpoint detection / ransomware monitor",
   "operatingSystem": "Linux",
@@ -359,11 +358,11 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
   <p class="sub reveal">Buy → get your key by email → one command. No account, no telemetry, no license server lock-in.</p>
   <div class="code-block reveal">
 <span class="comment"># 1. Activate (key arrives by email right after purchase)</span>
-<span class="cmd">$</span> talus license activate TALUS-XXXXX-XXXXX-XXXXX-XXXXX
+<span class="cmd">$</span> process-monitor license activate TALUS-XXXXX-XXXXX-XXXXX-XXXXX
 <span class="output">✓ License bound to this machine (perpetual)</span>
 
 <span class="comment"># 2. Unlock everything — web dashboard, auto-kill, SIEM export</span>
-<span class="cmd">$</span> sudo talus monitor --web 0.0.0.0:8443 --auto-kill --kafka-brokers kafka:9092
+<span class="cmd">$</span> sudo process-monitor monitor --web 0.0.0.0:8443 --auto-kill --kafka-brokers kafka:9092
 <span class="output">🌐 Web dashboard: https://0.0.0.0:8443</span>
   </div>
 </section>
