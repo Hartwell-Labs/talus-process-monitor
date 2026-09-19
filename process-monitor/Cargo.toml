@@ -16,7 +16,7 @@ memgraph = ["dep:tokio"]
 [dependencies]
 anyhow = "1"
 aya = "0.14.0"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
