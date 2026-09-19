@@ -177,7 +177,7 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
     <p style="text-align:center;margin-top:12px;"><em>Writeup: <a href="https://dev.to/bartoszosiej/detecting-ransomware-with-ebpf-in-rust-4779">Detecting ransomware with eBPF in Rust</a> — how the detection heuristic works, with code.</em></p>
     <a href="https://github.com/BartoszOsiej/talus-process-monitor" class="btn btn-secondary">View on GitHub</a>
     <a href="talus-enterprise-maturity-report.pdf" class="btn btn-secondary">📄 Enterprise Report (PDF)</a>
-    <a href="https://crates.io/crates/process-monitor" class="btn btn-secondary">Install from crates.io →</a>
+    <a href="https://github.com/BartoszOsiej/talus-process-monitor/releases" class="btn btn-secondary">⬇ Download prebuilt binary →</a>
   </div>
 </div>
 </section>
@@ -276,11 +276,9 @@ footer .heart{color:var(--red);animation:heartbeat 1.5s infinite}
   <h2 class="reveal">Start in 30 seconds</h2>
   <p class="sub reveal">One command. Full kernel observability.</p>
   <div class="code-block reveal">
-<span class="comment"># Install from crates.io</span>
-<span class="cmd">$</span> cargo install process-monitor
-
-<span class="comment"># Or clone and build</span>
+<span class="comment"># Clone and build (~2 min, auto-installs the eBPF toolchain)</span>
 <span class="cmd">$</span> git clone https://github.com/BartoszOsiej/talus-process-monitor
+<span class="cmd">$</span> cd talus-process-monitor &amp;&amp; ./build.sh
 
 <span class="comment"># Run (requires root for eBPF)</span>
 <span class="cmd">$</span> sudo ./target/release/process-monitor
