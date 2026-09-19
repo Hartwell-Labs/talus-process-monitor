@@ -688,7 +688,7 @@ where
 fn generate_self_signed_cert() -> Result<(rustls::ServerConfig, String), anyhow::Error> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()])?;
     let cert_der = cert.cert.der().clone();
-    let key_der = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+    let key_der = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
 
     let mut root_store = rustls::RootCertStore::empty();
     root_store.add(cert_der.clone())?;
