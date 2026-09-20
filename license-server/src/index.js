@@ -63,6 +63,17 @@ import {
 // HTTP (shared storage for the failover deployment). Same surface either way.
 import { createDB } from './db.js';
 
+// Key-format codec: customers get short keys (TALUS-XXXXX-…) with the
+// signed JWT bound server-side; the server verifies signatures on the
+// canonical "payload.signature" form underneath.
+import {
+  is_pretty,
+  decode_pretty,
+  to_pretty,
+  is_short,
+  normalize_short_key,
+} from './format.js';
+
 // POST /api/v1/redeem { key } — translate a store key into the mapped Talus
 // license. Rate-limited per key hash (8 tries / 5 min) to blunt guessing;
 // store keys are high-entropy, so brute force is impractical anyway.
@@ -100,7 +111,7 @@ async function handle_redeem(request, env) {
   if (resolved.kind === 'store') {
     return json_response({
       success: true,
-      license_key: resolved.license_key,
+      license_key: await to_pretty(resolved.license_key, sha256_hex_bytes),
       license_id: resolved.license_id,
       message: 'store key translated — run `talus license activate <KEY>` with this key',
     });
@@ -116,6 +127,65 @@ async function handle_redeem(request, env) {
       success: false,
       message:
         'store key not fulfilled yet — if you just purchased, retry in a few minutes',
+    },
+    404,
+  );
+}
+
+// POST /api/v1/resolve { key } — resolve a SHORT key (TALUS-XXXXX-…) to its
+// bound signed JWT. The client verifies the JWT signature locally, so this
+// endpoint only ever returns keys the owner signed. Rate-limited per key
+// hash like /redeem (8 tries / 5 min).
+async function handle_resolve(request, env) {
+  if (!env.DB) return env_error('DB binding');
+
+  const body = await read_json(request);
+  if (!body.ok) return json_response({ success: false, message: body.error }, 400);
+  const key = str_field(body.value.key);
+  if (!key || key.length > 256) {
+    return json_response({ success: false, message: 'missing key' }, 400);
+  }
+  if (!is_short(key)) {
+    return json_response(
+      { success: false, message: 'not a short-format license key' },
+      400,
+    );
+  }
+
+  const key_hash = await sha256_hex(normalize_short_key(key));
+  const now_s = Math.floor(Date.now() / 1000);
+  await env.DB.prepare('DELETE FROM rate_events WHERE ts < ?1')
+    .bind(now_s - 300)
+    .run();
+  await env.DB.prepare('INSERT INTO rate_events (bucket, ts) VALUES (?1, ?2)')
+    .bind(`resolve:${key_hash.slice(0, 16)}`, now_s)
+    .run();
+  const { results } = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM rate_events WHERE bucket = ?1 AND ts >= ?2',
+  )
+    .bind(`resolve:${key_hash.slice(0, 16)}`, now_s - 300)
+    .all();
+  if ((results?.[0]?.n ?? 0) > 8) {
+    return json_response(
+      { success: false, message: 'too many attempts — try again later' },
+      429,
+    );
+  }
+
+  const resolved = await resolve_key(env, key);
+  if (resolved.kind === 'short') {
+    return json_response({
+      success: true,
+      license_key: resolved.license_key,
+      license_id: resolved.license_id,
+      message: 'run `talus license activate <KEY>` — the key activates online',
+    });
+  }
+  return json_response(
+    {
+      success: false,
+      message:
+        'license key not recognized — check the key or contact support if it was just issued',
     },
     404,
   );
@@ -196,6 +266,9 @@ export default {
       if (pathname === '/api/v1/redeem' && request.method === 'POST') {
         return handle_redeem(request, env);
       }
+      if (pathname === '/api/v1/resolve' && request.method === 'POST') {
+        return handle_resolve(request, env);
+      }
 
       // ── Admin panel (web UI, TOTP session) ──────────────────────────────
       if (pathname === '/admin' || pathname === '/admin/') {
@@ -275,14 +348,16 @@ async function handle_activate(request, env) {
     );
   }
 
-  // ── Store-key translation ("redeem") ────────────────────────────────
-  // A store key (Polar / Gumroad / Lemon Squeezy purchase) is translated
-  // into the real Talus license via the store_keys mapping filled by the
-  // issuer daemon. Unknown keys are recorded for fulfillment and rejected
-  // with a retry hint.
+  // ── Key resolution ──────────────────────────────────────────────────
+  // Three accepted inputs, all normalizing to the canonical signed JWT:
+  //   1. short key  TALUS-XXXXX-…   → lookup in short_keys (admin/bind)
+  //   2. store key  (Polar/…)       → lookup in store_keys (redeem flow)
+  //   3. canonical JWT / pretty JWT → used as-is
   let effective_key = license_key;
   const resolved = await resolve_key(env, license_key);
   if (resolved.kind === 'store') {
+    effective_key = resolved.license_key;
+  } else if (resolved.kind === 'short') {
     effective_key = resolved.license_key;
   } else if (resolved.kind === 'unknown') {
     return json_response(
@@ -296,7 +371,20 @@ async function handle_activate(request, env) {
   }
 
   // ── Signature verification (server holds the public key only) ──────────
-  const parts = effective_key.split('.');
+  // Accept both forms: the pretty display key (TALUS-XXXXX-…-SS) is
+  // decoded — with checksum validation — to its canonical form first.
+  let effective_canonical = effective_key;
+  if (is_pretty(effective_canonical)) {
+    try {
+      effective_canonical = decode_pretty(effective_canonical, sha256_hex_bytes);
+    } catch (err) {
+      return json_response(
+        { success: false, message: `invalid license key: ${String(err.message ?? err)}` },
+        400,
+      );
+    }
+  }
+  const parts = effective_canonical.split('.');
   if (parts.length !== 2) {
     return json_response(
       { success: false, message: 'invalid license key format' },
@@ -468,6 +556,7 @@ async function handle_activate(request, env) {
     expires_at: expires_at ?? null,
     tier,
     message: 'license activated',
+    license_key_display: await to_pretty(key, sha256_hex_bytes),
   });
 }
 
@@ -657,6 +746,42 @@ async function handle_admin(request, env, pathname) {
     return json_response({
       success: true,
       message: `order ${order_id} fulfilled — store key mapped to ${license_id}`,
+    });
+  }
+
+  if (action === 'bind') {
+    // Bind a SHORT customer-facing key (TALUS-XXXXX-…) to its signed JWT
+    // (canonical form). Called by issue-license.sh right after keygen.
+    // The short key is stored as a SHA-256 hash — never in plaintext.
+    const short_key = str_field(body.value.short_key);
+    const jwt = str_field(body.value.license_key);
+    if (!short_key || !jwt) {
+      return json_response(
+        { success: false, message: 'missing short_key or license_key' },
+        400,
+      );
+    }
+    if (!is_short(short_key)) {
+      return json_response(
+        { success: false, message: 'short_key must look like TALUS-XXXXX-XXXXX-XXXXX-XXXXX' },
+        400,
+      );
+    }
+    const normalized = normalize_short_key(short_key);
+    const sk_hash = await sha256_hex(normalized);
+    const now = now_iso();
+    await env.DB.prepare(
+      `INSERT INTO short_keys (short_key_hash, license_key, license_id, created_at)
+       VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT(short_key_hash) DO UPDATE SET
+         license_key = excluded.license_key,
+         license_id = excluded.license_id`,
+    )
+      .bind(sk_hash, jwt, license_id, now)
+      .run();
+    return json_response({
+      success: true,
+      message: `short key bound to ${license_id}`,
     });
   }
 
@@ -1147,6 +1272,14 @@ async function record_login_failure(env, auth_code) {
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────
+
+// SHA-256 over raw bytes → hex (used by the pretty-key codec).
+async function sha256_hex_bytes(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 // Re-exported store-bridge helpers used by admin handlers.
 import { normalize_store_key, key_hint } from './store-bridge.js';

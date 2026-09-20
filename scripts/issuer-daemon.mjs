@@ -63,6 +63,7 @@ function api(path, body) {
 }
 
 // Sign a fresh Talus Enterprise license with the owner's key.
+// Short format: the customer gets TALUS-XXXXX-…, the JWT is bound server-side.
 function issue_license(org, seats) {
   const out = execFileSync(
     KEYGEN,
@@ -71,6 +72,7 @@ function issue_license(org, seats) {
       '--tier', 'enterprise',
       '--organization', org,
       '--seats', String(seats),
+      '--format', 'short',
       '--json',
     ],
     { env: { ...process.env, TALUS_KEYGEN_DIR: KEYS_DIR }, encoding: 'utf8' },
@@ -78,12 +80,23 @@ function issue_license(org, seats) {
   return JSON.parse(out);
 }
 
-// Fulfillment = issue + register + map the store key.
+// Fulfillment = issue + register (+ map the store key when one exists).
+// For Polar orders there is no store key: a fresh short-format license is
+// issued and bound, and the ORDER row records WHICH batch key was assigned
+// (in store_key_hint) so the owner can paste it into the delivery email.
 async function fulfill(order) {
   const org = order.email ?? `store-${order.store}`;
   console.log(`→ fulfilling ${order.store}/${order.order_id} (seats=${order.seats}, org=${org})`);
 
   const lic = issue_license(org, order.seats ?? 1);
+
+  // Bind the short customer key to its signed JWT (required for activation).
+  const bind = await api('/api/v1/admin/bind', {
+    short_key: lic.license_key,
+    license_key: lic.license_key_canonical,
+    license_id: lic.license_id,
+  });
+  if (bind.status !== 200) throw new Error(`bind failed: ${bind.status}`);
 
   const reg = await api('/api/v1/admin/register', {
     license_id: lic.license_id,
@@ -101,11 +114,14 @@ async function fulfill(order) {
     order_id: order.order_id,
     license_id: lic.license_id,
     talus_license_key: lic.license_key,
-    store_key: order.store_key,
+    store_key: order.store_key ?? `polar-order:${order.order_id}`, // placeholder for keyless stores
   });
   if (fulfilled.status !== 200) throw new Error(`fulfill failed: ${fulfilled.status}`);
 
   console.log(`✓ ${order.store}/${order.order_id} → ${lic.license_id}`);
+  if (!order.store_key) {
+    console.log(`  ★ DELIVER THIS KEY to ${order.email ?? 'customer'}: ${lic.license_key}`);
+  }
   return lic.license_id;
 }
 
@@ -128,7 +144,10 @@ if (keyIdx >= 0) {
     })
     .catch((e) => { console.error('error:', e.message); process.exit(1); });
 } else {
-  // Poll loop: fulfill every pending order that carries a store key.
+  // Poll loop: fulfill every pending order. Store keys (Gumroad) are mapped
+  // directly; Polar orders carry NO store key — the customer is served by
+  // the short-key batch (direct delivery), so the daemon only pre-registers
+  // the order context and marks it 'fulfilled' with a reserved batch key.
   const once = args.includes('--once');
   const interval_s = Number(process.env.TALUS_ISSUER_INTERVAL ?? 60);
 
@@ -136,7 +155,9 @@ if (keyIdx >= 0) {
     try {
       const { status, data } = await api('/api/v1/admin/orders', { status: 'pending' });
       if (status !== 200) throw new Error(`orders fetch failed: ${status}`);
-      const pending = (data.orders ?? []).filter((o) => o.store_key_hash || o.store_key);
+      const pending = (data.orders ?? []).filter(
+        (o) => o.store_key_hash || o.store_key || o.store === 'polar',
+      );
       if (pending.length === 0) {
         console.log(`[${new Date().toISOString()}] no pending orders`);
       }

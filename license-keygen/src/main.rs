@@ -20,6 +20,8 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
+mod format;
+
 // ── Key storage ───────────────────────────────────────────────────────────
 
 const KEY_FILE: &str = "signing_key.json";
@@ -76,7 +78,11 @@ struct IssuedLicense {
     organization: Option<String>,
     expires_at: Option<String>,
     issued_at: String,
+    /// Canonical signed key (b64 payload.b64 signature) — what verify checks.
     key_string: String,
+    /// Customer-facing short key (TALUS-XXXXX-…) when issued in short format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    short_key: Option<String>,
     features: Option<Vec<String>>,
 }
 
@@ -158,6 +164,12 @@ enum Commands {
         /// the boxed human display. Used by scripts/issue-license.sh.
         #[arg(long)]
         json: bool,
+
+        /// Key form: short (TALUS-XXXXX-XXXXX-XXXXX-XXXXX, customer-facing,
+        /// JWT bound server-side) or raw (base64 payload.signature, legacy
+        /// self-contained). Short is the default.
+        #[arg(long, default_value = "short", value_parser = ["short", "raw"])]
+        format: String,
     },
 
     /// Verify a license key signature
@@ -193,6 +205,7 @@ fn main() -> Result<()> {
             features,
             seats,
             json,
+            format,
         } => cmd_issue(
             tier,
             organization,
@@ -202,6 +215,7 @@ fn main() -> Result<()> {
             features,
             seats,
             json,
+            format,
         )?,
         Commands::Verify { key } => cmd_verify(key)?,
         Commands::List => cmd_list()?,
@@ -265,6 +279,7 @@ fn cmd_issue(
     features: Option<String>,
     seats: u32,
     json_output: bool,
+    format: String,
 ) -> Result<()> {
     let key_data = load_signing_key()?;
 
@@ -332,9 +347,17 @@ fn cmd_issue(
     // Encode
     let payload_b64 = BASE64.encode(&payload_bytes);
     let sig_b64 = BASE64.encode(signature.to_bytes());
-    let key_string = format!("{payload_b64}.{sig_b64}");
+    let canonical = format!("{payload_b64}.{sig_b64}");
+    let key_string = if format == "raw" {
+        canonical.clone()
+    } else {
+        // Short customer-facing key; the JWT (canonical) is what gets bound
+        // to it server-side via admin/bind.
+        format::new_short_key()
+    };
 
-    // Register
+    // Register — key_string always stores the CANONICAL signed JWT (what
+    // verify checks); the short customer key is stored alongside.
     let mut registry = LicenseRegistry::load();
     registry.licenses.push(IssuedLicense {
         license_id: id.clone(),
@@ -342,7 +365,8 @@ fn cmd_issue(
         organization: organization.clone(),
         expires_at: expires_at.clone(),
         issued_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-        key_string: key_string.clone(),
+        key_string: canonical.clone(),
+        short_key: (format != "raw").then(|| key_string.clone()),
         features: features_list.clone(),
     });
     registry.save()?;
@@ -358,6 +382,7 @@ fn cmd_issue(
             "seats": seats.max(1),
             "features": features_list,
             "license_key": key_string,
+            "license_key_canonical": canonical,
         });
         println!("{out}");
         return Ok(());
@@ -423,8 +448,34 @@ fn cmd_verify(key_str: String) -> Result<()> {
 
     let verifying_key = VerifyingKey::from_bytes(&public_bytes)?;
 
+    // Accept both self-contained forms: pretty (TALUS-…) decodes to
+    // canonical first. SHORT keys are server-bound and carry no JWT — the
+    // keygen is offline, so it cannot resolve them (the registry has the
+    // pairing instead; see list). Canonical passes through untouched.
+    let canonical = if format::is_short(&key_str) {
+        let id_part = key_str.trim().to_uppercase();
+        let registry = LicenseRegistry::load();
+        match registry.licenses.iter().find(|l| {
+            l.short_key
+                .as_deref()
+                .map(|s| s.to_uppercase() == id_part)
+                .unwrap_or(false)
+                || l.key_string.to_uppercase() == id_part
+        }) {
+            Some(lic) => lic.key_string.clone(),
+            None => bail!(
+                "short key {id_part} not found in the local keygen registry — \
+                 short keys are resolved by the license server at activation"
+            ),
+        }
+    } else if format::is_pretty(&key_str) {
+        format::decode_pretty(&key_str)?
+    } else {
+        key_str.trim().to_string()
+    };
+
     // Split key
-    let parts: Vec<&str> = key_str.split('.').collect();
+    let parts: Vec<&str> = canonical.split('.').collect();
     if parts.len() != 2 {
         bail!("invalid key format: expected '<payload>.<signature>'");
     }

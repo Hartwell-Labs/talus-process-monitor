@@ -3,7 +3,7 @@
 # Usage:
 #   scripts/issue-license.sh --org "Acme Corp" [--tier enterprise] \
 #       [--expires 2027-12-31] [--seats 5] [--max-nodes 0] \
-#       [--license-id TALUS-...] [--features f1,f2] [--count N] [--offline]
+#       [--license-id TALUS-...] [    --features f1,f2] [--count N] [--offline] [--format short|raw] [--format pretty|raw]
 #
 # Signs the license locally with the owner's Ed25519 key, then automatically
 # pre-registers it on the activation server (POST /api/v1/admin/register)
@@ -39,7 +39,7 @@ if [[ ! -f "$KEYS_DIR/signing_key.json" ]]; then
 fi
 
 # ── Parse arguments ───────────────────────────────────────────────────────
-ORG="" TIER="enterprise" EXPIRES="" SEATS="1" MAX_NODES="" LICENSE_ID="" FEATURES=""
+ORG="" TIER="enterprise" EXPIRES="" SEATS="1" MAX_NODES="" LICENSE_ID="" FEATURES="" FORMAT="short"
 COUNT=1 OFFLINE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --features) FEATURES="$2"; shift 2 ;;
     --count) COUNT="$2"; shift 2 ;;
     --offline) OFFLINE=1; shift ;;
+    --format) FORMAT="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -93,6 +94,7 @@ for ((i = 1; i <= COUNT; i++)); do
     ${MAX_NODES:+--max-nodes "$MAX_NODES"} \
     ${FEATURES:+--features "$FEATURES"} \
     --seats "$SEATS" \
+    --format "$FORMAT" \
     --json \
     "${ID_ARGS[@]}")"
 
@@ -118,6 +120,28 @@ PYEOF
 
   LIC_ID="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['license_id'])" "$PARSED")"
   LIC_KEY="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['license_key'])" "$PARSED")"
+  # ── Bind the short key to its JWT on the server (short format only) ─────
+  # The customer-facing short key resolves to the JWT via this binding.
+  # Without it a short key cannot activate. Raw-format keys skip this.
+  if [[ "$FORMAT" == "short" && "$OFFLINE" == "0" ]]; then
+    LIC_CANONICAL="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['license_key_canonical'])" "$PARSED")"
+    HTTP="$(curl -sS -o /tmp/talus-bind-reply.json -w '%{http_code}' \
+      -X POST "$SERVER/api/v1/admin/bind" \
+      -H 'content-type: application/json' \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -d "{\"short_key\":\"$LIC_KEY\",\"license_key\":\"$LIC_CANONICAL\",\"license_id\":\"$LIC_ID\"}" || echo 000)"
+    if [[ "$HTTP" == 200 ]]; then
+      BIND_STATUS="short-key binding: OK"
+    else
+      REPLY="$(cat /tmp/talus-bind-reply.json 2>/dev/null || echo '')"
+      echo "warning: short-key binding failed (HTTP $HTTP): $REPLY" >&2
+      echo "         Customers CANNOT activate this key until binding succeeds." >&2
+      BIND_STATUS="short-key binding: FAILED (HTTP $HTTP)"
+    fi
+    rm -f /tmp/talus-bind-reply.json
+  else
+    BIND_STATUS="short-key binding: SKIPPED"
+  fi
 
   # ── Pre-register on the server (best-effort but loud on failure) ────────
   REGISTER_STATUS="server-registration: SKIPPED (--offline)"
@@ -175,6 +199,7 @@ PYEOF
   fi
   echo "  Seats:         $SEATS"
   [[ -n "$MAX_NODES" && "$MAX_NODES" != "0" ]] && echo "  Max nodes:     $MAX_NODES"
+  echo "  $BIND_STATUS"
   echo "  $REGISTER_STATUS"
   echo
   echo "  ┌─────────────────────────────────────────────────────┐"

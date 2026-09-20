@@ -358,16 +358,47 @@ export async function handle_store_webhook(request, env, store) {
 // ── Redeem lookup (called by /api/v1/activate) ────────────────────────────
 //
 // Given the raw key the customer pasted, decide what it is:
-//   { kind: 'talus' }  — native Talus key (payload.signature base64 shape)
+//   { kind: 'short' }  — short TALUS-XXXXX-… key with a bound JWT
+//   { kind: 'talus' }  — self-contained Talus key (canonical b64 or pretty)
 //   { kind: 'store', store, license_key, license_id? } — a known store key
-//   { kind: 'unknown' } — unknown store key (recorded for diagnostics)
+//   { kind: 'unknown' } — unknown key (recorded for diagnostics)
+
+import { is_canonical, is_pretty, is_short, normalize_short_key } from './format.js';
 
 export async function resolve_key(env, raw_key) {
-  // Native Talus keys are "<b64 payload>.<b64 64-byte signature>".
-  const looks_native = /^[A-Za-z0-9+/=_-]+\.[A-Za-z0-9+/=_-]{80,120}$/.test(
-    raw_key.trim(),
-  );
-  if (looks_native) return { kind: 'talus' };
+  const k = raw_key.trim();
+
+  // SHORT key: resolve through the short_keys binding (admin/bind).
+  if (is_short(k)) {
+    const sk_hash = await sha256_hex(normalize_short_key(k));
+    const bound = await env.DB.prepare(
+      'SELECT license_key, license_id FROM short_keys WHERE short_key_hash = ?1',
+    )
+      .bind(sk_hash)
+      .first();
+    if (bound?.license_key) {
+      return {
+        kind: 'short',
+        license_key: bound.license_key,
+        license_id: bound.license_id,
+      };
+    }
+    // Structured like a short key but not bound (yet) — record + retry hint.
+    await env.DB.prepare(
+      `INSERT INTO pending_store_keys (key_hash, last_seen, attempts)
+       VALUES (?1, ?2, 1)
+       ON CONFLICT(key_hash) DO UPDATE SET
+         last_seen = ?2,
+         attempts = attempts + 1`,
+    )
+      .bind(sk_hash, now_iso())
+      .run();
+    return { kind: 'unknown', key_hash: sk_hash, hint: key_hint(k) };
+  }
+
+  // Self-contained native Talus keys: canonical "<b64>.<b64>" or the pretty
+  // full-JWT display form "TALUS-XXXXX-…-SS" (checksum-verified on decode).
+  if (is_canonical(k) || is_pretty(k)) return { kind: 'talus' };
 
   const key_hash = await sha256_hex(normalize_store_key(raw_key));
   const hint = key_hint(raw_key);

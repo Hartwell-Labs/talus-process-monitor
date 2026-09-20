@@ -36,6 +36,9 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
+// Pretty-key codec (TALUS-XXXXX-… ↔ canonical payload.signature).
+pub mod format;
+
 // ── Integrity check ───────────────────────────────────────────────────────
 
 /// Compute XOR checksum of a byte slice.
@@ -204,11 +207,21 @@ impl LicenseKey {
     #[allow(dead_code)]
     /// Parse and verify a license key string.
     ///
-    /// Format: `<base64_payload>.<base64_signature>`
+    /// Accepts BOTH customer-facing forms:
+    ///   • pretty:   `TALUS-XXXXX-XXXXX-…-SS` (Crockford base32 + checksum)
+    ///   • canonical: `<base64_payload>.<base64_signature>` (legacy)
+    /// Verification always operates on the canonical form underneath.
     pub fn parse(key_str: &str) -> Result<Self> {
         // Tolerate copy-paste artifacts: trailing newlines/spaces from
         // terminal or editor must never break activation.
         let key_str = key_str.trim();
+        // Pretty display key → canonical form (checksum-validated decode).
+        let key_owned: String = if format::is_pretty(key_str) {
+            format::decode_pretty(key_str)?
+        } else {
+            key_str.to_string()
+        };
+        let key_str: &str = key_owned.as_str();
         let parts: Vec<&str> = key_str.split('.').collect();
         if parts.len() != 2 {
             bail!("invalid license key format: expected '<payload>.<signature>'");
@@ -506,6 +519,39 @@ fn post_activation_api<T: serde::de::DeserializeOwned>(
     );
 }
 
+/// Resolve a SHORT key (TALUS-XXXXX-XXXXX-XXXXX-XXXXX) to its signed JWT
+/// (canonical form) via the license server. The short key is just a handle —
+/// the JWT is bound to it server-side. The returned JWT is verified locally
+/// (Ed25519, embedded public key), so the server cannot forge license terms.
+fn resolve_short_key(short_key: &str) -> Result<String> {
+    let (status, body): (_, serde_json::Value) = post_activation_api(
+        "/api/v1/resolve",
+        &serde_json::json!({ "key": short_key.trim() }),
+        30,
+    )?;
+
+    if !status.is_success() || !body["success"].as_bool().unwrap_or(false) {
+        let msg = body["message"].as_str().unwrap_or("key not recognized");
+        audit_log("RESOLVE_FAILED", "short-key", &format!("{status}: {msg}"));
+        bail!(
+            "license key not recognized ({}). \
+             Short keys activate online — check the key or retry in a few minutes",
+            msg
+        );
+    }
+
+    let jwt = body["license_key"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("resolve response missing license_key"))?;
+
+    audit_log(
+        "RESOLVE_OK",
+        body["license_id"].as_str().unwrap_or("short-key"),
+        "short key resolved to signed license",
+    );
+    Ok(jwt.to_string())
+}
+
 /// Activation request sent to the server.
 #[derive(Serialize)]
 struct ActivationRequest {
@@ -590,15 +636,22 @@ pub fn activate_license(key: &str) -> Result<LicenseCache> {
     // Rate limit activation attempts
     check_activation_rate_limit()?;
 
-    // ── Store-key redemption ───────────────────────────────────────────────
-    // Keys purchased through a store (Polar / Gumroad / Lemon Squeezy) are
-    // not native Talus keys. If local parsing fails, ask the server to
-    // translate the store key into a Talus license and continue with that.
-    // Native keys (payload.signature) skip this entirely.
-    let key = match LicenseKey::parse(key) {
-        Ok(_) => key,
-        Err(_) => &redeem_store_key(key)?,
+    // ── Key normalization ──────────────────────────────────────────────────
+    // Accepted inputs, all normalizing to the canonical signed JWT:
+    //   1. short key  TALUS-XXXXX-…    → resolve via /api/v1/resolve
+    //   2. store key   (Polar/…)       → redeem via /api/v1/redeem
+    //   3. canonical JWT / pretty JWT  → used as-is
+    // Everything is verified LOCALLY afterwards, so the server only ever
+    // hands out keys the owner signed — it cannot alter license terms.
+    let key_owned: String = if format::is_short(key) {
+        resolve_short_key(key)?
+    } else {
+        match LicenseKey::parse(key) {
+            Ok(_) => key.to_string(),
+            Err(_) => redeem_store_key(key)?,
+        }
     };
+    let key: &str = &key_owned;
 
     // Parse and verify the key locally first
     let license_key =

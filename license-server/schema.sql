@@ -109,3 +109,16 @@ CREATE TABLE IF NOT EXISTS pending_store_keys (
   last_seen TEXT NOT NULL,
   attempts  INTEGER NOT NULL DEFAULT 1
 );
+
+-- ── SHORT customer keys → signed JWT binding ──────────────────────────────
+-- Short keys (TALUS-XXXXX-XXXXX-XXXXX-XXXXX) are random handles; the signed
+-- JWT lives here, keyed by the SHA-256 of the normalized short key. Created
+-- by admin/bind right after keygen issues a short-format license. Only the
+-- hash of the short key is stored — the JWT itself is public data (signed).
+CREATE TABLE IF NOT EXISTS short_keys (
+  short_key_hash TEXT PRIMARY KEY,
+  license_key    TEXT NOT NULL,
+  license_id     TEXT NOT NULL,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_short_keys_license ON short_keys(license_id);
