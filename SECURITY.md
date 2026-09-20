@@ -30,3 +30,7 @@ pursued legally, provided you give us a reasonable window to ship a fix.
 This project ships with CI-enforced builds, pinned toolchains and automated
 test sweeps (see `.github/workflows/`). Fuzz targets live alongside the parser
 modules where applicable.
+
+## Known dependency notes
+
+- **glib 0.18.5 (talus-tauri desktop shell)** — RUSTSEC medium: unsoundness in `VariantStrIter`. Not reachable from our code paths (no direct `glib` usage; transitive via tauri 2.x gtk bindings). Bumping glib to 0.20 requires a tauri major upgrade — tracked, scheduled with the next tauri release rebase. The core monitor (Rust + eBPF) is unaffected.
