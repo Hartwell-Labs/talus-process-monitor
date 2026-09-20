@@ -86,7 +86,10 @@ pub fn decode_pretty(pretty_key: &str) -> Result<String> {
 }
 
 fn hex_last2(digest: &[u8]) -> String {
-    let hex = digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let hex = digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     hex[hex.len() - 2..].to_uppercase()
 }
 
