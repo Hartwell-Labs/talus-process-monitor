@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 
 const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const PREFIX: &str = "TALUS";
+#[allow(dead_code)] // license-issuer WIP — używane przez scripts/issuer-daemon (odpalamy po integracji)
 const GROUP: usize = 5;
 
 /// True when the string looks like the pretty display form (the full JWT
@@ -39,6 +40,7 @@ pub fn is_short(key: &str) -> bool {
 }
 
 /// Canonical key string → pretty key string.
+#[allow(dead_code)] // license-issuer WIP — pretty-print dla kluczy w CLI issuer
 pub fn to_pretty(canonical_key: &str) -> String {
     let data = canonical_key.trim().as_bytes();
     let digest = Sha256::digest(data);
@@ -88,6 +90,7 @@ fn hex_last2(digest: &[u8]) -> String {
     hex[hex.len() - 2..].to_uppercase()
 }
 
+#[allow(dead_code)] // license-issuer WIP — fallback kodowania bez base32 crate
 fn b32_encode(data: &[u8]) -> String {
     let mut out = String::new();
     let mut acc: u32 = 0;
