@@ -1,3 +1,5 @@
+<div align="center"><img src="https://raw.githubusercontent.com/BartoszOsiej/talus-process-monitor/master/logo-talus.png" width="150" alt="talus logo"/></div>
+
 # 🛡️ Talus — eBPF Ransomware Detection & Response for Linux
 
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)

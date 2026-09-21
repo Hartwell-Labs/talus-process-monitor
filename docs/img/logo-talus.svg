@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>talus logo</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="aur" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EF4444"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="48" fill="url(#bg)"/>
+  <g fill="none" stroke="#334155" stroke-width="3">
+    <rect x="88" y="56" width="80" height="120" rx="10"/>
+    <line x1="104" y1="88" x2="152" y2="88"/>
+    <line x1="104" y1="108" x2="152" y2="108"/>
+    <line x1="104" y1="128" x2="132" y2="128"/>
+  </g>
+  <path d="M166 120 L214 148 L166 176 Z" fill="url(#aur)"/>
+  <path d="M70 132 L118 160 L70 188 Z" fill="#F8FAFC" opacity="0.94"/>
+</svg>
