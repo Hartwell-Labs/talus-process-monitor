@@ -2,21 +2,31 @@
   <title>talus logo</title>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0F172A"/>
-      <stop offset="1" stop-color="#1E293B"/>
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#16233B"/>
     </linearGradient>
-    <linearGradient id="aur" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#EF4444"/>
-      <stop offset="1" stop-color="#F97316"/>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F87171"/>
+      <stop offset="1" stop-color="#DC2626"/>
     </linearGradient>
   </defs>
   <rect x="16" y="16" width="224" height="224" rx="48" fill="url(#bg)"/>
-  <g fill="none" stroke="#334155" stroke-width="3">
-    <rect x="88" y="56" width="80" height="120" rx="10"/>
-    <line x1="104" y1="88" x2="152" y2="88"/>
-    <line x1="104" y1="108" x2="152" y2="108"/>
-    <line x1="104" y1="128" x2="132" y2="128"/>
+  <!-- encrypted files: two top rows infected -->
+  <g>
+    <rect x="58"  y="62" width="36" height="36" rx="7" fill="url(#red)"/>
+    <rect x="110" y="62" width="36" height="36" rx="7" fill="url(#red)" opacity="0.92"/>
+    <rect x="162" y="62" width="36" height="36" rx="7" fill="url(#red)" opacity="0.84"/>
+    <rect x="58"  y="112" width="36" height="36" rx="7" fill="url(#red)" opacity="0.92"/>
+    <rect x="110" y="112" width="36" height="36" rx="7" fill="url(#red)" opacity="0.84"/>
+    <rect x="162" y="112" width="36" height="36" rx="7" fill="url(#red)" opacity="0.76"/>
   </g>
-  <path d="M166 120 L214 148 L166 176 Z" fill="url(#aur)"/>
-  <path d="M70 132 L118 160 L70 188 Z" fill="#F8FAFC" opacity="0.94"/>
+  <!-- killed row: outline only -->
+  <g fill="none" stroke="#3B4A63" stroke-width="3">
+    <rect x="58"  y="162" width="36" height="36" rx="7"/>
+    <rect x="110" y="162" width="36" height="36" rx="7"/>
+    <rect x="162" y="162" width="36" height="36" rx="7"/>
+  </g>
+  <!-- the kill line -->
+  <line x1="44" y1="155" x2="212" y2="155" stroke="#F8FAFC" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="212" cy="155" r="6" fill="#F8FAFC"/>
 </svg>
