@@ -1,0 +1,2 @@
+[console_scripts]
+talus-monitor = talus_process_monitor:main
