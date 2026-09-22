@@ -14,11 +14,13 @@ Genesis draft: https://github.com/BartoszOsiej/pqbit/blob/master/GENESIS.md
 
 ### talus-process-monitor
 eBPF ransomware detection & response for Linux (Rust + eBPF): sliding-window heuristics over syscalls, automated SIGKILL response, 280k events/s at ~7.6% CPU.
+v0.8.1-f embeds the eBPF object in the binary — true single-file deploy: download → sudo run, no build step.
 Repo: https://github.com/BartoszOsiej/talus-process-monitor
 Landing: https://bartoszosiej.github.io/talus-process-monitor/
-Install: pip install talus-process-monitor && talus-monitor install (fetches prebuilt binary)
+Install: pip install talus-process-monitor && talus-monitor install — or cargo install process-monitor — or prebuilt binary from GitHub Releases (embedded eBPF, zero setup)
 Field guide: https://bartoszosiej.github.io/talus-process-monitor/field-guide.html
 Comparison: https://bartoszosiej.github.io/talus-process-monitor/comparison.html
+Changelog: https://bartoszosiej.github.io/talus-process-monitor/changelog.html
 
 ### quantum-shield
 Post-quantum file encryption CLI (pqguard): ML-KEM-768 (FIPS 203) + AES-256-GCM, fuzz-tested.
@@ -31,7 +33,7 @@ Repo: https://github.com/BartoszOsiej/fortis
 Landing: https://bartoszosiej.github.io/fortis/
 
 ### externum
-Programming language that compiles to Python, standalone Bash, and bytecode. Self-hosted, ~379 tests, browser REPL.
+Programming language that compiles to Python, standalone Bash, and bytecode. Self-hosted, 382 tests, browser REPL. PyPI: pip install externum (Pro Pack available).
 Repo: https://github.com/BartoszOsiej/externum
 Playground: https://bartoszosiej.github.io/externum/
 
