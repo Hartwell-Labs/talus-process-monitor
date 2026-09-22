@@ -38,3 +38,6 @@ node_modules/
 # Wrangler local dev state
 .wrangler/
 pypi/dist/
+
+# embedded eBPF object MUST be tracked (include_bytes!)
+!process-monitor/src/bpf/process_monitor_ebpf.o
