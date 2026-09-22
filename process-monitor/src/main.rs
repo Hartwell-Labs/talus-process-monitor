@@ -551,6 +551,13 @@ fn resolve_bpf_path(explicit: Option<&PathBuf>) -> Result<PathBuf> {
         );
     }
 
+    // 0. The binary embeds its own eBPF object (include_bytes! in monitor.rs) —
+    //    this is the normal path for prebuilt release binaries. resolve_bpf_path
+    //    only needs to find an on-disk override.
+    if explicit.is_none() {
+        return Ok(PathBuf::from("<embedded>"));
+    }
+
     // 1. Build tree (CARGO_TARGET_DIR is set by build.sh / install.sh).
     if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
         for sub in [
