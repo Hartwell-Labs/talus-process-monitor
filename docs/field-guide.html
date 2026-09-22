@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Talus Field Guide — deployment & tuning playbook</title>
+<meta name="description" content="A practical, honest playbook for deploying and tuning Talus eBPF ransomware protection on real Linux servers.">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap');
+  :root { --bg:#0a0e1a; --surface:#111827; --surface2:#1a2234; --border:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --orange:#F15A24; --blue:#3b82f6; --green:#10b981; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 32px; font-weight: 800; letter-spacing: -1px; line-height: 1.2; margin-bottom: 6px; }
+  h1 span { color: var(--orange); }
+  .sub { color: var(--muted); font-size: 15px; margin-bottom: 28px; }
+  h2 { font-size: 20px; margin: 40px 0 12px; color: var(--blue); font-weight: 700; }
+  h3 { font-size: 15px; margin: 22px 0 8px; color: var(--text); }
+  p { margin-bottom: 13px; font-size: 14.5px; color: var(--text); }
+  ul { margin: 0 0 14px 20px; color: var(--muted); font-size: 14px; }
+  li { margin-bottom: 6px; }
+  pre { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 12px 0 18px; font-family:'JetBrains Mono',monospace; font-size: 12.5px; color: #cbd5e1; line-height: 1.55; }
+  code { font-family:'JetBrains Mono',monospace; font-size: 12.5px; background: var(--surface2); padding: 1px 5px; border-radius: 4px; }
+  pre code { background: none; padding: 0; }
+  .tip { border-left: 3px solid var(--green); background: var(--surface); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 13.5px; color: var(--muted); }
+  .warn { border-left: 3px solid var(--orange); background: var(--surface); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 13.5px; color: var(--muted); }
+  table { width:100%; border-collapse: collapse; margin: 14px 0 20px; font-size: 13px; }
+  th, td { padding: 9px 12px; border: 1px solid var(--border); text-align: left; }
+  th { background: var(--surface2); font-weight: 600; }
+  td { background: var(--surface); color: var(--muted); }
+  .cta { margin-top: 40px; padding: 20px; border: 1px solid var(--orange); border-radius: 10px; background: linear-gradient(135deg, #F15A2411, transparent); }
+  .cta h2 { color: var(--orange); margin-top: 0; }
+  a { color: var(--blue); text-decoration: none; }
+  .back { display:inline-block; margin-bottom: 26px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">← talus-process-monitor</a>
+  <h1>Talus <span>Field Guide</span></h1>
+  <p class="sub">Deployment &amp; tuning playbook for real Linux servers. Written by the author — every flag here is a real interface of the agent, nothing invented.</p>
+
+  <h2>1. Pick your deployment mode before anything else</h2>
+  <table>
+    <tr><th>Mode</th><th>Command</th><th>Use when</th></tr>
+    <tr><td><b>Observe</b></td><td><code>sudo process-monitor monitor</code></td><td>First week. Learn what normal looks like on YOUR hosts. Zero risk.</td></tr>
+    <tr><td><b>Pipeline</b></td><td><code>sudo process-monitor monitor --json</code></td><td>You already run a log stack (rsyslog, Loki, SIEM). Detection without response.</td></tr>
+    <tr><td><b>EDR</b></td><td><code>sudo process-monitor monitor --auto-kill</code></td><td>Hosts that hold things worth keeping, after tuning. Requires Enterprise license.</td></tr>
+  </table>
+  <div class="warn"><b>Rule of thumb:</b> never start in EDR mode. Tune in Observe, graduate to EDR. A wrong kill on a backup job is worse than a slow alert.</div>
+
+  <h2>2. Install and sanity-check in five minutes</h2>
+  <pre><code>git clone https://github.com/BartoszOsiej/talus-process-monitor.git
+cd talus-process-monitor &amp;&amp; ./build.sh          # TUI variant, ~1.7MB
+# or: ./build.sh --web                          # + REST API, WebSocket, Prometheus (Enterprise)
+
+./install.sh                                   # user-local install (default)
+sudo ./install.sh --system                      # /usr/local system-wide
+
+# 5-second end-to-end self-diagnostic (eBPF loads? events flowing?):
+sudo process-monitor monitor --diagnose</code></pre>
+  <p>If <code>--diagnose</code> completes cleanly, the pipeline works end-to-end on your kernel. If it fails: check you are root (or CAP_BPF/CAP_SYS_ADMIN, as in the Docker example), and that BTF is available (<code>ls /sys/kernel/btf/vmlinux</code>).</p>
+
+  <h2>3. Tuning the one knob that matters: the threshold</h2>
+  <p>Talus alerts when a process opens <b>N or more files within 1 second</b> (default <code>--alert-threshold 50</code>). That single number is your false-positive dial:</p>
+  <ul>
+    <li><b>Backups, sync jobs, media encoding</b> — these legitimately touch hundreds of files per second. Run during a real backup window; if Talus flags the backup process, raise the threshold above the observed rate (e.g. <code>--alert-threshold 400</code>).</li>
+    <li><b>Typical web/API hosts</b> — the default 50 rarely fires on legitimate traffic. Keep it.</li>
+    <li><b>Paranoid mode</b> (tiny document sets, archives) — <code>--alert-threshold 20</code>. Expect noise; tune or accept.</li>
+  </ul>
+  <pre><code># Measure what normal looks like on this host:
+sudo process-monitor monitor --benchmark 30      # throughput + hot processes
+
+# Narrow the view to the file types you actually protect:
+sudo process-monitor monitor --filter-ext pdf
+sudo process-monitor monitor --filter-ext enc</code></pre>
+  <div class="tip"><b>FP triage method:</b> run <code>--json</code> for 24h into a file, <code>jq</code> the alerts, and whitelist the two or three noisy legitimate processes by adjusting the threshold — not by disabling the agent. One evening of work, once per host type.</div>
+
+  <h2>4. Ship it as a service</h2>
+  <pre><code># /etc/systemd/system/talus.service
+[Unit]
+Description=Talus eBPF ransomware tripwire
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/process-monitor monitor --json --alert-threshold 400
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+  <pre><code>sudo systemctl daemon-reload &amp;&amp; sudo systemctl enable --now talus
+journalctl -u talus -f                            # watch the NDJSON stream</code></pre>
+
+  <h2>5. MeMLP — the neural layer, when to switch it on</h2>
+  <p><code>--memlp</code> enables the online-training detection engine. It learns from live events and saves a checkpoint every 30 seconds:</p>
+  <pre><code>sudo process-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json</code></pre>
+  <ul>
+    <li>Switch it on <b>after</b> the threshold is sane — it learns from the stream you give it.</li>
+    <li>The checkpoint persists across restarts: the model you trained stays yours.</li>
+  </ul>
+
+  <h2>6. Enterprise wiring (license → dashboard → exports)</h2>
+  <pre><code># Activate your license (no root required):
+process-monitor license activate KEY
+process-monitor license verify
+
+# Web dashboard + REST API + Prometheus (build with ./build.sh --web first):
+sudo process-monitor monitor --web 0.0.0.0:8080 --auto-kill
+
+# Stream detections into your data stack:
+sudo process-monitor monitor --auto-kill \
+  --kafka-brokers localhost:9092 --kafka-topic talus-detections \
+  --clickhouse http://localhost:8123 \
+  --memgraph http://localhost:7474</code></pre>
+  <div class="tip">Kafka/ClickHouse/Memgraph flags are independent — wire only what your stack already has. Nothing leaves the host by default.</div>
+
+  <h2>7. Runbook: an alert fired — now what</h2>
+  <ul>
+    <li><b>In Observe/Pipeline mode:</b> identify the process from the JSON event (pid, comm, exe). If it is not a known job — stop it, snapshot the directory tree, check for rename chains and new <code>.enc</code>-style extensions.</li>
+    <li><b>In EDR mode:</b> Talus already killed the process (SIGKILL at threshold breach). Verify with <code>journalctl -u talus | grep kill</code>, then preserve evidence before restoring from backup.</li>
+    <li><b>After any incident:</b> re-run <code>--diagnose</code>, review whether the threshold should move, and keep the 24h JSON window as evidence.</li>
+  </ul>
+
+  <h2>8. Honest limits</h2>
+  <ul>
+    <li>Talus watches <b>file-event behaviour</b>. It is not an antivirus, not a network IDS, and it will not catch a threat that touches zero files.</li>
+    <li>eBPF requires BTF/CO-RE support (recent kernels; the Docker runbook mounts <code>/sys/kernel/btf</code> explicitly). Old LTS boxes need a plan.</li>
+    <li>One threshold for the whole host: workloads with wildly different IO profiles on one box need either separate hosts or a higher threshold.</li>
+  </ul>
+
+  <div class="cta">
+    <h2>Want this done for you?</h2>
+    <p>This week the code <b class="mono">WEEK30</b> takes 30% off the 1:1 <a href="https://polar.sh/checkout/polar_c_rGI15C7IzCs54qElT4NJ5aLj7o3p7Uxdj4P4T1OtUsU">Support Session</a> (60 min: deployment + threshold tuning for your workload, $105 instead of $150) and the <a href="https://buy.polar.sh/polar_cl_E577BTilme4dnUFsfbG0aE4qo7QILaugmEjsA0oajKK">Enterprise license</a> ($35 instead of $50 — auto-kill, dashboard, Kafka/ClickHouse).</p>
+    <p>Agent is free and MIT forever: <a href="https://github.com/BartoszOsiej/talus-process-monitor">github.com/BartoszOsiej/talus-process-monitor</a></p>
+  </div>
+</div>
+</body>
+</html>
