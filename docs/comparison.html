@@ -5,6 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Talus vs Falco vs Wazuh vs Tracee — eBPF ransomware detection for Linux</title>
 <meta name="description" content="A practical comparison of eBPF ransomware detection tools for Linux: Talus, Falco, Wazuh, Tracee. Which one fits a small fleet of standalone hosts.">
+<link rel="canonical" href="https://bartoszosiej.github.io/talus-process-monitor/comparison.html">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "@id": "https://bartoszosiej.github.io/talus-process-monitor/comparison.html#faq",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is the difference between Talus and Falco?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Falco is a rule-based runtime detection engine built for Kubernetes fleets and large estates — you deploy it, feed events to your alerting stack, and maintain it. Talus is a single static Rust binary built for standalone hosts: it watches file events through eBPF, scores behaviour for wipe-and-extort patterns, and can pause or kill the offending process before archives die. Falco detects; Talus responds." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Talus replace Wazuh or a full SIEM?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Wazuh is a full XDR/SIEM platform — agents everywhere, a server, dashboards, compliance reports. Talus does one job: keeping individual Linux hosts that hold valuable data alive against ransomware, with no server infrastructure. They solve different problems and can coexist." }
+    },
+    {
+      "@type": "Question",
+      "name": "How does Talus detect ransomware?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Talus watches file events through eBPF (no kernel modules, single static binary) and scores behaviour: fast rewrites, rename chains, and entropy spikes within a sliding window. When a process crosses the configured threshold, Talus can alert, pause, or kill it. On benchmarks it observes ~280k file events/s at under 8% CPU on a modest VM." }
+    },
+    {
+      "@type": "Question",
+      "name": "What does Talus cost?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The agent itself is MIT-licensed and free — install from PyPI (pip install talus-process-monitor), build from crates.io (cargo install process-monitor), or grab a prebuilt binary from GitHub Releases. Paid options: a $150 one-time Support Session (1:1 deploy and threshold tuning) and a $50 Enterprise license (auto-kill, web dashboard, Kafka/ClickHouse export). Until Sep 27 the code WEEK30 takes 30% off both." }
+    },
+    {
+      "@type": "Question",
+      "name": "What are Talus's limitations?",
+      "acceptedAnswer": { "@type": "Answer", "text": "It is a young tool — an independent review by LinuxSecurity is being published to provide exactly the scrutiny a new tool needs. It is not a fleet-wide SIEM replacement: if you already run a SOC with tuned Falco rules, Talus adds a host-level response layer rather than replacing detection. And behavioural thresholds need one-time tuning on write-heavy legitimate workloads such as backups." }
+    }
+  ]
+}
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :root { --bg:#0a0e1a; --surface:#111827; --surface2:#1a2234; --border:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --orange:#F15A24; --blue:#3b82f6; }
