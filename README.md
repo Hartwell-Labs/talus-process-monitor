@@ -733,6 +733,17 @@ Enterprise licenses are sold directly by the author:
   team agreements (10+ seats)
 - 📜 Terms: [docs/EULA.txt](docs/EULA.txt)
 
+## Support & Services
+
+Need help deploying Talus, or want it tuned to your environment?
+
+- 🛠️ **Support Session — $150**: 60-minute 1:1 call + written config. Threshold
+  tuning for your workload, false-positive triage, systemd/alert routing,
+  response-playbook design. [Book instantly](https://polar.sh/checkout/polar_c_rGI15C7IzCs54qElT4NJ5aLj7o3p7Uxdj4P4T1OtUsU).
+- 🏢 **Enterprise — $50 one-time**: [direct checkout](https://buy.polar.sh/f8fee751-6cde-4a3b-b3cd-6e302ce8f5a8)
+  (auto-kill response, web dashboard, Kafka/ClickHouse export — full matrix above).
+- 📧 Volume, on-prem or custom integrations: bartosz.osiej2007@gmail.com
+
 ### How Licensing Works
 
 ```
