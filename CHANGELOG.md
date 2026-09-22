@@ -4,6 +4,12 @@ All notable changes to talus-process-monitor will be documented in this file.
 
 ## [Unreleased]
 
+### 0.8.1-f (2026-09-22): embedded eBPF object — true single-file deploy
+- Agent binary embeds the compiled eBPF object (23.5 KB): download → run, no ./build.sh needed
+- resolve_bpf_path returns <embedded> unless --bpf PATH is given; on-disk object still works as override
+- PyPI installer 0.8.1.post2 with full project.urls (docs, comparison, changelog)
+- CI: publish-pypi fixed (builds from pypi/ subdir); gitignore negation for the tracked .o
+
 ### License server failover — shared Turso storage, automatic server switchover
 
 - **Storage decoupled from compute** (`license-server/src/db.js`): the worker
