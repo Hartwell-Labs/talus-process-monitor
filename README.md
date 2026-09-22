@@ -6,6 +6,8 @@
 ![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go)
 ![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&logo=docker)
 ![Enterprise](https://img.shields.io/badge/Enterprise-Level%204%2F20-blue?style=flat-square)
+[![PyPI](https://img.shields.io/pypi/v/talus-process-monitor?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/talus-process-monitor/)
+[![Crates.io](https://img.shields.io/crates/v/process-monitor?style=flat-square&logo=rust)](https://crates.io/crates/process-monitor)
 
 **Kernel-level ransomware detection in Rust: a sliding-window heuristic over eBPF syscalls — with automated response.**
 
@@ -14,7 +16,11 @@
 Talus is not a passive monitor. It is a **detect-and-respond** agent: eBPF tracepoints hook syscalls at the kernel level, a per-PID sliding window scores file-open rates in real time, and the response layer **terminates** the offending process (`SIGKILL`) the moment a verdict fires. Measured on a live desktop: **~280,000 events/s sustained with ~7.6% CPU** through per-CPU perf buffers and zero-copy handoff to the userspace detection engine.
 
 ```bash
-# Detect + respond in one line (build takes ~2 min)
+# Install via pip (fetches the prebuilt binary from releases):
+pip install talus-process-monitor && talus-monitor install
+sudo talus-monitor run monitor --auto-kill
+
+# Or build from source (~2 min):
 ./build.sh && sudo ./target/release/process-monitor monitor --auto-kill
 ```
 
