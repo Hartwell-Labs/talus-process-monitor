@@ -1,8 +1,0 @@
-README-pypi.md
-pyproject.toml
-talus_process_monitor/__init__.py
-talus_process_monitor.egg-info/PKG-INFO
-talus_process_monitor.egg-info/SOURCES.txt
-talus_process_monitor.egg-info/dependency_links.txt
-talus_process_monitor.egg-info/entry_points.txt
-talus_process_monitor.egg-info/top_level.txt
