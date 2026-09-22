@@ -16,6 +16,9 @@ Genesis draft: https://github.com/BartoszOsiej/pqbit/blob/master/GENESIS.md
 eBPF ransomware detection & response for Linux (Rust + eBPF): sliding-window heuristics over syscalls, automated SIGKILL response, 280k events/s at ~7.6% CPU.
 Repo: https://github.com/BartoszOsiej/talus-process-monitor
 Landing: https://bartoszosiej.github.io/talus-process-monitor/
+Install: pip install talus-process-monitor && talus-monitor install (fetches prebuilt binary)
+Field guide: https://bartoszosiej.github.io/talus-process-monitor/field-guide.html
+Comparison: https://bartoszosiej.github.io/talus-process-monitor/comparison.html
 
 ### quantum-shield
 Post-quantum file encryption CLI (pqguard): ML-KEM-768 (FIPS 203) + AES-256-GCM, fuzz-tested.
