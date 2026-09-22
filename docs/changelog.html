@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Talus — changelog and release history</title>
+<meta name="description" content="Release history of Talus, the eBPF ransomware detection and response agent for Linux: licensing, supply-chain hardening, distribution via PyPI and crates.io.">
+<link rel="canonical" href="https://bartoszosiej.github.io/talus-process-monitor/changelog.html">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://bartoszosiej.github.io/talus-process-monitor/#software",
+  "name": "Talus",
+  "applicationCategory": "SecurityApplication",
+  "operatingSystem": "Linux 5.8+",
+  "softwareVersion": "0.8.0",
+  "codeRepository": "https://github.com/BartoszOsiej/talus-process-monitor",
+  "releaseNotes": "https://bartoszosiej.github.io/talus-process-monitor/changelog.html",
+  "softwareRequirements": "eBPF with BTF/CO-RE",
+  "release": [
+    { "@type": "SoftwareSourceCode", "name": "0.8.0", "datePublished": "2026-09-17", "description": "Secure licensing backend, key rotation, activation server" },
+    { "@type": "SoftwareSourceCode", "name": "0.7.0", "datePublished": "2026-08-30", "description": "Enterprise licensing system, keygen CLI, feature gating" },
+    { "@type": "SoftwareSourceCode", "name": "0.6.0", "datePublished": "2026-08-28", "description": "Enterprise maturity: supply chain, provenance, SBOM, hardening" },
+    { "@type": "SoftwareSourceCode", "name": "0.5.0", "datePublished": "2026-08-20", "description": "Stability and tooling" },
+    { "@type": "SoftwareSourceCode", "name": "0.4.0", "datePublished": "2025-08-01", "description": "Early releases" }
+  ]
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap');
+  :root { --bg:#0a0e1a; --surface:#111827; --surface2:#1a2234; --border:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --orange:#F15A24; --blue:#3b82f6; --green:#10b981; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px; }
+  h1 { font-size: 34px; font-weight: 800; letter-spacing: -1px; margin-bottom: 8px; }
+  h1 span { color: var(--orange); }
+  .sub { color: var(--muted); font-size: 15px; margin-bottom: 32px; }
+  h2 { font-size: 20px; margin: 36px 0 6px; color: var(--blue); font-weight: 700; }
+  .date { color: var(--muted); font-size: 13px; font-family:'JetBrains Mono',monospace; margin-bottom: 10px; }
+  .entry { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+  .entry h3 { font-size: 15px; margin-bottom: 8px; color: var(--text); }
+  .entry ul { margin-left: 18px; color: var(--muted); font-size: 14px; }
+  .entry li { margin: 5px 0; }
+  .entry b { color: var(--text); }
+  .badge { display:inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 11px; font-family:'JetBrains Mono',monospace; color: var(--green); margin-left: 8px; vertical-align: middle; }
+  code, .mono { font-family:'JetBrains Mono',monospace; font-size: 13px; }
+  .navline { margin-bottom: 28px; font-size: 13px; }
+  .navline a { color: var(--blue); text-decoration: none; }
+  .cta { margin-top: 36px; padding: 22px; border: 1px solid var(--orange); border-radius: 10px; background: linear-gradient(135deg, #F15A2411, transparent); }
+  .cta h2 { color: var(--orange); margin-top: 0; }
+  .cta a { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="navline"><a href="index.html">&larr; Talus home</a> &middot; <a href="comparison.html">Comparison</a> &middot; <a href="field-guide.html">Field Guide</a></div>
+  <h1>Talus <span>changelog</span></h1>
+  <p class="sub">Every release, honestly documented. The full technical detail lives in the <a style="color:var(--blue);text-decoration:none" href="https://github.com/BartoszOsiej/talus-process-monitor/blob/master/CHANGELOG.md">CHANGELOG.md</a> in the repository.</p>
+
+  <h2>Distribution expansion (September 2026)</h2>
+  <div class="date">2026-09-22 &middot; v0.8.0 line</div>
+  <div class="entry">
+    <ul>
+      <li><b>crates.io:</b> the full agent now builds with <code>cargo install process-monitor</code> — nine <span class="mono">ftui-*</span> dependencies moved from path-deps to published crates</li>
+      <li><b>PyPI installer:</b> <code>pip install talus-process-monitor</code> &rarr; <code>talus-monitor install</code> fetches the prebuilt binary (~4 MB) from GitHub Releases, no toolchain needed</li>
+      <li><b>CI auto-publish:</b> tagging <span class="mono">v*</span> builds and uploads the PyPI package automatically</li>
+      <li>Structured data (SoftwareApplication + FAQPage), IndexNow, comparison and field-guide pages</li>
+    </ul>
+  </div>
+
+  <h2>License server failover — shared Turso storage</h2>
+  <div class="date">Unreleased &middot; in master</div>
+  <div class="entry">
+    <ul>
+      <li><b>Storage decoupled from compute:</b> the license worker runs unchanged on native D1 or on Turso (libSQL) over HTTP</li>
+      <li><b>Failover worker</b> on a separate Cloudflare workers.dev domain serving the same shared database — seats and revocations identical on both</li>
+      <li><b>Client failover:</b> activation/deactivation/redemption try the primary, then the failover list (<span class="mono">TALUS_LICENSE_SERVER_FAILOVER</span>); connection failures switch, HTTP-level answers are authoritative</li>
+      <li>Verified end-to-end; topology and recovery documented in <span class="mono">docs/ops.md</span></li>
+    </ul>
+  </div>
+
+  <h2>0.8.0</h2>
+  <div class="date">2026-09-17</div>
+  <div class="entry">
+    <h3>Secure licensing backend <span class="badge">security</span></h3>
+    <ul>
+      <li><b>Key rotation (breaking):</b> the Ed25519 signing key had been committed in git history — a new keypair was generated outside the repository; all previously issued licenses void</li>
+      <li><b>License cache hardening:</b> cached payload re-verified against the signed key on every load; tampering fails closed (<span class="mono">CACHE_TAMPERED</span>)</li>
+      <li><b>Trial marker hardening:</b> 30-day trial record carries a SHA-256 integrity tag bound to binary + machine (<span class="mono">TRIAL_TAMPERED</span>)</li>
+      <li><b>Activation server:</b> Cloudflare Worker + D1, server-side Ed25519 verification</li>
+    </ul>
+  </div>
+
+  <h2>0.7.0</h2>
+  <div class="date">2026-08-30</div>
+  <div class="entry">
+    <h3>Enterprise licensing system</h3>
+    <ul>
+      <li><span class="mono">talus-keygen</span> CLI, feature gating, TUI integration, CLI redesign</li>
+    </ul>
+  </div>
+
+  <h2>0.6.0</h2>
+  <div class="date">2026-08-28</div>
+  <div class="entry">
+    <h3>Enterprise maturity program <span class="badge">supply chain</span></h3>
+    <ul>
+      <li><b>Level 1:</b> supply-chain security foundation &middot; <b>Level 2:</b> build provenance &amp; signing &middot; <b>Level 3:</b> security hardening &amp; audit &middot; <b>Level 4:</b> testing &amp; quality gates</li>
+    </ul>
+  </div>
+
+  <h2>Earlier</h2>
+  <div class="date">0.5.0 (2026-08-20) &middot; 0.4.0 (2025-08-01) &middot; 0.3.0 (2025-07-01) &middot; 0.2.0 (2025-03-01) &middot; 0.1.0 (2025-01-01)</div>
+  <div class="entry">
+    <ul>
+      <li>Foundations: eBPF file-event pipeline, behavioural scoring, response layer, TUI — full detail in <span class="mono">CHANGELOG.md</span></li>
+    </ul>
+  </div>
+
+  <div class="cta">
+    <h2>Get Talus</h2>
+    <p><code>pip install talus-process-monitor</code> &middot; <code>cargo install process-monitor</code> &middot; prebuilt binaries on GitHub Releases. The agent is free and MIT forever.</p>
+    <p>This week <span class="mono">WEEK30</span> takes 30% off the <a href="https://polar.sh/checkout/polar_c_rGI15C7IzCs54qElT4NJ5aLj7o3p7Uxdj4P4T1OtUsU">Support Session</a> ($105) and the <a href="https://buy.polar.sh/polar_cl_E577BTilme4dnUFsfbG0aE4qo7QILaugmEjsA0oajKK">Enterprise license</a> ($35).</p>
+  </div>
+</div>
+</body>
+</html>
