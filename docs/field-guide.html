@@ -88,6 +88,7 @@
   <pre><code># Option A: pip installer (pulls the prebuilt release binary, no compiler needed)
 pip install talus-process-monitor
 talus-monitor install                            # downloads the agent from GitHub Releases
+                                                 # (v0.8.1-f: eBPF object is embedded — no .o install step)
 
 # Option B: cargo (builds from crates.io)
 cargo install process-monitor
