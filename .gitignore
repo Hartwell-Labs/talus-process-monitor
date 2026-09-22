@@ -37,3 +37,4 @@ node_modules/
 
 # Wrangler local dev state
 .wrangler/
+pypi/dist/
