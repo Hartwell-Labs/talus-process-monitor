@@ -5,6 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Talus Field Guide — deployment & tuning playbook</title>
 <meta name="description" content="A practical, honest playbook for deploying and tuning Talus eBPF ransomware protection on real Linux servers.">
+<link rel="canonical" href="https://bartoszosiej.github.io/talus-process-monitor/field-guide.html">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "@id": "https://bartoszosiej.github.io/talus-process-monitor/field-guide.html#faq",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Which Talus deployment mode should I start with?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Start in Observe mode (sudo process-monitor monitor) for about a week. It is detection-only with zero risk of a wrong kill, and it teaches you what normal file activity looks like on your hosts. Graduate to Pipeline mode (--json) when you run a log stack, and to EDR mode (--auto-kill) only after tuning, on hosts that hold things worth keeping." }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I install Talus without a compiler?",
+      "acceptedAnswer": { "@type": "Answer", "text": "pip install talus-process-monitor, then run talus-monitor install — the Python installer pulls the prebuilt release binary (~4 MB) from GitHub Releases, no Rust toolchain needed. Alternatively cargo install process-monitor builds from crates.io, or ./build.sh compiles from source." }
+    },
+    {
+      "@type": "Question",
+      "name": "What threshold should I set for Talus alerts?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Talus alerts when a process opens N or more files within 1 second (default --alert-threshold 50). Keep 50 on typical web/API hosts, raise it above the observed rate of legitimate write-heavy jobs like backups (e.g. --alert-threshold 400), or lower it to 20 in paranoid mode for tiny document sets. Run monitor --benchmark 30 to measure what normal looks like on your host first." }
+    },
+    {
+      "@type": "Question",
+      "name": "What Linux kernels does Talus support?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Talus needs eBPF with BTF/CO-RE support, which means recent kernels. Check with ls /sys/kernel/btf/vmlinux — if that file exists, the agent loads. The Docker runbook mounts /sys/kernel/btf explicitly. Old LTS kernels without BTF need a separate plan; there is no kernel module fallback by design." }
+    },
+    {
+      "@type": "Question",
+      "name": "An alert fired — what do I do first?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Do not panic-kill. First identify the process from the alert output, then check whether it is a legitimate write-heavy job (backup, sync, media encoding) that simply crossed the threshold — if so, raise the threshold instead of disabling the agent. If the process is unknown, snapshot-preserve the target directories before any response, then pause or kill. The runbook section of the field guide walks through this decision step by step." }
+    }
+  ]
+}
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :root { --bg:#0a0e1a; --surface:#111827; --surface2:#1a2234; --border:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --orange:#F15A24; --blue:#3b82f6; --green:#10b981; }
@@ -136,6 +171,28 @@ sudo process-monitor monitor --auto-kill \
     <li>eBPF requires BTF/CO-RE support (recent kernels; the Docker runbook mounts <code>/sys/kernel/btf</code> explicitly). Old LTS boxes need a plan.</li>
     <li>One threshold for the whole host: workloads with wildly different IO profiles on one box need either separate hosts or a higher threshold.</li>
   </ul>
+
+  <h2>Frequently asked questions</h2>
+  <details>
+    <summary>Which Talus deployment mode should I start with?</summary>
+    <p>Start in Observe mode (<code>sudo process-monitor monitor</code>) for about a week. It is detection-only with zero risk of a wrong kill, and it teaches you what normal file activity looks like on your hosts. Graduate to Pipeline mode (<code>--json</code>) when you run a log stack, and to EDR mode (<code>--auto-kill</code>) only after tuning, on hosts that hold things worth keeping.</p>
+  </details>
+  <details>
+    <summary>How do I install Talus without a compiler?</summary>
+    <p><code>pip install talus-process-monitor</code>, then run <code>talus-monitor install</code> — the Python installer pulls the prebuilt release binary (~4 MB) from GitHub Releases, no Rust toolchain needed. Alternatively <code>cargo install process-monitor</code> builds from crates.io, or <code>./build.sh</code> compiles from source.</p>
+  </details>
+  <details>
+    <summary>What threshold should I set for Talus alerts?</summary>
+    <p>Talus alerts when a process opens N or more files within 1 second (default <code>--alert-threshold 50</code>). Keep 50 on typical web/API hosts, raise it above the observed rate of legitimate write-heavy jobs like backups (e.g. <code>--alert-threshold 400</code>), or lower it to 20 in paranoid mode for tiny document sets. Run <code>monitor --benchmark 30</code> to measure what normal looks like on your host first.</p>
+  </details>
+  <details>
+    <summary>What Linux kernels does Talus support?</summary>
+    <p>Talus needs eBPF with BTF/CO-RE support, which means recent kernels. Check with <code>ls /sys/kernel/btf/vmlinux</code> — if that file exists, the agent loads. The Docker runbook mounts <code>/sys/kernel/btf</code> explicitly. Old LTS kernels without BTF need a separate plan; there is no kernel module fallback by design.</p>
+  </details>
+  <details>
+    <summary>An alert fired — what do I do first?</summary>
+    <p>Do not panic-kill. First identify the process from the alert output, then check whether it is a legitimate write-heavy job (backup, sync, media encoding) that simply crossed the threshold — if so, raise the threshold instead of disabling the agent. If the process is unknown, snapshot-preserve the target directories before any response, then pause or kill. The runbook section of the field guide walks through this decision step by step.</p>
+  </details>
 
   <div class="cta">
     <h2>Want this done for you?</h2>
