@@ -9,6 +9,8 @@
 
 **Kernel-level ransomware detection in Rust: a sliding-window heuristic over eBPF syscalls — with automated response.**
 
+> If Talus saves you an evening of worry, a ⭐ star helps other admins find it. Practical deployment playbook: [Field Guide](https://bartoszosiej.github.io/talus-process-monitor/field-guide.html)
+
 Talus is not a passive monitor. It is a **detect-and-respond** agent: eBPF tracepoints hook syscalls at the kernel level, a per-PID sliding window scores file-open rates in real time, and the response layer **terminates** the offending process (`SIGKILL`) the moment a verdict fires. Measured on a live desktop: **~280,000 events/s sustained with ~7.6% CPU** through per-CPU perf buffers and zero-copy handoff to the userspace detection engine.
 
 ```bash
