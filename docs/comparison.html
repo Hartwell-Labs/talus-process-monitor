@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Talus vs Falco vs Wazuh vs Tracee — eBPF ransomware detection for Linux</title>
+<meta name="description" content="A practical comparison of eBPF ransomware detection tools for Linux: Talus, Falco, Wazuh, Tracee. Which one fits a small fleet of standalone hosts.">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap');
+  :root { --bg:#0a0e1a; --surface:#111827; --surface2:#1a2234; --border:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --orange:#F15A24; --blue:#3b82f6; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px; }
+  h1 { font-size: 34px; font-weight: 800; letter-spacing: -1px; line-height: 1.2; margin-bottom: 8px; }
+  h1 span { color: var(--orange); }
+  .sub { color: var(--muted); font-size: 15px; margin-bottom: 32px; }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: var(--blue); font-weight: 700; }
+  p { margin-bottom: 14px; font-size: 15px; }
+  code, .mono { font-family:'JetBrains Mono',monospace; font-size: 13px; }
+  table { width:100%; border-collapse: collapse; margin: 18px 0 24px; font-size: 13.5px; }
+  th, td { padding: 10px 12px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: var(--surface2); color: var(--text); font-weight: 600; }
+  td { background: var(--surface); color: var(--muted); }
+  td b { color: var(--text); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+  .card h3 { font-size: 15px; margin-bottom: 6px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .cta { margin-top: 36px; padding: 22px; border: 1px solid var(--orange); border-radius: 10px; background: linear-gradient(135deg, #F15A2411, transparent); }
+  .cta h2 { color: var(--orange); margin-top: 0; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .back { display:inline-block; margin-bottom: 28px; color: var(--muted); font-size: 13px; }
+  ul { margin: 0 0 14px 20px; color: var(--muted); font-size: 14px; }
+  li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">← talus-process-monitor</a>
+  <h1>Choosing a ransomware tripwire for Linux:<br><span>Talus vs Falco vs Wazuh vs Tracee</span></h1>
+  <p class="sub">A practical comparison — written by the author of one of the contenders, as fairly as that allows.</p>
+
+  <p>If you run Linux servers for a small organisation — a media outlet, an NGO, a SaaS side project — you have probably asked: which tool do I actually deploy to survive a wipe-and-extort attack?</p>
+  <p>The honest answer is annoying: it depends on how many hosts you run and who maintains them.</p>
+
+  <h2>The contenders</h2>
+  <div class="card"><h3>Falco (CNCF)</h3><p>The established runtime threat detection engine. Rule-based detection over syscall streams, huge rule ecosystem. Designed for — and shines on — Kubernetes fleets and large estates. You deploy it, feed events to your alerting stack, and maintain it.</p></div>
+  <div class="card"><h3>Wazuh</h3><p>A full XDR/SIEM platform: agents everywhere, a server, dashboards, compliance reports. If your goal is a security program with paperwork, it is a serious tool. If your goal is "one box must not get shredded", it is a lot of infrastructure for that job.</p></div>
+  <div class="card"><h3>Tracee (Aqua)</h3><p>Excellent runtime security and forensics built on eBPF. Powerful event capture and policy engine — aimed at cloud-native estates and security engineers who will tune it.</p></div>
+  <div class="card"><h3>Talus (mine)</h3><p>A single static Rust binary that watches file events through eBPF and scores behaviour for wipe-and-extort patterns: fast rewrites, rename chains, entropy spikes. Above a threshold it can pause or kill the offending process before archives die. No kernel modules, no server, no telemetry leaving the host. MIT.</p></div>
+
+  <h2>What actually differs</h2>
+  <table>
+    <tr><th></th><th>Falco</th><th>Wazuh</th><th>Tracee</th><th>Talus</th></tr>
+    <tr><td><b>Deployment</b></td><td>driver + rules + alerting</td><td>agents + server + dashboard</td><td>driver + policies</td><td>one binary</td></tr>
+    <tr><td><b>Sweet spot</b></td><td>k8s fleets</td><td>compliance programs</td><td>forensic engineers</td><td>standalone hosts</td></tr>
+    <tr><td><b>Ransomware response</b></td><td>detection; response is DIY</td><td>FIM-centric</td><td>detection</td><td>pause/kill playbooks built in</td></tr>
+    <tr><td><b>Footprint on 1 vCPU</b></td><td>noticeable</td><td>heavy</td><td>noticeable</td><td>light</td></tr>
+    <tr><td><b>License</b></td><td>Apache-2.0</td><td>GPLv2</td><td>Apache-2.0</td><td>MIT</td></tr>
+  </table>
+  <p>The pattern: the big three are built for people whose job is security. Talus is built for people whose job is something else, and whose servers just need to survive.</p>
+
+  <h2>Where I would be honest about Talus</h2>
+  <ul>
+    <li>It is young. An independent review by LinuxSecurity is being published this week — exactly the scrutiny a young tool needs.</li>
+    <li>If you already run a SOC with tuned Falco rules, you do not need Talus for detection — though a host-level kill switch is a different trade-off than an alert.</li>
+    <li>Behavioural scoring needs tuning for write-heavy legitimate workloads (backups, media encoding). That is what thresholds are for.</li>
+  </ul>
+
+  <h2>Numbers</h2>
+  <p>In my benchmarks: ~280k file events/s observed at under 8% CPU on a modest VM, zero false positives across a simulated ransomware attack suite. All public and reproducible from the <a href="https://github.com/BartoszOsiej/talus-process-monitor">repository</a>.</p>
+
+  <h2>When to pick what</h2>
+  <p><b>Falco / Tracee</b> — you operate a fleet and have a platform team; detection-as-alerts fits your workflow.<br>
+  <b>Wazuh</b> — an auditor asked for XDR and you have the budget and hands to run it.<br>
+  <b>Talus</b> — you run one to twenty Linux machines that hold things worth keeping, and nobody on the team is a security engineer. Deploy in minutes, tune once, sleep better.</p>
+
+  <div class="cta">
+    <h2>This week only — WEEK30</h2>
+    <p>Until Saturday (Sep 27) the launch code <b class="mono">WEEK30</b> takes 30% off both paid options:</p>
+    <ul>
+      <li><a href="https://polar.sh/checkout/polar_c_rGI15C7IzCs54qElT4NJ5aLj7o3p7Uxdj4P4T1OtUsU">Support Session</a> — 1:1 deploy + threshold tuning, <b>$105</b> instead of $150</li>
+      <li><a href="https://buy.polar.sh/polar_cl_E577BTilme4dnUFsfbG0aE4qo7QILaugmEjsA0oajKK">Enterprise license</a> — auto-kill, web dashboard, Kafka/ClickHouse export, <b>$35</b> instead of $50</li>
+    </ul>
+    <p>The agent itself is free and MIT forever.</p>
+  </div>
+</div>
+</body>
+</html>
