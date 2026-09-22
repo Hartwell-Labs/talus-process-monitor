@@ -35,15 +35,15 @@ hex = "0.4"
 urlencoding = "2"
 
 # FrankenTUI (path dependencies — full kernel)
-ftui = { path = "../frankentui/ftui" }
-ftui-core = { path = "../frankentui/ftui-core" }
-ftui-render = { path = "../frankentui/ftui-render" }
-ftui-runtime = { path = "../frankentui/ftui-runtime", features = ["crossterm-compat"] }
-ftui-layout = { path = "../frankentui/ftui-layout" }
-ftui-style = { path = "../frankentui/ftui-style" }
-ftui-text = { path = "../frankentui/ftui-text" }
-ftui-widgets = { path = "../frankentui/ftui-widgets" }
-ftui-extras = { path = "../frankentui/ftui-extras", features = ["charts", "canvas", "text-effects"] }
+ftui = { version = "0.6" }
+ftui-core = { version = "0.6" }
+ftui-render = { version = "0.6" }
+ftui-runtime = { version = "0.6", features = ["crossterm-compat"] }
+ftui-layout = { version = "0.6" }
+ftui-style = { version = "0.6" }
+ftui-text = { version = "0.6" }
+ftui-widgets = { version = "0.6" }
+ftui-extras = { version = "0.6", features = ["charts", "canvas", "text-effects"] }
 
 # Web server (optional, enabled with --features web)
 axum = { version = "0.8.9", features = ["ws"], optional = true }
