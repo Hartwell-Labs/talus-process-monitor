@@ -236,8 +236,24 @@ impl Monitor {
             bail!("must be run as root: loading eBPF programs requires CAP_BPF / CAP_SYS_ADMIN");
         }
 
-        eprintln!("[talus] loading eBPF object: {}", bpf_path.display());
-        let mut bpf = Ebpf::load_file(bpf_path).context("failed to load eBPF program")?;
+        // Prefer the eBPF object embedded in the binary (single-file deployment,
+        // no separate .o install step); fall back to an on-disk object so a
+        // locally rebuilt eBPF program can be tested without recompiling the agent.
+        const EMBEDDED_BPF: &[u8] = include_bytes!("bpf/process_monitor_ebpf.o");
+        let mut bpf = match Ebpf::load(EMBEDDED_BPF) {
+            Ok(bpf) => {
+                eprintln!("[talus] eBPF object: embedded ({} bytes)", EMBEDDED_BPF.len());
+                bpf
+            }
+            Err(embedded_err) => {
+                eprintln!(
+                    "[talus] embedded eBPF object failed to load ({}); trying file: {}",
+                    embedded_err,
+                    bpf_path.display()
+                );
+                Ebpf::load_file(bpf_path).context("failed to load eBPF program (embedded and file)")?
+            }
+        };
         eprintln!(
             "[talus] object parsed OK; programs: {:?}",
             bpf.programs().map(|(n, _)| n).collect::<Vec<_>>()

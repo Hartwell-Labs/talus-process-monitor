@@ -1,7 +1,7 @@
 [package]
 repository = "https://github.com/BartoszOsiej/talus-process-monitor"
 name = "process-monitor"
-version = "0.8.0"
+version = "0.8.1-f"
 edition = "2021"
 description = "eBPF-based real-time process and file operation monitor with TUI"
 license = "MIT"
