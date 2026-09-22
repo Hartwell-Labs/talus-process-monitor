@@ -50,7 +50,15 @@
   <div class="warn"><b>Rule of thumb:</b> never start in EDR mode. Tune in Observe, graduate to EDR. A wrong kill on a backup job is worse than a slow alert.</div>
 
   <h2>2. Install and sanity-check in five minutes</h2>
-  <pre><code>git clone https://github.com/BartoszOsiej/talus-process-monitor.git
+  <pre><code># Option A: pip installer (pulls the prebuilt release binary, no compiler needed)
+pip install talus-process-monitor
+talus-monitor install                            # downloads the agent from GitHub Releases
+
+# Option B: cargo (builds from crates.io)
+cargo install process-monitor
+
+# Option C: build from source
+git clone https://github.com/BartoszOsiej/talus-process-monitor.git
 cd talus-process-monitor &amp;&amp; ./build.sh          # TUI variant, ~1.7MB
 # or: ./build.sh --web                          # + REST API, WebSocket, Prometheus (Enterprise)
 
