@@ -192,7 +192,11 @@ jobs:
       # exit 13 = findings found; the single medium (use-trusted-publishing in
       # publish-pypi.yml) is tracked as a TODO until the PyPI trusted publisher
       # is configured — do not fail the whole pipeline on it.
-      - run: pip install zizmor && zizmor . --no-exit-codes || true
+      - run: |
+          pip install zizmor
+          if ! zizmor . --no-exit-codes; then
+            echo "::warning::zizmor reported findings (tracked TODO: trusted publishing)"
+          fi
 
   actionlint:
     permissions:
