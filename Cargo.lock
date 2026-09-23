@@ -4189,7 +4189,7 @@ dependencies = [
 
 [[package]]
 name = "process-monitor"
-version = "0.8.1-f"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "axum",
