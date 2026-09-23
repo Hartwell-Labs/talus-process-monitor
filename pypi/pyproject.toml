@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "talus-process-monitor"
-version = "0.8.1.post2"
+version = "0.8.2"
 description = "Talus — eBPF ransomware detection & response for Linux (installer for the prebuilt agent binary)"
 readme = "README-pypi.md"
 requires-python = ">=3.8"

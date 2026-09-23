@@ -4,6 +4,13 @@ All notable changes to talus-process-monitor will be documented in this file.
 
 ## [Unreleased]
 
+### 0.8.2 (2026-09-23): unified versioning + fresh PyPI release
+- Version unified across Cargo, PyPI package and git tags: **0.8.2** (the old
+  `0.8.1-f` / `0.8.1.post2` split is gone — PEP 440 friendly from now on)
+- PyPI package rebuilt from the current main; installer + TUI verified
+- everything from 0.8.1-f included: embedded eBPF object (23.5 KB) for a true
+  single-file deploy, per-CPU perf buffers, MeMLP online learning engine
+
 ### 0.8.1-f (2026-09-22): embedded eBPF object — true single-file deploy
 - Agent binary embeds the compiled eBPF object (23.5 KB): download → run, no ./build.sh needed
 - resolve_bpf_path returns <embedded> unless --bpf PATH is given; on-disk object still works as override
