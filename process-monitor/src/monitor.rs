@@ -39,6 +39,8 @@ pub struct ProcessEvent {
     pub event_type: u8,
     pub pid: u32,
     pub uid: u32,
+    /// Kernel monotonic timestamp (ns) at tracepoint entry — see eBPF side.
+    pub ktime_ns: u64,
     pub comm: [u8; EVENT_COMM_LEN],
     pub filename: [u8; EVENT_FILENAME_LEN],
     pub argv: [u8; EVENT_ARGV_LEN],
@@ -163,11 +165,87 @@ pub struct ResponseAction {
 }
 
 enum Msg {
-    Event(RecordedEvent),
+    /// Recorded event + delivery latency in nanoseconds
+    /// (kernel ktime at tracepoint entry → userspace receive time).
+    Event(RecordedEvent, u64),
     Lost(u64),
 }
 
 // ── Monitor core ──────────────────────────────────────────────────────────
+
+/// Kernel→userspace delivery-latency histogram.
+///
+/// Each event carries `ktime_ns` stamped inside the kernel (tracepoint
+/// entry). The perf-buffer reader thread subtracts it from its own
+/// monotonic clock on receive — the difference is the one-way
+/// kernel→userspace delivery latency. Bounded reservoir: keeps the last
+/// `CAP` samples (microsecond resolution), computed percentiles stay
+/// exact for the kept window.
+#[derive(Debug, Default)]
+pub struct LatencyStats {
+    samples_us: Vec<u64>,
+    count: u64,
+    max_us: u64,
+}
+
+impl LatencyStats {
+    const CAP: usize = 65_536;
+
+    #[inline]
+    fn record(&mut self, latency_ns: u64) {
+        let us = (latency_ns / 1_000).min(u64::MAX / 2) as usize;
+        self.count += 1;
+        if us as u64 > self.max_us {
+            self.max_us = us as u64;
+        }
+        // Reservoir: once full, replace a pseudorandom-ish slot (cheap LCG
+        // keyed by count) so the window stays representative without memory
+        // growth. Percentiles over the kept window are exact.
+        if self.samples_us.len() < Self::CAP {
+            self.samples_us.push(us as u64);
+        } else {
+            let slot = (self.count as usize * 2654435761) % Self::CAP;
+            self.samples_us[slot] = us as u64;
+        }
+    }
+
+    fn percentile(&self, p: f64) -> u64 {
+        if self.samples_us.is_empty() {
+            return 0;
+        }
+        let mut sorted = self.samples_us.clone();
+        sorted.sort_unstable();
+        let idx = ((sorted.len() as f64) * p).min((sorted.len() - 1) as f64) as usize;
+        sorted[idx]
+    }
+
+    /// (count, p50_us, p95_us, p99_us, max_us)
+    pub fn summary(&self) -> (u64, u64, u64, u64, u64) {
+        (
+            self.count,
+            self.percentile(0.50),
+            self.percentile(0.95),
+            self.percentile(0.99),
+            self.max_us,
+        )
+    }
+}
+
+/// CLOCK_MONOTONIC as nanoseconds — same clock the eBPF side stamps with
+/// (`bpf_ktime_get_ns`), so subtraction is meaningful.
+#[inline]
+fn now_ns() -> u64 {
+    // SAFETY: clock_gettime with a valid clockid and aligned timespec;
+    // cannot fail for CLOCK_MONOTONIC.
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    unsafe {
+        libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+    }
+    (ts.tv_sec as u64) * 1_000_000_000 + ts.tv_nsec as u64
+}
 
 pub struct Monitor {
     rx: Receiver<Msg>,
@@ -191,6 +269,8 @@ pub struct Monitor {
     pub total_events: u64,
     pub total_lost: u64,
     pub started: Instant,
+    /// Kernel→userspace delivery-latency histogram (nanoseconds samples).
+    pub latency: LatencyStats,
     /// MeMLP neural detection engine (None unless `--memlp` is passed).
     memlp: Option<crate::memlp::MeMLP>,
     /// Per-PID behavioural feature windows feeding the MeMLP engine.
@@ -242,7 +322,10 @@ impl Monitor {
         const EMBEDDED_BPF: &[u8] = include_bytes!("bpf/process_monitor_ebpf.o");
         let mut bpf = match Ebpf::load(EMBEDDED_BPF) {
             Ok(bpf) => {
-                eprintln!("[talus] eBPF object: embedded ({} bytes)", EMBEDDED_BPF.len());
+                eprintln!(
+                    "[talus] eBPF object: embedded ({} bytes)",
+                    EMBEDDED_BPF.len()
+                );
                 bpf
             }
             Err(embedded_err) => {
@@ -251,7 +334,8 @@ impl Monitor {
                     embedded_err,
                     bpf_path.display()
                 );
-                Ebpf::load_file(bpf_path).context("failed to load eBPF program (embedded and file)")?
+                Ebpf::load_file(bpf_path)
+                    .context("failed to load eBPF program (embedded and file)")?
             }
         };
         eprintln!(
@@ -352,6 +436,7 @@ impl Monitor {
             tick_start: now,
             total_events: 0,
             total_lost: 0,
+            latency: LatencyStats::default(),
             started: now,
             memlp: None,
             pid_features: HashMap::new(),
@@ -392,8 +477,9 @@ impl Monitor {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Lost(n) => self.total_lost += n,
-                Msg::Event(ev) => {
+                Msg::Event(ev, latency_ns) => {
                     self.total_events += 1;
+                    self.record_latency(latency_ns);
                     self.handle_event(&ev, &mut outputs);
                 }
             }
@@ -441,6 +527,11 @@ impl Monitor {
             }
         }
         outputs
+    }
+
+    #[inline]
+    fn record_latency(&mut self, latency_ns: u64) {
+        self.latency.record(latency_ns);
     }
 
     pub(crate) fn handle_event(&mut self, ev: &RecordedEvent, outputs: &mut Vec<Output>) {
@@ -845,7 +936,10 @@ fn spawn_reader(
                                                 head.as_ptr() as *const ProcessEvent
                                             )
                                         };
-                                        let _ = tx.send(Msg::Event(to_recorded(&evt)));
+                                        let _ = tx.send(Msg::Event(
+                                            to_recorded(&evt),
+                                            now_ns().saturating_sub(evt.ktime_ns),
+                                        ));
                                     } else {
                                         // Wrapped: copy into a temporary buffer
                                         let mut buf = vec![0u8; total_len];
@@ -856,7 +950,10 @@ fn spawn_reader(
                                                 buf.as_ptr() as *const ProcessEvent
                                             )
                                         };
-                                        let _ = tx.send(Msg::Event(to_recorded(&evt)));
+                                        let _ = tx.send(Msg::Event(
+                                            to_recorded(&evt),
+                                            now_ns().saturating_sub(evt.ktime_ns),
+                                        ));
                                     }
                                 }
                             }
@@ -1074,6 +1171,7 @@ impl Monitor {
             tick_start: now,
             total_events: 0,
             total_lost: 0,
+            latency: LatencyStats::default(),
             started: now,
             memlp: None,
             pid_features: HashMap::new(),
@@ -1118,6 +1216,7 @@ mod tests {
             event_type: 1,
             pid: 7,
             uid: 1000,
+            ktime_ns: 0,
             comm: [0u8; EVENT_COMM_LEN],
             filename: [0u8; EVENT_FILENAME_LEN],
             argv: [0u8; EVENT_ARGV_LEN],
@@ -1126,6 +1225,32 @@ mod tests {
         ev.filename[..11].copy_from_slice(b"/etc/passwd");
         assert_eq!(ev.comm_str(), "bash");
         assert_eq!(ev.filename_str(), "/etc/passwd");
+    }
+
+    #[test]
+    fn latency_stats_percentiles_and_reservoir_cap() {
+        let mut ls = LatencyStats::default();
+        // 100 samples 1..=100 µs: p50 = 50, p95 = 95, max = 100.
+        for us in 1..=100u64 {
+            ls.record(us * 1_000);
+        }
+        let (count, p50, p95, p99, max) = ls.summary();
+        // nearest-rank over 0-indexed sorted samples: p=f → sorted[ceil-ish(f*n)]
+        assert_eq!(count, 100);
+        assert_eq!(p50, 51); // sorted[50] of values 1..=100
+        assert_eq!(p95, 96); // sorted[95]
+        assert_eq!(p99, 100); // sorted[99]
+        assert_eq!(max, 100);
+
+        // Reservoir cap: record far past CAP, count keeps growing, no panic,
+        // and percentiles stay within the recorded range.
+        for i in 0..(LatencyStats::CAP as u64 + 1_000) {
+            ls.record((i % 5_000 + 1) * 1_000);
+        }
+        let (count2, p50b, p95b, _, maxb) = ls.summary();
+        assert!(count2 > LatencyStats::CAP as u64);
+        assert!(p50b <= p95b && p95b <= maxb);
+        assert!(maxb >= 1);
     }
 
     #[test]

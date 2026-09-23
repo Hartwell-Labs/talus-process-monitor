@@ -11,7 +11,7 @@ use core::slice;
 use aya_ebpf::{
     cty::c_char,
     helpers::{
-        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid,
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns,
         bpf_probe_read_user, bpf_probe_read_user_str_bytes,
     },
     macros::{map, tracepoint},
@@ -31,6 +31,10 @@ pub struct ProcessEvent {
     pub event_type: u8,
     pub pid: u32,
     pub uid: u32,
+    /// Kernel monotonic timestamp (ns) taken at tracepoint entry.
+    /// Userspace subtracts it from its own ktime to measure
+    /// kernel→userspace delivery latency.
+    pub ktime_ns: u64,
     pub comm: [u8; EVENT_COMM_LEN],
     pub filename: [u8; EVENT_FILENAME_LEN],
     pub argv: [u8; EVENT_ARGV_LEN],
@@ -69,6 +73,7 @@ fn emit_event(ctx: &TracePointContext, event_type: u8, filename_arg: u32) -> u32
     event.event_type = event_type;
     event.pid = pid;
     event.uid = uid;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
 
     if let Ok(comm) = bpf_get_current_comm() {
         let n = comm.len().min(EVENT_COMM_LEN - 1);

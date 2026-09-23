@@ -6,7 +6,7 @@
 
 use aya_ebpf::{
     helpers::{
-        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid,
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns,
         bpf_probe_read_user,
     },
     macros::tracepoint,
@@ -140,6 +140,7 @@ pub fn sys_enter_connect(ctx: TracePointContext) -> u32 {
     let uid = bpf_get_current_uid_gid() as u32;
     let mut event = unsafe { zero_event() };
     event.event_type = EVENT_CONNECT;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
     unsafe {
@@ -158,6 +159,7 @@ pub fn sys_enter_accept(ctx: TracePointContext) -> u32 {
     let uid = bpf_get_current_uid_gid() as u32;
     let mut event = unsafe { zero_event() };
     event.event_type = EVENT_ACCEPT;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
     unsafe {
@@ -176,6 +178,7 @@ pub fn sys_enter_sendto(ctx: TracePointContext) -> u32 {
     let uid = bpf_get_current_uid_gid() as u32;
     let mut event = unsafe { zero_event() };
     event.event_type = EVENT_SENDTO;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
     unsafe {
@@ -194,6 +197,7 @@ pub fn sys_enter_recvfrom(ctx: TracePointContext) -> u32 {
     let uid = bpf_get_current_uid_gid() as u32;
     let mut event = unsafe { zero_event() };
     event.event_type = EVENT_RECVFROM;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
     unsafe {

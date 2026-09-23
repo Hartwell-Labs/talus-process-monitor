@@ -181,7 +181,9 @@ fn main() -> Result<()> {
     // before any TLS code runs (no-op for the TUI-only build).
     #[cfg(feature = "web")]
     {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
     }
 
     let cli = Cli::parse();
@@ -909,6 +911,18 @@ fn run_benchmark(monitor: &mut Monitor, secs: u64) -> Result<()> {
     println!("  Open events:       {total_opens}");
     println!("  Network events:    {total_net}");
     println!("  Other events:      {total_other}");
+    println!();
+    let (lcount, p50, p95, p99, lmax) = monitor.latency.summary();
+    println!("  ── Delivery latency (kernel → userspace) ──────────");
+    if lcount > 0 {
+        println!("  Samples:           {lcount}");
+        println!("  p50:               {p50:>8} µs");
+        println!("  p95:               {p95:>8} µs");
+        println!("  p99:               {p99:>8} µs");
+        println!("  Max:               {lmax:>8} µs");
+    } else {
+        println!("  (no latency samples collected)");
+    }
     println!(
         "  Alerts:            {}",
         monitor.total_events - total_events + total_events

@@ -12,7 +12,7 @@ use core::slice;
 use aya_ebpf::{
     cty::c_char,
     helpers::{
-        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid,
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns,
         bpf_probe_read_user_str_bytes,
     },
     macros::{map, tracepoint},
@@ -30,6 +30,9 @@ pub struct FsEvent {
     pub event_type: u8,
     pub pid: u32,
     pub uid: u32,
+    /// Kernel monotonic timestamp (ns) — layout-compatible with
+    /// `super::ProcessEvent::ktime_ns` (same clock, same position).
+    pub ktime_ns: u64,
     pub comm: [u8; 16],
     pub filename: [u8; 64],
     pub argv: [u8; 128],
@@ -104,6 +107,7 @@ pub fn sys_enter_mkdir(ctx: TracePointContext) -> u32 {
 
     let mut event = unsafe { zero_fs_event() };
     event.event_type = EVENT_MKDIR;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
 
@@ -143,6 +147,7 @@ pub fn sys_enter_unlinkat(ctx: TracePointContext) -> u32 {
 
     let mut event = unsafe { zero_fs_event() };
     event.event_type = EVENT_UNLINK;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
 
@@ -183,6 +188,7 @@ pub fn sys_enter_kill(ctx: TracePointContext) -> u32 {
 
     let mut event = unsafe { zero_fs_event() };
     event.event_type = EVENT_KILL;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
 
@@ -256,6 +262,7 @@ pub fn sys_enter_fchmodat(ctx: TracePointContext) -> u32 {
 
     let mut event = unsafe { zero_fs_event() };
     event.event_type = EVENT_CHMOD;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
     event.pid = pid;
     event.uid = uid;
 
