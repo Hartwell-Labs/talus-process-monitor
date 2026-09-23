@@ -23,6 +23,9 @@ jobs:
           python -m build
           python -m twine check dist/*
       - name: Publish to PyPI
+        # zizmor: ignore[use-trusted-publishing]
+        # TODO: migrate to pypa/gh-action-pypi-publish (OIDC trusted publishing)
+        # once the trusted publisher is configured on pypi.org for this repo.
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_KEY }}
