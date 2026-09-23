@@ -176,6 +176,14 @@ struct MonitorArgs {
 }
 
 fn main() -> Result<()> {
+    // FIX(web): rustls 0.23 panics when both crypto providers (aws-lc-rs and
+    // ring) are enabled via feature unification. Install `ring` explicitly
+    // before any TLS code runs (no-op for the TUI-only build).
+    #[cfg(feature = "web")]
+    {
+        rustls::crypto::ring::default_provider().install_default().ok();
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
