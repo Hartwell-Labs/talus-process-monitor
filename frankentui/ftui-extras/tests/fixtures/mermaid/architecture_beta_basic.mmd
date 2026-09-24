@@ -1,8 +1,0 @@
-%% fixture_id: architecture_beta_basic
-%% purpose: basic architecture-beta with services and edges
-architecture-beta
-  service api(cloud)[API]
-  service db(database)[Database]
-  service disk(disk)[Storage]
-  api:R --> L:db
-  db:R --> L:disk

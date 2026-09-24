@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 8d9b6fc628337d5a23ab1ec556ff36780e3d80a83833325e181fa296104a5340 # shrinks to (n, edges, dir) = (3, [(1, 0), (0, 2), (0, 1)], TB)
-cc 8d782a168e5d58586121c19ab3bc7aa71eebc7e0cd102ce391c997967eaabf31 # shrinks to (n, edges, dir) = (3, [(1, 2), (0, 2)], TB)
-cc d12513f77f5c50fe456f31da5f3f839f498a1a9b5218354b3ced13c5c901325a # shrinks to (n, edges, dir) = (4, [(2, 3), (1, 3), (1, 3), (1, 2)], LR)

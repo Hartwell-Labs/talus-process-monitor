@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://bartoszosiej.github.io/talus-process-monitor/sitemap.xml

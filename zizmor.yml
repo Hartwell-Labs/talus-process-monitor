@@ -1,7 +1,0 @@
-rules:
-  superfluous-actions:
-    disable: true
-  dependabot-cooldown:
-    disable: true
-  unpinned-uses:
-    disable: true

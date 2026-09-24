@@ -1,9 +1,0 @@
----
-blank_issues_enabled: false
-contact_links:
-  - name: Docs
-    url: https://github.com/BartoszOsiej
-    about: Official documentation
-  - name: Security
-    url: https://github.com/BartoszOsiej/talus-process-monitor/security/advisories/new
-    about: Private security reports (see SECURITY.md)

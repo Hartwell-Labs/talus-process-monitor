@@ -1,9 +1,0 @@
-%% fixture_id: c4_context_basic
-%% purpose: basic C4Context with persons and systems
-C4Context
-  title System Context diagram
-  Person(customer, "Customer", "A user of the system")
-  System(webapp, "Web Application", "The main application")
-  System_Ext(email, "Email System", "Sends emails")
-  Rel(customer, webapp, "Uses")
-  Rel(webapp, email, "Sends emails using")

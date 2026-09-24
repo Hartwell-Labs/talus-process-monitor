@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src 'self' data:">
+<title>talus-process-monitor — Hartwell Labs</title>
+<meta name="description" content="Behavioral ransomware detection and automated response for Linux. eBPF-based tracing at ~280k events per second, sliding-window verdicts, automated kill response — with seccomp and Landlock self-sandboxing and a single static binary. No kernel modules.">
+<style>
+:root{--ink:#101223;--bg:#ffffff;--accent:#4f46e5;--accent-soft:#eef0ff;--muted:#6b7280;--line:#e7e8f2;--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
+.container{max-width:1080px;margin:0 auto;padding:0 24px}
+header{border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);z-index:10}
+.header-in{display:flex;align-items:center;justify-content:space-between;height:60px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;text-decoration:none;color:var(--ink);letter-spacing:-.02em}
+nav.main{display:flex;gap:26px}
+nav.main a{color:var(--muted);text-decoration:none;font-size:14.5px;font-weight:500}
+nav.main a:hover,nav.main a[aria-current="page"]{color:var(--accent)}
+.header-cta{font-size:14px;font-weight:600;color:var(--accent);text-decoration:none;border:1px solid var(--line);padding:7px 14px;border-radius:8px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+h1{font-size:clamp(30px,5vw,44px);letter-spacing:-.03em;line-height:1.12}
+h1 .dim{color:var(--muted)}
+.lede{margin-top:16px;font-size:17px;color:var(--muted);max-width:720px}
+.hero{padding:72px 0 40px}
+.badges{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+.badge{font-family:var(--mono);font-size:12.5px;border:1px solid var(--line);border-radius:999px;padding:5px 13px;color:var(--ink);background:var(--accent-soft)}
+section{padding:48px 0}
+.section-head h2{font-size:26px;letter-spacing:-.02em}
+.section-head p{color:var(--muted);margin-top:8px;max-width:720px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin-top:26px}
+.card{border:1px solid var(--line);border-radius:14px;padding:22px}
+.card h4{font-size:15.5px;letter-spacing:-.01em}
+.card p{margin-top:8px;font-size:14.5px;color:var(--muted)}
+.cmd{display:flex;align-items:center;gap:12px;background:#0f1222;color:#e6e8ff;border-radius:10px;padding:13px 16px;margin-top:12px;font-family:var(--mono);font-size:13.5px;overflow-x:auto}
+.cmd .cp{margin-left:auto;background:transparent;color:#a5b4fc;border:1px solid #2c2f4d;border-radius:6px;font-family:var(--mono);font-size:11.5px;padding:4px 10px;cursor:pointer}
+.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+.btn{padding:11px 20px;border-radius:9px;font-size:14.5px;font-weight:600;text-decoration:none}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-secondary{border:1px solid var(--line);color:var(--ink)}
+footer{border-top:1px solid var(--line);padding:36px 0;margin-top:24px}
+.f-in{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:13.5px}
+.f-in a{color:var(--muted)}
+@media(max-width:640px){nav.main{display:none}}
+</style>
+</head>
+<body>
+<header><div class="container header-in">
+<a class="logo" href="/">
+<svg width="22" height="22" viewBox="0 0 46 46" aria-hidden="true"><path d="M23,2 L42,13 L42,33 L23,44 L4,33 L4,13 Z" fill="none" stroke="#4f46e5" stroke-width="3.4" stroke-linejoin="round"/><polyline points="13,26 19,26 22,17 26,29 29,24 33,24" fill="none" stroke="#4f46e5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+Hartwell Labs</a>
+<nav class="main"><a href="/products">Products</a><a href="/catalog">Catalog</a><a href="/docs">Docs</a><a href="/security">Security</a><a href="/company">Company</a></nav>
+<a class="header-cta" href="https://github.com/Hartwell-Labs/talus-process-monitor">Source ↗</a>
+</div></header>
+
+<div class="container hero">
+<div class="eyebrow">Security infrastructure</div>
+<h1>talus-process-monitor.<br><span class="dim">Ransomware detection that acts, not alerts.</span></h1>
+<p class="lede">Behavioral ransomware detection and automated response for Linux. eBPF-based tracing at ~280k events per second, sliding-window verdicts, automated kill response — with seccomp and Landlock self-sandboxing and a single static binary. No kernel modules.</p>
+<div class="badges"><span class="badge">v0.8.2</span><span class="badge">Rust · eBPF</span><span class="badge">MIT</span><span class="badge">SBOM (SPDX)</span><span class="badge">build attestation</span></div>
+<div class="actions">
+<a class="btn btn-primary" href="https://github.com/Hartwell-Labs/talus-process-monitor">View source ↗</a>
+<a class="btn btn-secondary" href="https://github.com/Hartwell-Labs/talus-process-monitor/releases">Releases</a>
+<a class="btn btn-secondary" href="/catalog">Full catalog</a>
+</div>
+</div>
+
+<section style="padding-top:8px"><div class="container">
+<div class="cmd"><code>pip install talus-process-monitor</code><button class="cp" data-code="pip install talus-process-monitor">COPY</button></div><div class="cmd"><code>docker pull ghcr.io/hartwell-labs/talus-process-monitor:latest</code><button class="cp" data-code="docker pull ghcr.io/hartwell-labs/talus-process-monitor:latest">COPY</button></div>
+</div></section>
+
+<section><div class="container">
+<div class="section-head"><h2>Engineering, not promises.</h2><p>Every capability below ships in the open-source core — MIT licensed, CI on every push.</p></div>
+<div class="grid">
+<div class="card"><h4>Behavioral verdicts</h4><p>Sliding-window scoring of file-operation patterns — entropy jumps, rename storms, mount probing — instead of static signature lists.</p></div><div class="card"><h4>~280k events/s</h4><p>Ring-buffer eBPF pipeline sized for production fleets; watchdog-side aggregation keeps host overhead negligible.</p></div><div class="card"><h4>Automated response</h4><p>Confident verdicts trigger immediate process kill and response hooks — containment inside the detection window.</p></div><div class="card"><h4>Self-sandboxed</h4><p>The agent confines itself with seccomp and Landlock before touching the event stream. The sensor is not a new attack surface.</p></div><div class="card"><h4>One static binary</h4><p>No kernel modules, no DKMS, no agent framework. Ship it with systemd, a container, or a USB stick.</p></div><div class="card"><h4>Supply-chain graded</h4><p>Signed releases, SBOM (SPDX), build provenance and OpenSSF Scorecard on the flagship repository.</p></div>
+</div>
+</div></section>
+
+<footer><div class="container f-in">
+<span>© 2026 Hartwell Labs. Part of the <a href="/">Hartwell Labs</a> open-source toolset — <a href="/security">security &amp; disclosure</a>.</span>
+<span>Szczecin, Poland · MIT</span>
+</div></footer>
+<script>
+document.querySelectorAll('.cp').forEach(function(b){b.addEventListener('click',function(){navigator.clipboard.writeText(b.dataset.code);b.textContent='COPIED';setTimeout(function(){b.textContent='COPY'},1200);});});
+</script>
+</body>
+</html>

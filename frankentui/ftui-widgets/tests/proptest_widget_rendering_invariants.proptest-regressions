@@ -1,8 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc c59204f2fb060b9d35c677188aa3bd83c3dcc1440211f88fb711dcff989d547a # shrinks to item_count = 1, selected = 1, w = 5, h = 3
-cc eec11d11f0d71e57dc8839c28fc1984835f9a1beee0c9b9b191bcf989ae36a45 # shrinks to area = Rect { x: 0, y: 0, width: 0, height: 0 }, borders = Borders(TOP | RIGHT | BOTTOM)

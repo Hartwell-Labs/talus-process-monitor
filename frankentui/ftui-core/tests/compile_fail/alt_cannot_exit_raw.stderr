@@ -1,8 +1,0 @@
-error[E0599]: no method named `exit_raw` found for struct `ftui_core::mode_typestate::TerminalMode<3>` in the current scope
- --> tests/compile_fail/alt_cannot_exit_raw.rs:6:9
-  |
-6 |     alt.exit_raw();
-  |         ^^^^^^^^ method not found in `ftui_core::mode_typestate::TerminalMode<3>`
-  |
-  = note: the method was found for
-          - `ftui_core::mode_typestate::TerminalMode<ftui_core::::mode_typestate::{impl#6}::{constant#0}>`
