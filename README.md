@@ -1,13 +1,17 @@
-# 🛡️ Talus — eBPF Ransomware Detection & Response for Linux
+<div align="center">
 
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Rust](https://img.shields.io/badge/Rust-2021-DEA584?style=flat-square&logo=rust)
-![eBPF](https://img.shields.io/badge/eBPF-Linux%205.8+-FCD900?style=flat-square&logo=linux)
-![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go)
-![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&logo=docker)
-![Enterprise](https://img.shields.io/badge/Enterprise-Level%204%2F20-blue?style=flat-square)
-[![PyPI](https://img.shields.io/pypi/v/talus-process-monitor?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/talus-process-monitor/)
-[![Crates.io](https://img.shields.io/crates/v/process-monitor?style=flat-square&logo=rust)](https://crates.io/crates/process-monitor)
+<img src="https://raw.githubusercontent.com/Hartwell-Labs/.github/main/profile/assets/hartwell-logo.svg" width="72" alt="Hartwell Labs" />
+
+## Talus
+
+Behavioral ransomware detection & response for Linux — eBPF-based, ~280k events/s, single static binary.
+
+[![Rust](https://img.shields.io/badge/Rust-eBPF%20·%20Aya-F15A24?style=flat-square&logo=rust)](.) [![CI](https://img.shields.io/github/actions/workflow/status/Hartwell-Labs/talus-process-monitor/ci-ultra.yml?branch=master&style=flat-square&label=CI)](.) [![Release](https://img.shields.io/github/v/release/Hartwell-Labs/talus-process-monitor?style=flat-square)](.)
+[![License](https://img.shields.io/badge/license-MIT-F15A24?style=flat-square)](LICENSE) [![Website](https://img.shields.io/badge/site-hartwell--labs.github.io-4f46e5?style=flat-square)](https://hartwell-labs.github.io)
+
+[Website](https://hartwell-labs.github.io) · [All products](https://hartwell-labs.github.io/products/) · [Security](https://hartwell-labs.github.io/security/) · [Hack the Lab](https://github.com/Hartwell-Labs/hack-the-lab)
+
+</div>
 
 **Kernel-level ransomware detection in Rust: a sliding-window heuristic over eBPF syscalls — with automated response.**
 
@@ -817,3 +821,14 @@ MIT (see [LICENSE](LICENSE) for details)
 Extended dossiers (architecture, verification, benchmarks, error codex) ship in this repo:
 - [VERIFICATION-EBPF.md](docs/VERIFICATION-EBPF.md)
 - [SECURITY.md](SECURITY.md)
+---
+
+<div align="center">
+
+**[Hartwell Labs](https://github.com/Hartwell-Labs)** — security systems, languages and tools, built in the open.
+
+[Website](https://hartwell-labs.github.io) · [All products](https://hartwell-labs.github.io/products/) · [Security policy](https://hartwell-labs.github.io/security/) · [Report a vulnerability](https://hartwell-labs.github.io/security/)
+
+<sub>MIT License · © 2026 Hartwell Labs</sub>
+
+</div>
