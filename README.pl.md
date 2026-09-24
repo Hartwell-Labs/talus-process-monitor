@@ -1,6 +1,17 @@
-# 🛡️ Talus — wykrywanie ransomware na poziomie jądra (eBPF + Rust)
+<div align="center">
 
-**[English README](README.md)** · [Architektura](ARCHITECTURE.md) · [Artykuł: jak działa detekcja](https://dev.to/bartoszosiej/detecting-ransomware-with-ebpf-in-rust-4779)
+<img src="https://raw.githubusercontent.com/Hartwell-Labs/.github/main/profile/assets/hartwell-logo.svg" width="72" alt="Hartwell Labs" />
+
+## talus-process-monitor
+
+Behawioralna detekcja ransomware i odpowiedź dla Linuksa — tracepointy eBPF, werdykty w oknie przesuwnym, automatyczna odpowiedź SIGKILL.
+
+[![Hartwell Labs](https://img.shields.io/badge/%E2%AC%A1-Hartwell_Labs-F15A24?style=flat-square)](https://hartwell-labs.github.io)
+[![License](https://img.shields.io/badge/license-MIT-F15A24?style=flat-square)](LICENSE) [![Website](https://img.shields.io/badge/site-hartwell--labs.github.io-4f46e5?style=flat-square)](https://hartwell-labs.github.io)
+
+[Strona](https://hartwell-labs.github.io) · [Wszystkie produkty](https://hartwell-labs.github.io/products/) · [Polityka bezpieczeństwa](https://hartwell-labs.github.io/security/) · [Hack the Lab](https://github.com/Hartwell-Labs/hack-the-lab) · [🇬🇧 English](README.md)
+
+</div>
 
 **eBPF-owy agent detect-and-respond dla Linuksa**: tracepointy eBPF hakują syscalle na poziomie jądra, ruchome okno 1 s ocenia tempo otwierania plików per PID, a warstwa odpowiedzi **ubija podejrzany proces (`SIGKILL`)** w chwili werdyktu. Zmierzono na żywym desktopie: **~280 000 zdarzeń/s przy ~7,6% CPU** (bufory per-CPU, zero-copy do silnika detekcji w Ruście).
 
@@ -140,3 +151,15 @@ Szczegóły (EN): [README.md](README.md) · przewodnik kupującego: [docs/custom
 ## Licencja
 
 Community: MIT ([LICENSE](LICENSE)). Enterprise: [docs/EULA.txt](docs/EULA.txt).
+
+---
+
+<div align="center">
+
+**[Hartwell Labs](https://github.com/Hartwell-Labs)** — systemy bezpieczeństwa, języki i narzędzia, budowane jawnie.
+
+[Strona](https://hartwell-labs.github.io) · [Wszystkie produkty](https://hartwell-labs.github.io/products/) · [Polityka bezpieczeństwa](https://hartwell-labs.github.io/security/)
+
+<sub>Licencja MIT · © 2026 Hartwell Labs</sub>
+
+</div>
