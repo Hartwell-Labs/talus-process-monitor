@@ -1,0 +1,9 @@
+# gitleaks config — extend default rules, allowlist vendored third-party data
+[extend]
+useDefault = true
+
+[allowlist]
+  description = "Vendored third-party demo data (sqlite amalgamation etc.) — C identifiers, not secrets"
+  paths = [
+    '''frankentui/ftui-demo-showcase/data/''',
+  ]
