@@ -5,6 +5,10 @@ version = "0.8.2"
 edition = "2021"
 description = "eBPF-based real-time process and file operation monitor with TUI"
 license = "MIT"
+homepage = "https://bartoszosiej.github.io/talus-process-monitor/"
+documentation = "https://bartoszosiej.github.io/talus-process-monitor/field-guide.html"
+keywords = ["ebpf", "security", "ransomware", "monitoring", "edr"]
+categories = ["os::linux-apis", "command-line-utilities", "development-tools::profiling"]
 
 [features]
 default = []
