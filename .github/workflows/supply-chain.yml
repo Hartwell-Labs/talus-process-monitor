@@ -71,7 +71,7 @@ jobs:
           path: sbom/
           retention-days: 90
 
-  # ── Secret Scanning (gitleaks) ─────────────────────────────────────────
+  # ── Secret Scanning (gitleaks CLI — no org license needed) ─────────────
   secret-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
@@ -80,9 +80,12 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz -o gitleaks.tgz
+          tar -xzf gitleaks.tgz gitleaks && sudo mv gitleaks /usr/local/bin/
+      - name: Run gitleaks
+        run: gitleaks detect --source . --verbose --redact --exit-code 1
 
   # ── Dependency Review ───────────────────────────────────────────────────
   dep-review:
