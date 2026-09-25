@@ -748,7 +748,7 @@ Need help deploying Talus, or want it tuned to your environment?
 - 🎉 **This week only (Sep 22–27):** code `WEEK30` = 30% off everything below at checkout.
 - 🛠️ **Support Session — $150**: 60-minute 1:1 call + written config. Threshold
   tuning for your workload, false-positive triage, systemd/alert routing,
-  response-playbook design. [Book instantly](https://polar.sh/checkout/polar_c_rGI15C7IzCs54qElT4NJ5aLj7o3p7Uxdj4P4T1OtUsU).
+  response-playbook design. [Book instantly](https://buy.polar.sh/polar_cl_ZidnJwSp43rSD0VqSHiSCiGS9v3gJBGMGfmmv0nhv3L).
 - 🏢 **Enterprise — $50 one-time**: [direct checkout](https://buy.polar.sh/f8fee751-6cde-4a3b-b3cd-6e302ce8f5a8)
   (auto-kill response, web dashboard, Kafka/ClickHouse export — full matrix above).
 - 📧 Volume, on-prem or custom integrations: bartosz.osiej2007@gmail.com
