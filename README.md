@@ -627,6 +627,10 @@ Talus is a security agent — it must be secure itself. Enterprise edition inclu
 [sandbox] hardening applied ✓
 ```
 
+If the seccomp filter cannot be installed, the agent prints a loud SECURITY
+WARNING and records a `SANDBOX_DEGRADED` entry in the audit log — an unhardened
+deployment is visible in the audit trail, not just on stderr.
+
 ### Signed Audit Log (`audit.rs`)
 
 Every license operation is recorded in a **tamper-proof hash chain** (SOC2/ISO27001 compliance):
@@ -642,11 +646,25 @@ Each entry = SHA-256(HMAC(machine_key, prev_hash + timestamp + event + license_i
 | `EXPIRED` | License expired |
 | `MISMATCH` | Machine fingerprint mismatch |
 | `TRANSFER` | License transferred to another machine |
+| `TRIAL_RESET_DENIED` | Trial file deleted but the audit trail shows a prior trial — re-trial refused |
+| `SANDBOX_DEGRADED` | seccomp filter could not be installed — the agent runs unhardened and says so in the audit trail |
 
 ```bash
 process-monitor license audit-log          # Show last 20 entries
 process-monitor license verify-audit       # Verify hash chain integrity
 ```
+
+**Tamper-evidence & concurrency hardening:** appends take an exclusive file
+lock on `audit.log.lock` (verify takes a shared lock), so concurrent processes
+— e.g. the monitor and the license CLI — can no longer fork the hash chain.
+A hidden anchor file (`.audit.anchor`, HMAC over `last_entry_hash | entry_count`)
+detects log truncation, deletion and rewrites. The HMAC key is a random 32-byte
+value persisted once at `.audit.key` (0600) — it no longer depends on the
+volatile machine fingerprint (hostname/MAC changes used to invalidate the whole
+history); a legacy machine-derived key is kept only to verify pre-existing logs.
+
+A concurrent-writers regression test (multi-threaded appends interleaved with
+reads) guards the chain-integrity invariant.
 
 ### License Security (`license.rs`)
 
@@ -664,6 +682,7 @@ process-monitor license verify-audit       # Verify hash chain integrity
 | **Server-side seat enforcement** | `max_seats` checked in D1 at activation (`license-server/`) |
 | **Signed-key cache binding** | Local cache re-verified against the Ed25519 signature on every load — edited tier/expiry is rejected |
 | **Trial integrity tag** | SHA-256 tag ties the trial marker to binary + machine — copied/edited trial files are voided |
+| **Trial reset guard** | Deleting `.trial.dat` does not restart the trial — a recorded trial lifecycle (or a truncated/deleted audit log) makes a second 30-day trial impossible |
 | **Public-key-only server** | The activation worker cannot forge licenses even if fully compromised |
 
 ### Web Dashboard Security (`web.rs`)
