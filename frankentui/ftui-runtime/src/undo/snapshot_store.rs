@@ -245,35 +245,7 @@ impl<T> SnapshotStore<T> {
         while self.undo_stack.len() > self.config.max_depth {
             self.undo_stack.pop_front();
         }
-    }
-}
-
-// ============================================================================
-// Re-export persistent data structure types when the `hamt` feature is enabled
-// ============================================================================
-
-/// Persistent collection types for snapshot-friendly state.
-///
-/// When the `hamt` feature is enabled, this module re-exports types from
-/// the [`im`] crate. These collections use hash-array-mapped tries (HAMT)
-/// and relaxed-radix-balanced trees (RRB) for O(log n) structural sharing
-/// on clone.
-///
-/// # Example
-///
-/// ```ignore
-/// use ftui_runtime::undo::snapshot_store::persistent;
-///
-/// let mut map = persistent::HashMap::new();
-/// map.insert("key", 42);
-/// let snapshot = map.clone(); // O(log n) — shares structure
-/// map.insert("key2", 99);
-/// // `snapshot` still has only "key" → 42
-/// ```
-#[cfg(feature = "hamt")]
-pub mod persistent {
-    pub use im::{HashMap, HashSet, OrdMap, OrdSet, Vector};
-}
+    }}
 
 // ============================================================================
 // Tests
@@ -553,92 +525,6 @@ mod tests {
 
         store.undo();
         assert_eq!(store.total_snapshots(), 3); // 1 undo + 2 redo
-    }
-
-    // ====================================================================
-    // im crate integration tests (always available via dev-dependency)
-    // ====================================================================
-
-    #[test]
-    fn im_hashmap_structural_sharing() {
-        use im::HashMap;
-
-        let mut map = HashMap::new();
-        for i in 0..1000 {
-            map.insert(format!("key_{i}"), i);
-        }
-
-        let mut store = SnapshotStore::with_default_config();
-
-        // Push initial state
-        store.push(map.clone());
-
-        // Mutate and push — clone is O(log n) due to structural sharing
-        let mut map2 = map.clone();
-        map2.insert("new_key".to_string(), 9999);
-        store.push(map2);
-
-        // Undo should restore the original map
-        let prev = store.undo().unwrap();
-        assert_eq!(prev.len(), 1000);
-        assert!(!prev.contains_key("new_key"));
-
-        // Redo should restore the mutated map
-        let restored = store.redo().unwrap();
-        assert_eq!(restored.len(), 1001);
-        assert_eq!(restored.get("new_key"), Some(&9999));
-    }
-
-    #[test]
-    fn im_vector_structural_sharing() {
-        use im::Vector;
-
-        let mut vec: Vector<u32> = (0..1000).collect();
-
-        let mut store = SnapshotStore::with_default_config();
-        store.push(vec.clone());
-
-        // Mutate (append)
-        vec.push_back(9999);
-        store.push(vec);
-
-        // Undo
-        let prev = store.undo().unwrap();
-        assert_eq!(prev.len(), 1000);
-
-        // Redo
-        let restored = store.redo().unwrap();
-        assert_eq!(restored.len(), 1001);
-        assert_eq!(restored.back(), Some(&9999));
-    }
-
-    #[test]
-    fn im_hashmap_many_snapshots_memory_efficiency() {
-        use im::HashMap;
-
-        // Create a "large" state
-        let mut state: HashMap<String, Vec<u8>> = HashMap::new();
-        for i in 0..100 {
-            state.insert(format!("entry_{i}"), vec![0u8; 100]);
-        }
-
-        let mut store = SnapshotStore::new(SnapshotConfig::new(1000));
-
-        // Take 50 snapshots with small mutations each
-        for i in 0..50 {
-            store.push(state.clone());
-            // Small mutation — only 1 key changes
-            state.insert(format!("entry_{}", i % 100), vec![i as u8; 100]);
-        }
-
-        assert_eq!(store.undo_depth(), 50);
-
-        // All snapshots should be valid and distinct
-        for _ in 0..49 {
-            let prev = store.undo().unwrap();
-            assert_eq!(prev.len(), 100);
-        }
-        assert!(store.undo().is_none());
     }
 
     #[test]
