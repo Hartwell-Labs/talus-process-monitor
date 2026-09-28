@@ -11,11 +11,71 @@
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+// ── Cross-process locking (concurrency fix) ─────────────────────────────
+//
+// audit_log() implements read-last-line → compute-hash → append → anchor.
+// Without a cross-process lock, two concurrent writers (e.g. monitor +
+// license CLI, parallel test binaries) read the SAME prev_hash and append
+// interleaved entries → the chain reads as corrupted afterwards. A flock-ed
+// `audit.log.lock` next to the log serializes the critical section;
+// verification takes the lock shared so it never observes a torn append.
+
+extern "C" {
+    fn flock(fd: i32, operation: i32) -> i32;
+}
+const LOCK_EX: i32 = 2;
+const LOCK_SH: i32 = 1;
+const LOCK_UN: i32 = 8;
+
+/// RAII guard holding a lock on the audit lock file.
+struct AuditFileLock {
+    file: fs::File,
+}
+
+impl AuditFileLock {
+    fn acquire(path: &PathBuf, operation: i32) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+            .with_context(|| format!("open lock file {}", path.display()))?;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
+        // flock blocks until the lock is free; a failure to lock is fatal —
+        // appending unlocked is exactly the bug being fixed (fail-closed).
+        let rc = unsafe { flock(fd, operation) };
+        if rc != 0 {
+            return Err(anyhow::anyhow!(
+                "flock failed on {} (io error)",
+                path.display()
+            ));
+        }
+        Ok(Self { file })
+    }
+}
+
+impl Drop for AuditFileLock {
+    fn drop(&mut self) {
+        let fd = std::os::unix::io::AsRawFd::as_raw_fd(&self.file);
+        unsafe { flock(fd, LOCK_UN) };
+    }
+}
+
+fn audit_lock_path(log_path: &Path) -> PathBuf {
+    let mut p = log_path.to_path_buf().into_os_string();
+    p.push(".lock");
+    PathBuf::from(p)
+}
 
 /// A single signed audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,9 +99,8 @@ pub struct AuditEntry {
 }
 
 impl AuditEntry {
-    /// Compute HMAC for this entry using machine-derived key.
-    fn compute_hash(&self, prev_hash: &str) -> String {
-        let key = derive_audit_key();
+    /// Compute HMAC for this entry under the given key.
+    fn compute_hash_with(&self, key: &[u8; 32], prev_hash: &str) -> String {
         let payload = format!(
             "{}|{}|{}|{}|{}|{}|{}",
             self.ts, self.uid, self.host, self.event, self.license_id, self.detail, prev_hash
@@ -52,10 +111,27 @@ impl AuditEntry {
         let result = hasher.finalize();
         hex::encode(result)
     }
+
+    /// Compute HMAC for this entry using the current (stable) audit key.
+    fn compute_hash(&self, prev_hash: &str) -> String {
+        self.compute_hash_with(&audit_hmac_key(), prev_hash)
+    }
+
+    /// True if the entry hash verifies under ANY known key (stable or legacy).
+    fn verifies_under_known_key(&self, prev_hash: &str) -> bool {
+        audit_verify_keys()
+            .iter()
+            .any(|k| self.entry_hash == self.compute_hash_with(k, prev_hash))
+    }
 }
 
-/// Derive an audit-specific key from machine fingerprint.
-/// Different from the license obfuscation key to prevent cross-module attacks.
+/// Derive the *legacy* audit key from machine fingerprint.
+///
+/// KEPT FOR VERIFICATION FALLBACK ONLY (security hardening review): entries written
+/// before the stable key file existed verify under this key. The fingerprint
+/// (hostname + MACs) is volatile — a NIC change used to invalidate the entire
+/// audit history — and public (it is printed by `license machine-id`), so this
+/// derivation is no longer used for new writes.
 fn derive_audit_key() -> [u8; 32] {
     let machine = crate::license::generate_machine_id().unwrap_or_default();
     let mut hasher = Sha256::new();
@@ -67,9 +143,156 @@ fn derive_audit_key() -> [u8; 32] {
     key
 }
 
+/// Path of the stable audit key file (created once, 0600).
+fn audit_key_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("talus").join(".audit.key"))
+}
+
+/// Load the stable audit HMAC key, creating it on first use.
+///
+/// The key is a random 32-byte value persisted outside the log, so the audit
+/// MAC does not depend on the volatile machine fingerprint (MAC/hostname
+/// changes used to make every historical entry verify as corrupted).
+/// Threat model unchanged and documented: user-level storage, resists casual
+/// tampering; a user who reads this file can forge entries — same trust level
+/// as the previous machine-derived key, which was publicly recomputable.
+fn audit_hmac_key() -> [u8; 32] {
+    let path = match audit_key_path() {
+        Some(p) => p,
+        None => return derive_audit_key(), // no config dir: legacy behavior
+    };
+    if let Ok(data) = fs::read_to_string(&path) {
+        if let Ok(key) = hex::decode(data.trim()) {
+            if key.len() == 32 {
+                let mut k = [0u8; 32];
+                k.copy_from_slice(&key);
+                return k;
+            }
+        }
+    }
+    // First run (or damaged file): create a fresh random key.
+    let mut key = [0u8; 32];
+    match fs::File::open("/dev/urandom") {
+        Ok(mut f) => {
+            use std::io::Read;
+            if f.read_exact(&mut key).is_err() {
+                key = derive_audit_key(); // last-resort fallback
+            }
+        }
+        Err(_) => key = derive_audit_key(),
+    }
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&path, hex::encode(key));
+    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    key
+}
+
+/// Keys to try when verifying an entry, in order: stable key first,
+/// then the legacy machine-derived key (for pre-stable-key entries).
+fn audit_verify_keys() -> Vec<[u8; 32]> {
+    vec![audit_hmac_key(), derive_audit_key()]
+}
+
 /// Get the audit log file path.
 fn audit_log_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("talus").join("audit.log"))
+}
+
+/// Path of the hidden length-anchor file for the audit log.
+///
+/// The hash chain alone only detects *modification* and *append-forgery*;
+/// a truncated (or fully deleted) log verifies as VALID because every
+/// remaining prefix is internally consistent. The anchor binds the last
+/// entry hash and the entry count outside the log file, so truncation
+/// breaks verification.
+fn anchor_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("talus").join(".audit.anchor"))
+}
+
+/// MAC over (last entry hash, entry count) under an explicit key.
+fn anchor_mac_with(key: &[u8; 32], last_hash: &str, count: u64) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(b"talus-audit-anchor-v1");
+    hasher.update(last_hash.as_bytes());
+    hasher.update(count.to_le_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// MAC over (last entry hash, entry count) using the current audit key.
+fn anchor_mac(last_hash: &str, count: u64) -> String {
+    anchor_mac_with(&audit_hmac_key(), last_hash, count)
+}
+
+/// Persist the length anchor after appending an entry.
+fn write_anchor(last_hash: &str, count: u64) {
+    if let Some(path) = anchor_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let line = format!("{last_hash}|{count}|{}", anchor_mac(last_hash, count));
+        if fs::write(&path, line).is_ok() {
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+/// Read and authenticate the length anchor. Returns (last_hash, count).
+/// Returns None if missing, malformed, or MAC-invalid (treated as absent).
+fn read_anchor() -> Option<(String, u64)> {
+    let path = anchor_path()?;
+    let data = fs::read_to_string(path).ok()?;
+    let parts: Vec<&str> = data.trim().split('|').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let count: u64 = parts[1].parse().ok()?;
+    // Anchors written before the stable key existed use the legacy key.
+    let valid = audit_verify_keys()
+        .iter()
+        .any(|k| anchor_mac_with(k, parts[0], count) == parts[2]);
+    if !valid {
+        return None;
+    }
+    Some((parts[0].to_string(), count))
+}
+
+/// Heuristic evidence that a trial is being restarted on this machine.
+///
+/// Used to refuse a second 30-day trial (security hardening review finding):
+/// - the audit log already records a trial lifecycle (TRIAL_STARTED /
+///   TRIAL_EXPIRED), i.e. the trial file was removed to reset the clock;
+/// - or the log/anchor pair shows the log was truncated or deleted
+///   (possible evidence destruction before a re-trial).
+///
+/// Residual risk (documented): a user removing audit.log, .audit.anchor and
+/// .trial.dat together on a machine that never contacted the license server
+/// leaves no trace. Server-side trial tracking (license-server keyed by
+/// machine_id) closes this for online installs.
+pub fn trial_reset_suspected() -> bool {
+    let log_path = match audit_log_path() {
+        Some(p) => p,
+        None => return false,
+    };
+    if !log_path.exists() {
+        // Log deleted while the anchor still records entries.
+        return matches!(read_anchor(), Some((_, c)) if c > 0);
+    }
+    let data = fs::read_to_string(&log_path).unwrap_or_default();
+    if data.contains("\"event\":\"TRIAL_STARTED\"")
+        || data.contains("\"event\":\"TRIAL_EXPIRED\"")
+    {
+        return true;
+    }
+    match read_anchor() {
+        Some((_, c)) => {
+            c > 0
+                && data.lines().filter(|l| !l.trim().is_empty()).count() < c as usize
+        }
+        None => false,
+    }
 }
 
 /// Append a signed entry to the audit log with hash chain.
@@ -83,9 +306,24 @@ pub fn audit_log(event: &str, license_id: &str, detail: &str) {
         let _ = fs::create_dir_all(parent);
     }
 
-    // Get previous hash from last line
-    let prev_hash = fs::read_to_string(&log_path)
-        .ok()
+    // Serialize the read-tail → append → anchor critical section across
+    // processes. Lock file is stable, separate from the log, so anchor/log
+    // file replacement never affects lock identity. Underscore-prefixed
+    // binding: the guard must live until the end of the critical section.
+    let _audit_lock = match AuditFileLock::acquire(&audit_lock_path(&log_path), LOCK_EX) {
+        Ok(l) => l,
+        Err(_) => {
+            // Failing to acquire the lock means we cannot guarantee chain
+            // integrity — refuse to append rather than corrupt silently.
+            eprintln!("[talus] audit: cannot lock audit log — entry not recorded (fail-closed)");
+            return;
+        }
+    };
+
+    // Get previous hash and current entry count from the log
+    let log_data = fs::read_to_string(&log_path).ok();
+    let prev_hash = log_data
+        .as_deref()
         .and_then(|data| {
             data.lines().last().and_then(|line| {
                 serde_json::from_str::<AuditEntry>(line)
@@ -94,6 +332,12 @@ pub fn audit_log(event: &str, license_id: &str, detail: &str) {
             })
         })
         .unwrap_or_else(|| "0".to_string());
+    let prev_count = log_data
+        .as_deref()
+        .map(|data| {
+            data.lines().filter(|l| !l.trim().is_empty()).count() as u64
+        })
+        .unwrap_or(0);
 
     let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let hostname = hostname::get()
@@ -123,6 +367,8 @@ pub fn audit_log(event: &str, license_id: &str, detail: &str) {
             let _ = writeln!(file, "{json}");
         }
         let _ = fs::set_permissions(&log_path, fs::Permissions::from_mode(0o600));
+        // Refresh the length anchor so truncation becomes detectable.
+        write_anchor(&entry.entry_hash, prev_count + 1);
     }
 }
 
@@ -132,8 +378,22 @@ pub fn verify_audit_log() -> Result<u64> {
     let log_path = audit_log_path().context("cannot determine audit log path")?;
 
     if !log_path.exists() {
-        return Ok(0);
+        // A missing log is only legitimate when no entries were ever recorded.
+        // An existing anchor for a non-empty state means the log was deleted.
+        return match read_anchor() {
+            None => Ok(0),
+            Some((h, c)) if h == "0" && c == 0 => Ok(0),
+            Some((h, c)) => bail!(
+                "audit log is missing but length anchor records {c} entries (last: {h}) — log was deleted"
+            ),
+        };
     }
+
+    // Shared lock for the whole verification pass: concurrent writers block
+    // until verification finishes, so the chain/anchor are never read
+    // mid-append. Waiting writers then chain onto the fresh tail.
+    let _lock = AuditFileLock::acquire(&audit_lock_path(&log_path), LOCK_SH)
+        .context("cannot lock audit log for verification (fail-closed)")?;
 
     let data = fs::read_to_string(&log_path).context("failed to read audit log")?;
 
@@ -152,9 +412,9 @@ pub fn verify_audit_log() -> Result<u64> {
                     corrupted += 1;
                     continue;
                 }
-                // Verify entry hash
-                let expected = entry.compute_hash(&prev_hash);
-                if entry.entry_hash != expected {
+                // Verify entry hash under any known key (stable first, then
+                // legacy machine-derived for pre-stable-key entries).
+                if !entry.verifies_under_known_key(&prev_hash) {
                     corrupted += 1;
                     continue;
                 }
@@ -172,6 +432,30 @@ pub fn verify_audit_log() -> Result<u64> {
             "audit log integrity check failed: {corrupted} corrupted entries out of {}",
             verified + corrupted
         );
+    }
+
+    // Length anchor check: the chain above validates the *content* of the
+    // remaining entries; this validates their *number* against the state
+    // recorded outside the log file at last append.
+    let last_hash = if verified > 0 {
+        prev_hash.clone()
+    } else {
+        "0".to_string()
+    };
+    match read_anchor() {
+        Some((anchor_hash, anchor_count)) => {
+            if anchor_hash != last_hash || anchor_count != verified {
+                bail!(
+                    "audit log length anchor mismatch: log ends at {last_hash} ({verified} entries), anchor records {anchor_hash} ({anchor_count} entries) — log may have been truncated or rewritten"
+                );
+            }
+        }
+        None => {
+            // Legacy install (pre-anchor log) or first run: establish the
+            // anchor at the current state. From this point on, any further
+            // truncation or deletion is detected.
+            write_anchor(&last_hash, verified);
+        }
     }
 
     Ok(verified)
@@ -205,6 +489,15 @@ mod tests {
         let k1 = derive_audit_key();
         let k2 = derive_audit_key();
         assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn anchor_mac_binds_hash_and_count() {
+        let a = anchor_mac("hash1", 5);
+        assert_eq!(a, anchor_mac("hash1", 5), "deterministic");
+        assert_eq!(a.len(), 64);
+        assert_ne!(a, anchor_mac("hash2", 5), "binds last hash");
+        assert_ne!(a, anchor_mac("hash1", 6), "binds count");
     }
 
     #[test]
@@ -432,5 +725,37 @@ mod tests {
         assert!(corrupted > 0, "tampering should be detected");
 
         let _ = fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+#[cfg(test)]
+mod flock_stress_tests {
+    use super::*;
+
+    /// Concurrent writers: 4 threads append interleaved entries through the
+    /// real flock-ed critical section; afterwards the chain must verify
+    /// 100% (without the lock this test reliably produces a corrupted chain).
+    #[test]
+    fn concurrent_writers_chain_stays_valid() {
+        let n_before = verify_audit_log().unwrap_or(0);
+
+        let handles: Vec<_> = (0..4)
+            .map(|w| {
+                std::thread::spawn(move || {
+                    for i in 0..15 {
+                        audit_log("FLOCK_STRESS", "-", &format!("writer={w} iter={i}"));
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("writer thread panicked");
+        }
+
+        let n_after = verify_audit_log().expect("chain corrupted after concurrent writes!");
+        assert!(
+            n_after >= n_before + 60,
+            "expected >= 60 new entries, got {n_after} (before: {n_before})"
+        );
     }
 }

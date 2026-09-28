@@ -1247,6 +1247,21 @@ fn is_trial_active() -> bool {
         let _ = fs::remove_file(&trial_file);
         false
     } else {
+        // No trial file: legitimate only on the very first run.
+        // If the audit trail shows a trial lifecycle already happened here,
+        // the file was removed to reset the clock — refuse a new trial
+        // (security review: infinite 30-day trial by deleting .trial.dat).
+        if crate::audit::trial_reset_suspected() {
+            audit_log(
+                "TRIAL_RESET_DENIED",
+                "TRIAL-30D",
+                "trial file missing but audit trail shows a prior trial — re-trial refused",
+            );
+            eprintln!(
+                "[talus] Enterprise trial already used on this machine — activate a license to continue"
+            );
+            return false;
+        }
         // First run — start trial
         let _ = fs::create_dir_all(&marker);
         let started_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -1269,6 +1284,17 @@ fn is_trial_active() -> bool {
         );
         true
     }
+}
+
+/// Days left in the current 30-day trial, if a valid trial file exists.
+/// Used by the banner to report the trial state honestly.
+pub fn trial_days_remaining() -> Option<i64> {
+    let dir = dirs::config_dir()?.join("talus");
+    let data = fs::read_to_string(dir.join(".trial.dat")).ok()?;
+    let trial: TrialData = serde_json::from_str(&data).ok()?;
+    let start = chrono::NaiveDateTime::parse_from_str(&trial.started_at, "%Y-%m-%dT%H:%M:%SZ").ok()?;
+    let elapsed = chrono::Utc::now().naive_utc() - start;
+    Some((30 - elapsed.num_days()).max(0))
 }
 
 /// Compute an integrity tag for the trial record to detect tampering.
