@@ -27,8 +27,8 @@ sudo ./target/release/process-monitor monitor
 ```
 
 - Free agent, MIT: https://github.com/BartoszOsiej/talus-process-monitor
-- Deployment & tuning playbook: https://bartoszosiej.github.io/talus-process-monitor/field-guide.html
-- Comparison vs Falco/Wazuh/Tracee: https://bartoszosiej.github.io/talus-process-monitor/comparison.html
+- Deployment & tuning playbook: https://hartwell-labs.pl/talus-process-monitor/field-guide.html
+- Comparison vs Falco/Wazuh/Tracee: https://hartwell-labs.pl/talus-process-monitor/comparison.html
 
 Requires Linux with BTF (CO-RE) support and root or CAP_BPF/CAP_SYS_ADMIN to
 load the eBPF program. The binary runs on x86_64 Linux.

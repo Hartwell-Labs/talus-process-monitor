@@ -136,6 +136,6 @@ An honest security article should list failure modes:
 - A 1-second sliding window, filename entropy, and extension tracking together produce a low-false-positive verdict — and `SIGKILL` turns the monitor into an active response agent.
 - Sustained throughput of ~280k events/s with 7.6% CPU on a live desktop means the agent is cheap enough to run everywhere.
 
-The project is MIT-licensed and lives at [github.com/BartoszOsiej/talus-process-monitor](https://github.com/BartoszOsiej/talus-process-monitor). The longer technical write-up on the detection pipeline is on [DEV.to](https://dev.to/bartoszosiej/detecting-ransomware-with-ebpf-in-rust-4779); the project documentation and TUI screenshots are at the [project site](https://bartoszosiej.github.io/talus-process-monitor/).
+The project is MIT-licensed and lives at [github.com/BartoszOsiej/talus-process-monitor](https://github.com/BartoszOsiej/talus-process-monitor). The longer technical write-up on the detection pipeline is on [DEV.to](https://dev.to/bartoszosiej/detecting-ransomware-with-ebpf-in-rust-4779); the project documentation and TUI screenshots are at the [project site](https://hartwell-labs.pl/talus-process-monitor/).
 
 *Bartosz Osiej is a Rust and eBPF developer and the maintainer of talus-process-monitor.*

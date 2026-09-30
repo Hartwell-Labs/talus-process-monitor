@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://bartoszosiej.github.io/talus-process-monitor/sitemap.xml
+Sitemap: https://hartwell-labs.pl/talus-process-monitor/sitemap.xml
