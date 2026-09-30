@@ -764,7 +764,7 @@ Enterprise licenses are sold directly by the author:
 
 Need help deploying Talus, or want it tuned to your environment?
 
-- 🎉 **This week only (Sep 22–27):** code `WEEK30` = 30% off everything below at checkout.
+- 🎉 **Launch offer (through Oct 31):** code `WEEK30` = 30% off everything below at checkout.
 - 🛠️ **Support Session — $150**: 60-minute 1:1 call + written config. Threshold
   tuning for your workload, false-positive triage, systemd/alert routing,
   response-playbook design. [Book instantly](https://buy.polar.sh/polar_cl_ZidnJwSp43rSD0VqSHiSCiGS9v3gJBGMGfmmv0nhv3L).
