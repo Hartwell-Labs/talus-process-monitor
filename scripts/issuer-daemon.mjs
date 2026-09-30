@@ -27,7 +27,7 @@
 // (pending_store_keys): pass --fulfill-key with the key the customer tried.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -50,6 +50,34 @@ function load_token() {
   process.exit(1);
 }
 const ADMIN = load_token();
+
+// Polar API (organization token) — fetch the REAL customer-facing license key
+// (POLAR-XXXX-…) that Polar generated for an order. Mapping that key (instead
+// of a placeholder) lets the customer activate it directly: the server
+// translates POLAR-key → TALUS license at activation/redeem time.
+const POLAR_TOKEN_FILE = join(process.env.HOME ?? '', '.secrets/talus/polar_api_token');
+function load_polar_token() {
+  try { return readFileSync(POLAR_TOKEN_FILE, 'utf8').split(/\r?\n/)[0].trim(); }
+  catch { return process.env.POLAR_API_TOKEN ?? null; }
+}
+const POLAR_TOKEN = load_polar_token();
+
+async function fetch_polar_license_key(order) {
+  if (!POLAR_TOKEN) return null;
+  const org = order.polar_org_id ?? process.env.POLAR_ORG_ID ?? null;
+  if (!org) return null;
+  const res = await fetch(`https://api.polar.sh/v1/license-keys/?organization_id=${org}&limit=100`, {
+    headers: { authorization: `Bearer ${POLAR_TOKEN}`, 'user-agent': 'talus-issuer/1' },
+  });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => ({}));
+  const items = data.items ?? [];
+  // Prefer explicit order linkage; fall back to customer email; single-candidate fallback.
+  let hit = items.find((k) => k.order_id === order.order_id);
+  if (!hit && order.email) hit = items.find((k) => k.customer?.email === order.email || k.customer_email === order.email);
+  if (!hit && items.length === 1) hit = items[0];
+  return hit?.key ?? hit?.license_key ?? null;
+}
 
 function api(path, body) {
   return fetch(`${SERVER}${path}`, {
@@ -109,20 +137,142 @@ async function fulfill(order) {
   });
   if (reg.status !== 200) throw new Error(`register failed: ${reg.status}`);
 
+  let store_key = order.store_key;
+  if (!store_key && order.store === 'polar') {
+    const polar_key = await fetch_polar_license_key(order);
+    if (polar_key) {
+      store_key = polar_key;
+      console.log(`  ↳ mapped real Polar key for ${order.order_id}`);
+    } else {
+      throw new Error('polar license key not available yet — order stays pending, will retry');
+    }
+  }
   const fulfilled = await api('/api/v1/admin/fulfill', {
     store: order.store,
     order_id: order.order_id,
     license_id: lic.license_id,
     talus_license_key: lic.license_key,
-    store_key: order.store_key ?? `polar-order:${order.order_id}`, // placeholder for keyless stores
+    store_key: store_key ?? `polar-order:${order.order_id}`,
   });
   if (fulfilled.status !== 200) throw new Error(`fulfill failed: ${fulfilled.status}`);
 
   console.log(`✓ ${order.store}/${order.order_id} → ${lic.license_id}`);
   if (!order.store_key) {
-    console.log(`  ★ DELIVER THIS KEY to ${order.email ?? 'customer'}: ${lic.license_key}`);
+    console.log(`  ★ KEY for ${order.email ?? 'customer'}: ${lic.license_key}`);
   }
-  return lic.license_id;
+  return lic;
+}
+
+// ── Delivery: email the license key to the customer (Resend) ──────────────
+// Reads RESEND_API_KEY from ~/pisanie/mailing/.env (chmod 600). Sends from
+// the verified domain. delivery-log.json prevents duplicate mails across
+// restarts; catchup_delivery() re-delivers orders fulfilled but never
+// emailed (e.g. daemon crashed between fulfill and send).
+
+const DELIVERY_LOG = join(process.env.HOME ?? '', '.secrets/talus/delivery-log.json');
+const MAIL_ENV = join(process.env.HOME ?? '', 'pisanie/mailing/.env');
+const MAIL_FROM = process.env.TALUS_MAIL_FROM ?? 'Hartwell Labs <important@hartwell-labs.pl>';
+
+function read_resend_key() {
+  try {
+    for (const line of readFileSync(MAIL_ENV, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^RESEND_API_KEY=(.+)$/);
+      if (m) return m[1].trim();
+    }
+  } catch { /* missing file */ }
+  return null;
+}
+
+function load_delivery_log() {
+  try { return JSON.parse(readFileSync(DELIVERY_LOG, 'utf8')); } catch { return {}; }
+}
+
+function save_delivery_log(log) {
+  try { writeFileSync(DELIVERY_LOG, JSON.stringify(log, null, 1), { mode: 0o600 }); }
+  catch (e) { console.error('delivery-log write failed:', e.message); }
+}
+
+async function send_license_email(order, lic) {
+  const key = read_resend_key();
+  if (!key) {
+    console.error('  ✉ no RESEND_API_KEY — deliver manually. KEY:', lic.license_key);
+    return false;
+  }
+  const to = order.email;
+  const subject = 'Your Talus Enterprise license key';
+  const text = [
+    'Thank you for purchasing Talus Process Monitor (Enterprise).',
+    '',
+    `Your license key: ${lic.license_key}`,
+    '',
+    'Activate (Linux):',
+    `  talus license activate ${lic.license_key}`,
+    '',
+    'One key = one seat/machine. To move machines: run',
+    '`talus license deactivate` first, then activate again.',
+    '',
+    'Docs & downloads: https://hartwell-labs.pl/talus-process-monitor/',
+    'Support: reply to this email (bartosz.osiej2007@gmail.com).',
+    '',
+    '— Hartwell Labs · hartwell-labs.pl',
+  ].join('\n');
+  const html = `<p>Thank you for purchasing <b>Talus Process Monitor (Enterprise)</b>.</p>
+<p>Your license key:</p>
+<p style="font-family:monospace;font-size:16px;background:#f4f4f5;padding:10px;border-radius:6px"><b>${lic.license_key}</b></p>
+<p>Activate:</p>
+<pre style="background:#f4f4f5;padding:10px;border-radius:6px">talus license activate ${lic.license_key}</pre>
+<p>One key = one seat/machine. Moving machines: run <code>talus license deactivate</code> first.</p>
+<p>Docs &amp; downloads: <a href="https://hartwell-labs.pl/talus-process-monitor/">hartwell-labs.pl/talus-process-monitor</a><br>
+Support: reply to this email (bartosz.osiej2007@gmail.com).</p>
+<p style="color:#8b93a3;font-size:12px">Hartwell Labs · hartwell-labs.pl</p>`;
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: MAIL_FROM, to, subject, text, html, reply_to: 'bartosz.osiej2007@gmail.com' }),
+  });
+  const rbody = await res.json().catch(() => ({}));
+  if (res.status === 200 || res.status === 201) {
+    console.log(`  ✉ license emailed to ${to} (id ${rbody.id ?? '?'})`);
+    return true;
+  }
+  console.error(`  ✉ email failed (${res.status}): ${JSON.stringify(rbody).slice(0, 160)} — KEY: ${lic.license_key}`);
+  return false;
+}
+
+async function deliver_license_email(order, lic) {
+  if (!order.email || order.store_key) return; // keyless Polar orders only
+  const log = load_delivery_log();
+  const id = `${order.store}/${order.order_id}`;
+  if (log[id]?.emailed && log[id]?.license_id === lic.license_id) return;
+  // Throttle: failed-email retry at most every 30 min (log.at set on every attempt).
+  const last = log[id] ? Date.parse(log[id].at) : 0;
+  if (Number.isFinite(last) && Date.now() - last < 30 * 60 * 1000) return;
+  const ok = await send_license_email(order, lic);
+  log[id] = { license_id: lic.license_id, emailed: ok, at: new Date().toISOString() };
+  save_delivery_log(log);
+}
+
+async function catchup_delivery() {
+  const log = load_delivery_log();
+  const { status, data } = await api('/api/v1/admin/orders', { status: 'fulfilled' });
+  if (status !== 200) return;
+  let registry;
+  try { registry = JSON.parse(readFileSync(join(KEYS_DIR, 'issued_licenses.json'), 'utf8')); }
+  catch { return; }
+  const items = Array.isArray(registry) ? registry : registry.licenses ?? [];
+  for (const o of data.orders ?? []) {
+    if (o.store !== 'polar' || !o.email || !o.license_id) continue;
+    const id = `${o.store}/${o.order_id}`;
+    if (log[id]?.emailed) continue;
+    const rec = items.find((x) => x.license_id === o.license_id);
+    if (!rec) continue;
+    const ok = await send_license_email(o, {
+      license_id: o.license_id,
+      license_key: rec.short_key ?? rec.license_key,
+    });
+    log[id] = { license_id: o.license_id, emailed: ok, at: new Date().toISOString(), catchup: true };
+    save_delivery_log(log);
+  }
 }
 
 // ── Modes ──────────────────────────────────────────────────────────────────
@@ -138,8 +288,8 @@ if (keyIdx >= 0) {
   const order_id = args[args.indexOf('--order') + 1] ?? `manual-${Date.now()}`;
   const order = { store, order_id, seats: 1, store_key };
   fulfill(order)
-    .then((id) => {
-      console.log(`\nTalus license ${id} is now bound to that store key.`);
+    .then((lic) => {
+      console.log(`\nTalus license ${lic.license_id} is now bound to that store key.`);
       console.log('The customer can activate again with their original store key.');
     })
     .catch((e) => { console.error('error:', e.message); process.exit(1); });
@@ -153,6 +303,7 @@ if (keyIdx >= 0) {
 
   for (;;) {
     try {
+      await catchup_delivery();
       const { status, data } = await api('/api/v1/admin/orders', { status: 'pending' });
       if (status !== 200) throw new Error(`orders fetch failed: ${status}`);
       const pending = (data.orders ?? []).filter(
@@ -163,7 +314,8 @@ if (keyIdx >= 0) {
       }
       for (const order of pending) {
         try {
-          await fulfill(order);
+          const lic = await fulfill(order);
+          await deliver_license_email(order, lic);
         } catch (e) {
           console.error(`✗ ${order.store}/${order.order_id}: ${e.message}`);
         }
