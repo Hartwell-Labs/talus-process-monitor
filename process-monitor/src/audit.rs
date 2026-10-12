@@ -12,6 +12,7 @@ use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -27,11 +28,28 @@ use sha2::{Digest, Sha256};
 // verification takes the lock shared so it never observes a torn append.
 
 extern "C" {
+    #[cfg(not(miri))]
     fn flock(fd: i32, operation: i32) -> i32;
 }
 const LOCK_EX: i32 = 2;
 const LOCK_SH: i32 = 1;
 const LOCK_UN: i32 = 8;
+
+/// `flock(2)` wrapper.
+///
+/// Miri cannot model `flock`, so under the interpreter locking degrades to a
+/// no-op. Miri runs single-threaded for this crate's tests, so skipping the
+/// lock is safe there; the real cross-process locking is exercised on the
+/// normal (non-miri) test runs.
+#[cfg(not(miri))]
+fn raw_flock(fd: i32, operation: i32) -> i32 {
+    unsafe { flock(fd, operation) }
+}
+
+#[cfg(miri)]
+fn raw_flock(_fd: i32, _operation: i32) -> i32 {
+    0
+}
 
 /// RAII guard holding a lock on the audit lock file.
 struct AuditFileLock {
@@ -53,7 +71,7 @@ impl AuditFileLock {
         let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
         // flock blocks until the lock is free; a failure to lock is fatal —
         // appending unlocked is exactly the bug being fixed (fail-closed).
-        let rc = unsafe { flock(fd, operation) };
+        let rc = raw_flock(fd, operation);
         if rc != 0 {
             return Err(anyhow::anyhow!(
                 "flock failed on {} (io error)",
@@ -67,7 +85,7 @@ impl AuditFileLock {
 impl Drop for AuditFileLock {
     fn drop(&mut self) {
         let fd = std::os::unix::io::AsRawFd::as_raw_fd(&self.file);
-        unsafe { flock(fd, LOCK_UN) };
+        raw_flock(fd, LOCK_UN);
     }
 }
 
@@ -156,37 +174,81 @@ fn audit_key_path() -> Option<PathBuf> {
 /// Threat model unchanged and documented: user-level storage, resists casual
 /// tampering; a user who reads this file can forge entries — same trust level
 /// as the previous machine-derived key, which was publicly recomputable.
+///
+/// The result is cached process-wide via [`OnceLock`]. Concurrent callers
+/// (parallel tests, threads appending entries) that raced on first use could
+/// otherwise each persist a *different* random key, splitting the log across
+/// keys and making every entry signed under a losing key verify as tampered.
 fn audit_hmac_key() -> [u8; 32] {
-    let path = match audit_key_path() {
-        Some(p) => p,
-        None => return derive_audit_key(), // no config dir: legacy behavior
-    };
-    if let Ok(data) = fs::read_to_string(&path) {
-        if let Ok(key) = hex::decode(data.trim()) {
-            if key.len() == 32 {
-                let mut k = [0u8; 32];
-                k.copy_from_slice(&key);
-                return k;
-            }
-        }
+    static KEY: OnceLock<[u8; 32]> = OnceLock::new();
+    *KEY.get_or_init(load_or_create_audit_key)
+}
+
+/// Read and validate a 32-byte hex-encoded key from `path`, if present.
+fn read_key_file(path: &Path) -> Option<[u8; 32]> {
+    let data = fs::read_to_string(path).ok()?;
+    let decoded = hex::decode(data.trim()).ok()?;
+    if decoded.len() != 32 {
+        return None;
     }
-    // First run (or damaged file): create a fresh random key.
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&decoded);
+    Some(key)
+}
+
+/// Generate a fresh random 32-byte key, falling back to the legacy
+/// machine-derived key if the entropy source is unavailable.
+fn generate_audit_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     match fs::File::open("/dev/urandom") {
         Ok(mut f) => {
             use std::io::Read;
             if f.read_exact(&mut key).is_err() {
-                key = derive_audit_key(); // last-resort fallback
+                return derive_audit_key(); // last-resort fallback
             }
         }
-        Err(_) => key = derive_audit_key(),
+        Err(_) => return derive_audit_key(),
+    }
+    key
+}
+
+/// Load the persisted key, or create it exactly once.
+fn load_or_create_audit_key() -> [u8; 32] {
+    let path = match audit_key_path() {
+        Some(p) => p,
+        None => return derive_audit_key(), // no config dir: legacy behavior
+    };
+    if let Some(key) = read_key_file(&path) {
+        return key;
     }
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(&path, hex::encode(key));
-    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-    key
+    // Create exclusively so exactly one writer wins the race; everyone else
+    // adopts the winner's key instead of overwriting it with their own.
+    let key = generate_audit_key();
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            let _ = f.write_all(hex::encode(key).as_bytes());
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+            key
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Another process created it first: adopt its key once readable.
+            for _ in 0..10 {
+                if let Some(existing) = read_key_file(&path) {
+                    return existing;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            key
+        }
+        Err(_) => key,
+    }
 }
 
 /// Keys to try when verifying an entry, in order: stable key first,
@@ -281,16 +343,12 @@ pub fn trial_reset_suspected() -> bool {
         return matches!(read_anchor(), Some((_, c)) if c > 0);
     }
     let data = fs::read_to_string(&log_path).unwrap_or_default();
-    if data.contains("\"event\":\"TRIAL_STARTED\"")
-        || data.contains("\"event\":\"TRIAL_EXPIRED\"")
+    if data.contains("\"event\":\"TRIAL_STARTED\"") || data.contains("\"event\":\"TRIAL_EXPIRED\"")
     {
         return true;
     }
     match read_anchor() {
-        Some((_, c)) => {
-            c > 0
-                && data.lines().filter(|l| !l.trim().is_empty()).count() < c as usize
-        }
+        Some((_, c)) => c > 0 && data.lines().filter(|l| !l.trim().is_empty()).count() < c as usize,
         None => false,
     }
 }
@@ -334,9 +392,7 @@ pub fn audit_log(event: &str, license_id: &str, detail: &str) {
         .unwrap_or_else(|| "0".to_string());
     let prev_count = log_data
         .as_deref()
-        .map(|data| {
-            data.lines().filter(|l| !l.trim().is_empty()).count() as u64
-        })
+        .map(|data| data.lines().filter(|l| !l.trim().is_empty()).count() as u64)
         .unwrap_or(0);
 
     let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -735,7 +791,11 @@ mod flock_stress_tests {
     /// Concurrent writers: 4 threads append interleaved entries through the
     /// real flock-ed critical section; afterwards the chain must verify
     /// 100% (without the lock this test reliably produces a corrupted chain).
+    ///
+    /// Ignored under Miri: `flock` is unavailable there (locking is a no-op),
+    /// so the concurrency guarantee cannot be exercised.
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn concurrent_writers_chain_stays_valid() {
         let n_before = verify_audit_log().unwrap_or(0);
 

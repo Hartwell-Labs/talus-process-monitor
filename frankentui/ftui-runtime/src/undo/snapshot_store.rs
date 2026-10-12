@@ -245,7 +245,8 @@ impl<T> SnapshotStore<T> {
         while self.undo_stack.len() > self.config.max_depth {
             self.undo_stack.pop_front();
         }
-    }}
+    }
+}
 
 // ============================================================================
 // Tests

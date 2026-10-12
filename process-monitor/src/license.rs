@@ -1292,7 +1292,8 @@ pub fn trial_days_remaining() -> Option<i64> {
     let dir = dirs::config_dir()?.join("talus");
     let data = fs::read_to_string(dir.join(".trial.dat")).ok()?;
     let trial: TrialData = serde_json::from_str(&data).ok()?;
-    let start = chrono::NaiveDateTime::parse_from_str(&trial.started_at, "%Y-%m-%dT%H:%M:%SZ").ok()?;
+    let start =
+        chrono::NaiveDateTime::parse_from_str(&trial.started_at, "%Y-%m-%dT%H:%M:%SZ").ok()?;
     let elapsed = chrono::Utc::now().naive_utc() - start;
     Some((30 - elapsed.num_days()).max(0))
 }
