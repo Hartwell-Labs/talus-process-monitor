@@ -179,6 +179,33 @@ Talus follows a **pipeline architecture** — kernel ingestion → userspace det
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Pipeline (diagram)
+
+```mermaid
+flowchart LR
+    subgraph K["Kernel space — eBPF tracepoints"]
+        direction TB
+        A1["sys_enter_execve"]
+        A2["sys_enter_openat"]
+        A3["sys_enter_connect"]
+        A4["… 10 programs total"]
+    end
+
+    B["PerfEventArray<br/>per-CPU · zero-copy"]
+
+    subgraph U["Userspace — Rust"]
+        direction TB
+        C["Reader thread<br/>perf buffers → MPSC"]
+        D["Detection engine<br/>sliding window · entropy · frequency"]
+        E["Response<br/>SIGKILL · cgroup freeze"]
+        F["Output<br/>TUI · JSON · WebSocket<br/>Prometheus · REST API"]
+    end
+
+    A1 & A2 & A3 & A4 --> B --> C --> D
+    D -->|verdict| E
+    D -->|events| F
+```
+
 ### Pipeline stages
 
 | Stage | Component | Throughput | Mechanism |
