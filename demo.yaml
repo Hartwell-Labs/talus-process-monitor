@@ -1,0 +1,155 @@
+# ftui demo definitions (bd-2xj.3)
+# Parsed by frankentui/ftui-runtime/src/demo.rs (lightweight line-based parser).
+# Validated by frankentui/ftui-runtime/tests/demo_yaml_validation.rs in CI.
+#
+# Reconstructed 2026-09-28: the file was never committed with the TUI migration
+# (d7e7fa8), which left the validation test broken on clean checkouts. Content
+# matches the schema documented in src/demo.rs and the coverage the test suite
+# requires (widget gallery, decision card levels, diff strategy, incremental
+# layout, deterministic replay).
+#
+demos:
+  - demo_id: widget_gallery
+    title: "Widget Gallery"
+    claim: "Renders 13 widgets correctly with stable framing and focus order"
+    timeout_seconds: 15
+    terminal_size: [120, 40]
+    tags: [widgets, rendering]
+    steps:
+      - type: render
+        widget: block
+        description: "Block with borders and titles"
+      - type: render
+        widget: paragraph
+        description: "Wrapped paragraph text"
+      - type: render
+        widget: list
+        description: "Selectable list with highlight"
+      - type: render
+        widget: table
+        description: "Table with header row and column constraints"
+      - type: render
+        widget: tabs
+        description: "Tab bar with active indicator"
+      - type: render
+        widget: gauge
+        description: "Progress gauge at 62 percent"
+      - type: render
+        widget: sparkline
+        description: "Sparkline over 64 samples"
+      - type: render
+        widget: chart
+        description: "Layered line chart with axes"
+      - type: render
+        widget: canvas
+        description: "Braille canvas scatter plot"
+      - type: render
+        widget: scrollbar
+        description: "Scrollbar bound to viewport"
+      - type: render
+        widget: input
+        description: "Text input with cursor"
+      - type: render
+        widget: checkbox
+        description: "Checkbox group with mixed state"
+      - type: render
+        widget: progress_tree
+        description: "Tree with per-node progress"
+      - type: assert_content
+        contains: ["Block", "Paragraph", "Gauge"]
+        description: "Key widget labels are present"
+      - type: measure_timing
+        metric: render_frame_us
+        max_us: 4000
+        description: "Full gallery frame under 4 ms"
+
+  - demo_id: galaxy_brain_decision_card
+    title: "Galaxy Brain Decision Card"
+    claim: "Four explanation levels render from traffic light to full Bayesian"
+    timeout_seconds: 12
+    terminal_size: [140, 44]
+    tags: [widgets, rendering, explainability]
+    steps:
+      - type: render
+        widget: decision_card
+        level: traffic_light
+        description: "Level 0 — red/amber/green verdict only"
+      - type: render
+        widget: decision_card
+        level: plain_english
+        description: "Level 1 — one-sentence human explanation"
+      - type: render
+        widget: decision_card
+        level: evidence_terms
+        description: "Level 2 — evidence and terms listed"
+      - type: render
+        widget: decision_card
+        level: full_bayesian
+        description: "Level 3 — posterior, likelihoods, priors"
+      - type: assert_content
+        contains: ["posterior"]
+        description: "Full Bayesian level shows the posterior line"
+
+  - demo_id: bayesian_diff_strategy
+    title: "Bayesian Diff Strategy"
+    claim: "Diff rendering converges under measured timing budget"
+    timeout_seconds: 20
+    terminal_size: [100, 36]
+    tags: [performance, rendering]
+    steps:
+      - type: render
+        widget: diff_view
+        description: "Diff view over synthetic editor state"
+      - type: measure_timing
+        metric: diff_compute_us
+        max_us: 8000
+        description: "Diff computation under 8 ms"
+      - type: measure_timing
+        metric: render_frame_us
+        max_us: 4000
+        description: "Diff view frame under 4 ms"
+      - type: assert_content
+        contains: ["+", "-"]
+        description: "Diff markers present"
+
+  - demo_id: incremental_layout
+    title: "Incremental Layout"
+    claim: "Resize relayouts incrementally with stable focus"
+    timeout_seconds: 10
+    terminal_size: [160, 48]
+    tags: [performance, layout]
+    steps:
+      - type: render
+        widget: layout_tree
+        description: "Split layout tree before resize"
+      - type: resize
+        to: [80, 24]
+        description: "Shrink to half size"
+      - type: render
+        widget: layout_tree
+        description: "Layout tree after shrink"
+      - type: resize
+        to: [160, 48]
+        description: "Grow back to full size"
+      - type: measure_timing
+        metric: relayout_us
+        max_us: 6000
+        description: "Incremental relayout under 6 ms"
+
+  - demo_id: deterministic_replay
+    title: "Deterministic Replay"
+    claim: "Same seed and input stream reproduce identical frames"
+    timeout_seconds: 30
+    terminal_size: [120, 40]
+    tags: [determinism, testing]
+    steps:
+      - type: render
+        widget: stateful_widget
+        seed: 42
+        signal: focus_next
+        description: "Deterministic widget with fixed seed"
+      - type: assert_checksum
+        description: "Frame checksum matches golden value"
+      - type: assert_content
+        contains: ["seed=42"]
+        description: "Replay banner shows the seed"

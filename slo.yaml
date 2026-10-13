@@ -1,0 +1,192 @@
+# ftui SLO budgets (bd-2xj.2)
+# Parsed by frankentui/ftui-runtime/src/slo.rs (parse_slo_yaml).
+# Validated by frankentui/ftui-runtime/tests/slo_yaml_validation.rs in CI.
+#
+# Reconstructed 2026-09-28: the file was never committed with the TUI migration
+# (d7e7fa8), which left the validation test broken on clean checkouts. Values
+# follow the defaults in src/slo.rs (regression 10%, noise 5%, breach count 5)
+# and keep every documented invariant: latency percentiles ascending per family,
+# max_ratio > 1.0 and < 3.28 (ratio-breach replay margin), error_rate max_value
+# <= 1.0, at least two safe_mode_trigger metrics.
+#
+regression_threshold: 0.10
+noise_tolerance: 0.05
+safe_mode_breach_count: 5
+safe_mode_error_rate: 0.10
+
+metrics:
+  # ── Data plane: render frame latency ──────────────────────────────────────
+  render_frame_p50_us:
+    metric_type: latency
+    max_value: 2000.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  render_frame_p95_us:
+    metric_type: latency
+    max_value: 3000.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  render_frame_p99_us:
+    metric_type: latency
+    max_value: 4000.0
+    max_ratio: 1.30
+    safe_mode_trigger: true
+  render_frame_p999_us:
+    metric_type: latency
+    max_value: 8000.0
+    max_ratio: 1.50
+    safe_mode_trigger: false
+
+  # ── Data plane: layout computation ────────────────────────────────────────
+  layout_compute_p50_us:
+    metric_type: latency
+    max_value: 1500.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  layout_compute_p95_us:
+    metric_type: latency
+    max_value: 2500.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  layout_compute_p99_us:
+    metric_type: latency
+    max_value: 3500.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  layout_compute_p999_us:
+    metric_type: latency
+    max_value: 7000.0
+    max_ratio: 1.50
+    safe_mode_trigger: false
+
+  # ── Data plane: diff strategy ──────────────────────────────────────────────
+  diff_strategy_p50_us:
+    metric_type: latency
+    max_value: 1000.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  diff_strategy_p95_us:
+    metric_type: latency
+    max_value: 2000.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  diff_strategy_p99_us:
+    metric_type: latency
+    max_value: 3000.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  diff_strategy_p999_us:
+    metric_type: latency
+    max_value: 6000.0
+    max_ratio: 1.50
+    safe_mode_trigger: false
+
+  # ── Data plane: ANSI presence / output integrity ──────────────────────────
+  ansi_present_p50_us:
+    metric_type: latency
+    max_value: 800.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  ansi_present_p95_us:
+    metric_type: latency
+    max_value: 1200.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  ansi_present_p99_us:
+    metric_type: latency
+    max_value: 2000.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  ansi_present_p999_us:
+    metric_type: latency
+    max_value: 4000.0
+    max_ratio: 1.50
+    safe_mode_trigger: false
+
+  # ── Data plane: memory ─────────────────────────────────────────────────────
+  heap_rss_bytes:
+    metric_type: memory
+    max_value: 1500000000.0
+    max_ratio: 2.0
+    safe_mode_trigger: true
+  allocations_per_frame:
+    metric_type: memory
+    max_value: 50000.0
+    max_ratio: 2.0
+    safe_mode_trigger: false
+
+  # ── Decision plane: Bayesian machinery ─────────────────────────────────────
+  posterior_update_p50_us:
+    metric_type: latency
+    max_value: 300.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  posterior_update_p95_us:
+    metric_type: latency
+    max_value: 600.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  posterior_update_p99_us:
+    metric_type: latency
+    max_value: 1000.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  posterior_update_p999_us:
+    metric_type: latency
+    max_value: 2500.0
+    max_ratio: 1.50
+    safe_mode_trigger: false
+
+  voi_computation_p50_us:
+    metric_type: latency
+    max_value: 200.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  voi_computation_p95_us:
+    metric_type: latency
+    max_value: 400.0
+    max_ratio: 1.25
+    safe_mode_trigger: false
+  voi_computation_p99_us:
+    metric_type: latency
+    max_value: 800.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  voi_computation_p999_us:
+    metric_type: latency
+    max_value: 2000.0
+    max_ratio: 1.50
+    safe_mode_trigger: false
+
+  conformal_predict_p99_us:
+    metric_type: latency
+    max_value: 1200.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  eprocess_update_p99_us:
+    metric_type: latency
+    max_value: 500.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  bocpd_update_p99_us:
+    metric_type: latency
+    max_value: 700.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+  cascade_decision_p99_us:
+    metric_type: latency
+    max_value: 1500.0
+    max_ratio: 1.30
+    safe_mode_trigger: false
+
+  # ── Error rates ────────────────────────────────────────────────────────────
+  render_error_rate:
+    metric_type: error_rate
+    max_value: 0.02
+    max_ratio: 3.0
+    safe_mode_trigger: false
+  decision_error_rate:
+    metric_type: error_rate
+    max_value: 0.01
+    max_ratio: 3.0
+    safe_mode_trigger: false

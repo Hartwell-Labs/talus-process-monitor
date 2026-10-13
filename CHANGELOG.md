@@ -4,6 +4,74 @@ All notable changes to talus-process-monitor will be documented in this file.
 
 ## [Unreleased]
 
+### Security: cross-process audit locking (concurrency fix, 2026-09-28)
+- `audit.rs`: `audit_log()` (read-tail → hash → append → anchor) is now
+  serialized across processes with a `flock`-ed `audit.log.lock` (0600);
+  concurrent writers (monitor + license CLI, parallel test binaries) used to
+  read the same `prev_hash` and interleave entries, corrupting the chain.
+- `verify_audit_log()` takes the lock shared — verification never observes a
+  torn append. Lock acquisition failure = fail-closed (entry not recorded
+  rather than chain corruption).
+- New test `concurrent_writers_chain_stays_valid` (4 threads × 15 interleaved
+  entries → chain verifies 100%).
+
+### Security: sandbox degradation is audit-visible (2026-09-28)
+- `sandbox.rs`: new `seccomp_is_degraded()` probe (NoNewPrivs + PR_GET_SECCOMP);
+  when the syscall filter could not be installed, `apply()` now prints a loud
+  SECURITY WARNING and records a `SANDBOX_DEGRADED` entry in the audit
+  register — unhardened deployments are visible in the audit trail instead of
+  silently relying on the WARN line on stderr.
+
+### Security: stable audit key (2026-09-26)
+- `audit.rs`: audit HMAC key no longer derived from the volatile machine
+  fingerprint (hostname + MACs — a NIC change used to invalidate the entire
+  audit history; the fingerprint is public, so the key was publicly
+  recomputable). New random 32-byte key persisted once at
+  `~/.config/talus/.audit.key` (0600), bounded read from /dev/urandom.
+- Dual-key verification (`audit_verify_keys`): stable key first, legacy
+  machine-derived key as fallback — mixed-era logs verify as VALID; new
+  entries survive MAC/hostname changes. Length anchor verifies under both
+  keys (seamless migration).
+- Tests 102/102 PASS; live re-test: mixed machine-key/stable-key log →
+  VALID 3/3, chain continues across eras.
+
+### Security: trial reset prevention + honest banner (2026-09-26)
+- `license.rs`: `is_trial_active()` refuses a second 30-day trial when the
+  audit trail shows a prior trial lifecycle (`TRIAL_STARTED`/`TRIAL_EXPIRED`)
+  or when the audit log/anchor pair indicates truncation before re-trial —
+  audit event `TRIAL_RESET_DENIED`. Previously deleting `~/.config/talus/
+  .trial.dat` restarted the trial window indefinitely (and an EXPIRED trial
+  was recreated on every run — infinite trial loop).
+- `audit.rs`: `trial_reset_suspected()` heuristic (trial lifecycle in log,
+  deleted log with live anchor, or truncated log vs anchor count).
+- `main.rs` banner: running trial shown as "Enterprise Trial (Nd left)"
+  instead of "Community" + phantom "Org: Enterprise Trial" line.
+- Residual risk documented: removing audit.log + .audit.anchor + .trial.dat
+  on a machine that never contacted the license server leaves no trace —
+  closed server-side (trial tracking keyed by machine_id).
+- Tests 101/101 PASS; live re-test: clean machine → trial starts; log with
+  TRIAL_STARTED + deleted trial file → re-trial refused, Community mode.
+
+### Security: audit log length anchor (2026-09-26)
+- `audit.rs`: new hidden anchor file `~/.config/talus/.audit.anchor` (0600)
+  binding `last_entry_hash | entry_count` with an HMAC-SHA256 over the audit
+  key (domain-separated: `talus-audit-anchor-v1`); refreshed on every append.
+- `verify_audit_log()` now detects **truncation** (any cut), **full deletion**
+  of the log while an anchor exists, and rewrites to a different entry count —
+  the hash chain alone verified truncated logs as VALID — a HIGH-severity
+  finding from the internal security review).
+- Backward compatible: legacy logs without an anchor get anchored at first
+  verification; a deleted anchor is treated as absent (no false fails),
+  documented residual risk: attacker able to remove BOTH files erases history
+  (user-level storage — host hardening / deployment-level controls cover the
+  privileged-attacker case).
+- Tests: `anchor_mac_binds_hash_and_count` added; suite 101/101 PASS;
+  live re-test: truncate-to-zero / partial truncate / delete → exit 1 with
+  explicit message; valid log → VALID, exit 0.
+- An earlier reported issue with `verify` exit codes was withdrawn as a
+  measurement artifact (a pipe
+  swallowed the exit status; direct measurement shows correct exit 1).
+
 ### 0.8.2 (2026-09-23): unified versioning + fresh PyPI release
 - Version unified across Cargo, PyPI package and git tags: **0.8.2** (the old
   `0.8.1-f` / `0.8.1.post2` split is gone — PEP 440 friendly from now on)

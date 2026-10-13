@@ -427,8 +427,14 @@ fn run_monitor(args: MonitorArgs) -> Result<()> {
     } else {
         "\x1b[33m"
     };
+    // Honest banner (security hardening): a running trial is shown as a
+    // trial with its remaining window, not as "Community" with a phantom
+    // "Enterprise Trial" organization line.
+    let trial_days = crate::license::trial_days_remaining();
     let tier_label = if license_state.is_activated {
         format!("{}Enterprise{}", banner_color, "\x1b[0m")
+    } else if let Some(days) = trial_days {
+        format!("\x1b[33mEnterprise Trial ({}d left)\x1b[0m", days.max(0))
     } else {
         "\x1b[33mCommunity\x1b[0m".to_string()
     };
@@ -442,7 +448,9 @@ fn run_monitor(args: MonitorArgs) -> Result<()> {
         tier_label
     );
     if let Some(ref org) = license_state.organization {
-        eprintln!("  \x1b[36m║\x1b[0m  Org:      {:<38} \x1b[36m║\x1b[0m", org);
+        if trial_days.is_none() {
+            eprintln!("  \x1b[36m║\x1b[0m  Org:      {:<38} \x1b[36m║\x1b[0m", org);
+        }
     }
     eprintln!(
         "  \x1b[36m║\x1b[0m  eBPF:     {:<38} \x1b[36m║\x1b[0m",

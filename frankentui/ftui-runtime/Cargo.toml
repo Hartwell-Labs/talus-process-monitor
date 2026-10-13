@@ -33,9 +33,6 @@ crossterm-compat = ["ftui-core/crossterm"]
 # Native TTY backend (replaces Crossterm on Unix). When enabled, provides
 # `Program::with_native_backend()` constructor using `ftui-tty`.
 native-backend = ["dep:ftui-tty"]
-# Enable persistent data structures (HAMT) for O(1) snapshot-based undo/redo.
-# Re-exports `im` crate types (HashMap, Vector, OrdMap) through `ftui_runtime::undo::persistent`.
-hamt = ["dep:im"]
 # Enable event trace recording and replay for deterministic debugging.
 # Adds JSONL + gzip serialization of input events with nanosecond timestamps.
 event-trace = ["dep:serde", "dep:serde_json", "dep:flate2"]
@@ -82,7 +79,6 @@ tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"]
 serde = { version = "1.0.229", features = ["derive"], optional = true }
 serde_json = { version = "1.0.151", optional = true }
 base64 = { version = "0.23", optional = true }
-im = { version = "15.1", optional = true }
 flate2 = { version = "1.1", optional = true }
 toml = { version = "1.1.3", optional = true }
 
@@ -95,7 +91,6 @@ tempfile = "3.22.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 base64 = "0.23"
-im = "15.1"
 flate2 = "1.1"
 # OpenTelemetry testing infrastructure (kept in lockstep with the optional
 # runtime deps above so the test build resolves a single otel version set)

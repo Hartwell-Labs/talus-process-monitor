@@ -71,7 +71,7 @@ jobs:
           path: sbom/
           retention-days: 90
 
-  # ── Secret Scanning (gitleaks) ─────────────────────────────────────────
+  # ── Secret Scanning (gitleaks CLI — no org license needed) ─────────────
   secret-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest

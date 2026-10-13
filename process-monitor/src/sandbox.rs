@@ -442,6 +442,28 @@ pub fn install_seccomp_filter() -> Result<()> {
     Ok(())
 }
 
+/// True when the syscall filter could NOT be installed (or NNP could not be
+/// set). Exposed so callers can decide to refuse startup instead of running
+/// unsandboxed (hardening policy).
+pub fn seccomp_is_degraded() -> bool {
+    // NNP bit stays set once it succeeds — read /proc/self/status NoNewPrivs
+    // plus the PR_GET_SECCOMP probe: a filter is active only if the probe
+    // reports SECCOMP_MODE_FILTER.
+    let nnp = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("NoNewPrivs:\t")?.parse::<i32>().ok())
+        })
+        .unwrap_or(0);
+    if nnp != 1 {
+        return true;
+    }
+    // PR_GET_SECCOMP = 21: 0/1 = a mode is active, EACCES/EINVAL = none.
+    let rc = unsafe { libc::prctl(21, 0, 0, 0, 0) };
+    rc < 0
+}
+
 // ── Landlock filesystem restrictions ─────────────────────────────────────────
 
 /// Restrict filesystem access via Landlock LSM (kernel ≥5.13).
@@ -692,6 +714,19 @@ pub fn apply(bpf_path: &Path) -> Result<()> {
     // 3. Apply Landlock FS restrictions (kernel ≥5.13)
     if let Err(e) = apply_landlock(bpf_path) {
         eprintln!("[sandbox] WARN: Landlock failed: {e}");
+    }
+
+    // 4. Degradation transparency: an agent running WITHOUT its syscall
+    // filter must say so loudly and record it in the audit register, so
+    // SIEM/audit reviewers can spot unhardened deployments (seccomp is the
+    // primary control; Landlock degradation is reported by apply_landlock).
+    if seccomp_is_degraded() {
+        eprintln!("[sandbox] SECURITY WARNING: seccomp filter NOT active — running with degraded isolation");
+        crate::audit::audit_log(
+            "SANDBOX_DEGRADED",
+            "-",
+            "seccomp filter not active (kernel refused NNP/filter install)",
+        );
     }
 
     eprintln!("[sandbox] hardening applied ✓");
