@@ -19,6 +19,35 @@ default-members = ["process-monitor"]
 exclude = ["license-keygen"]
 resolver = "2"
 
+# FrankenTUI jest wlasnym kodem tego repo (vendored z crates.io do frankentui/),
+# ale procesowy Cargo.toml deklarowal zaleznosci jako `ftui = { version = "0.6" }`
+# — czyli zrodlo z crates.io, nie lokalne. Skutek: w rozwiazanym grafie kazdy
+# franken-crate istnial DWA razy, raz jako path/lokalny (bo jest w members),
+# raz z crates.io, obie wersje 0.6.0. Dwie kopie tego samego kodu w jednym
+# buildzie to nie tylko marnotrawstwo — Cargo traktuje je jako dwa rozne pakiety,
+# wiec `use ftui_core::X` z jednego drzewa i drugiego sa rozne typy.
+#
+# Dla ftui-runtime roznica nie byla kosmetyczna: wersja z crates.io wciaz
+# zawierala modul `hamt` z crate `im` (niezalezny), ktory 28.09 usunalismy
+# z repo jako deprecated. Build mogl wiec wybrac tamta wersje i skompilowac
+# kod, ktorego juz nie utrzymujemy.
+#
+# [patch.crates-io] przepisuje zrodlo na lokalne. Wlasne `path` w procesowym
+# Cargo.toml tego nie robilo — patch dziala przekrojnie na caly graf.
+[patch.crates-io]
+ftui = { path = "frankentui/ftui" }
+ftui-a11y = { path = "frankentui/ftui-a11y" }
+ftui-backend = { path = "frankentui/ftui-backend" }
+ftui-core = { path = "frankentui/ftui-core" }
+ftui-extras = { path = "frankentui/ftui-extras" }
+ftui-i18n = { path = "frankentui/ftui-i18n" }
+ftui-layout = { path = "frankentui/ftui-layout" }
+ftui-render = { path = "frankentui/ftui-render" }
+ftui-runtime = { path = "frankentui/ftui-runtime" }
+ftui-style = { path = "frankentui/ftui-style" }
+ftui-text = { path = "frankentui/ftui-text" }
+ftui-widgets = { path = "frankentui/ftui-widgets" }
+
 [workspace.package]
 version = "0.8.1"
 edition = "2021"

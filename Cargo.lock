@@ -1782,30 +1782,14 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 name = "ftui"
 version = "0.6.0"
 dependencies = [
- "ftui-core 0.6.0",
- "ftui-extras 0.6.0",
- "ftui-layout 0.6.0",
- "ftui-render 0.6.0",
- "ftui-runtime 0.6.0",
- "ftui-style 0.6.0",
- "ftui-text 0.6.0",
- "ftui-widgets 0.6.0",
-]
-
-[[package]]
-name = "ftui"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3570c36c63707251170aff6778ce2336055ff1e47ad4f83453ab4ca0e05bcc"
-dependencies = [
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-extras 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-layout 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-style 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-text 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-widgets 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ftui-core",
+ "ftui-extras",
+ "ftui-layout",
+ "ftui-render",
+ "ftui-runtime",
+ "ftui-style",
+ "ftui-text",
+ "ftui-widgets",
 ]
 
 [[package]]
@@ -1813,35 +1797,15 @@ name = "ftui-a11y"
 version = "0.6.0"
 dependencies = [
  "ahash",
- "ftui-core 0.6.0",
-]
-
-[[package]]
-name = "ftui-a11y"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d27f8c470f267a8480dc81d93c936682452b512dcaeab4b92215a2fa81aa72"
-dependencies = [
- "ahash",
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ftui-core",
 ]
 
 [[package]]
 name = "ftui-backend"
 version = "0.6.0"
 dependencies = [
- "ftui-core 0.6.0",
- "ftui-render 0.6.0",
-]
-
-[[package]]
-name = "ftui-backend"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b5e91b38270c2bf340c47ee6792f1aa15c3d2c63d67768f11c097cdaf0aa610"
-dependencies = [
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ftui-core",
+ "ftui-render",
 ]
 
 [[package]]
@@ -1872,40 +1836,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-core"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcbde4a176f851bd42666e72910ef7c394fde59f951ecf9137596e30ad5df9f5"
-dependencies = [
- "ahash",
- "arc-swap",
- "bitflags 2.13.1",
- "crossterm",
- "getrandom 0.3.4",
- "getrandom 0.4.3",
- "libc",
- "signal-hook 0.4.4",
- "unicode-display-width",
- "unicode-segmentation",
- "unicode-width",
- "web-time",
-]
-
-[[package]]
 name = "ftui-extras"
 version = "0.6.0"
 dependencies = [
  "base64 0.23.1",
  "bytemuck",
  "criterion",
- "ftui-core 0.6.0",
- "ftui-layout 0.6.0",
+ "ftui-core",
+ "ftui-layout",
  "ftui-pty",
- "ftui-render 0.6.0",
- "ftui-runtime 0.6.0",
- "ftui-style 0.6.0",
- "ftui-text 0.6.0",
- "ftui-widgets 0.6.0",
+ "ftui-render",
+ "ftui-runtime",
+ "ftui-style",
+ "ftui-text",
+ "ftui-widgets",
  "image",
  "math-text-transform",
  "pollster",
@@ -1928,35 +1872,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-extras"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b333c52b3fa031eddaff194a68a1b78924852fdb233154fc2686511bfeb185cc"
-dependencies = [
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-style 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-text 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-widgets 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "unicode-display-width",
- "unicode-segmentation",
- "web-time",
-]
-
-[[package]]
 name = "ftui-harness"
 version = "0.6.0"
 dependencies = [
  "blake3",
- "ftui-core 0.6.0",
- "ftui-extras 0.6.0",
- "ftui-layout 0.6.0",
+ "ftui-core",
+ "ftui-extras",
+ "ftui-layout",
  "ftui-pty",
- "ftui-render 0.6.0",
- "ftui-runtime 0.6.0",
- "ftui-style 0.6.0",
- "ftui-text 0.6.0",
- "ftui-widgets 0.6.0",
+ "ftui-render",
+ "ftui-runtime",
+ "ftui-style",
+ "ftui-text",
+ "ftui-widgets",
  "portable-pty",
  "proptest",
  "ratatui",
@@ -1973,20 +1901,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-i18n"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31804e7fb38ce458da60262fb5deab734950c63763fd39c5b13cacface691591"
-
-[[package]]
 name = "ftui-layout"
 version = "0.6.0"
 dependencies = [
  "blake3",
  "criterion",
- "ftui-core 0.6.0",
+ "ftui-core",
  "ftui-harness",
- "ftui-render 0.6.0",
+ "ftui-render",
  "proptest",
  "rustc-hash 2.1.3",
  "serde",
@@ -1996,24 +1918,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-layout"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc61efaa1adadc14936d57e11942d34d61d88cf01f5622ae8350f42d33aea73e"
-dependencies = [
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustc-hash 2.1.3",
- "serde",
- "serde_json",
- "smallvec",
-]
-
-[[package]]
 name = "ftui-pty"
 version = "0.6.0"
 dependencies = [
  "frankenterm-core",
- "ftui-core 0.6.0",
+ "ftui-core",
  "portable-pty",
  "serde",
  "serde_json",
@@ -2030,29 +1939,13 @@ dependencies = [
  "bitflags 2.13.1",
  "bumpalo",
  "criterion",
- "ftui-core 0.6.0",
+ "ftui-core",
  "memchr",
  "proptest",
  "serde",
  "serde_json",
  "smallvec",
  "tracing",
- "unicode-segmentation",
- "web-time",
-]
-
-[[package]]
-name = "ftui-render"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7280990677abf1c5d6eb14da84db5188c33a6aa6af072e3d0383597249ea8fb6"
-dependencies = [
- "ahash",
- "bitflags 2.13.1",
- "bumpalo",
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "memchr",
- "smallvec",
  "unicode-segmentation",
  "web-time",
 ]
@@ -2066,14 +1959,14 @@ dependencies = [
  "base64 0.23.1",
  "criterion",
  "flate2",
- "ftui-backend 0.6.0",
- "ftui-core 0.6.0",
+ "ftui-backend",
+ "ftui-core",
  "ftui-harness",
- "ftui-i18n 0.6.0",
- "ftui-layout 0.6.0",
- "ftui-render 0.6.0",
- "ftui-style 0.6.0",
- "ftui-text 0.6.0",
+ "ftui-i18n",
+ "ftui-layout",
+ "ftui-render",
+ "ftui-style",
+ "ftui-text",
  "ftui-tty",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -2092,33 +1985,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-runtime"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6183b11343c07b86cedfbd4cb9be97804157a9cb3c3af22ebe82a7a3e8cffaa"
-dependencies = [
- "arc-swap",
- "ftui-backend 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-i18n 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-layout 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-style 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-text 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tracing",
- "unicode-segmentation",
- "unicode-width",
- "web-time",
-]
-
-[[package]]
 name = "ftui-style"
 version = "0.6.0"
 dependencies = [
  "ahash",
  "arc-swap",
- "ftui-core 0.6.0",
- "ftui-render 0.6.0",
+ "ftui-core",
+ "ftui-render",
  "proptest",
  "serde",
  "serde_json",
@@ -2127,26 +2000,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-style"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b4c4c43226b06036bb50bae4c7180afca42031a1bcb12497e666f285982652c"
-dependencies = [
- "ahash",
- "arc-swap",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tracing",
-]
-
-[[package]]
 name = "ftui-text"
 version = "0.6.0"
 dependencies = [
  "criterion",
- "ftui-core 0.6.0",
- "ftui-layout 0.6.0",
- "ftui-render 0.6.0",
- "ftui-style 0.6.0",
+ "ftui-core",
+ "ftui-layout",
+ "ftui-render",
+ "ftui-style",
  "lru",
  "proptest",
  "ropey",
@@ -2162,31 +2023,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftui-text"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f93c0914f3ee5b042c3ce0983a293f306b9953f8d6e7f2b09b394aab2d8eae"
-dependencies = [
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-layout 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-style 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "lru",
- "ropey",
- "rustc-hash 2.1.3",
- "smallvec",
- "tracing",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
 name = "ftui-tty"
 version = "0.6.0"
 dependencies = [
- "ftui-backend 0.6.0",
- "ftui-core 0.6.0",
- "ftui-render 0.6.0",
+ "ftui-backend",
+ "ftui-core",
+ "ftui-render",
  "nix 0.31.3",
  "portable-pty",
  "proptest",
@@ -2201,39 +2043,19 @@ dependencies = [
  "ahash",
  "bitflags 2.13.1",
  "criterion",
- "ftui-a11y 0.6.0",
- "ftui-core 0.6.0",
- "ftui-layout 0.6.0",
- "ftui-render 0.6.0",
- "ftui-runtime 0.6.0",
- "ftui-style 0.6.0",
- "ftui-text 0.6.0",
+ "ftui-a11y",
+ "ftui-core",
+ "ftui-layout",
+ "ftui-render",
+ "ftui-runtime",
+ "ftui-style",
+ "ftui-text",
  "proptest",
  "regex",
  "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",
- "unicode-segmentation",
- "unicode-width",
- "web-time",
-]
-
-[[package]]
-name = "ftui-widgets"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "021fec4da722917ffc9337757774ab582b218bf153a60cd97fa79256e5e7ae66"
-dependencies = [
- "ahash",
- "bitflags 2.13.1",
- "ftui-a11y 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-layout 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-style 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-text 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-segmentation",
  "unicode-width",
  "web-time",
@@ -4180,15 +4002,15 @@ dependencies = [
  "crossterm",
  "dirs",
  "ed25519-dalek 3.0.0",
- "ftui 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-extras 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-layout 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-render 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-style 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-text 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ftui-widgets 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ftui",
+ "ftui-core",
+ "ftui-extras",
+ "ftui-layout",
+ "ftui-render",
+ "ftui-runtime",
+ "ftui-style",
+ "ftui-text",
+ "ftui-widgets",
  "futures",
  "hex",
  "hostname 0.4.2",
