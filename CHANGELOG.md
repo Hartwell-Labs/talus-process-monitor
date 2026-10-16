@@ -2,7 +2,11 @@
 
 All notable changes to talus-process-monitor will be documented in this file.
 
-## [Unreleased]
+## [0.8.2] - unreleased
+
+### Changed
+- Version 0.8.2 unified across Cargo.toml, CHANGELOG.md, and the v0.8.2 tag.
+
 
 ### Security: cross-process audit locking (concurrency fix, 2026-09-28)
 - `audit.rs`: `audit_log()` (read-tail → hash → append → anchor) is now

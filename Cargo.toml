@@ -16,7 +16,7 @@ members = [
 # bpfel-unknown-none and cannot be built/tested for the host; build.sh
 # invokes it explicitly with --manifest-path and -Z build-std.
 default-members = ["process-monitor"]
-exclude = ["license-keygen"]
+exclude = ["license-keygen", "fuzz"]
 resolver = "2"
 
 # FrankenTUI jest wlasnym kodem tego repo (vendored z crates.io do frankentui/),
@@ -49,7 +49,7 @@ ftui-text = { path = "frankentui/ftui-text" }
 ftui-widgets = { path = "frankentui/ftui-widgets" }
 
 [workspace.package]
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 license = "MIT"
 
