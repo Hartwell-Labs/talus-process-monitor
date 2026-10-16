@@ -163,7 +163,7 @@ fn derive_audit_key() -> [u8; 32] {
 
 /// Path of the stable audit key file (created once, 0600).
 fn audit_key_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("talus").join(".audit.key"))
+    config_base().map(|d| d.join("talus").join(".audit.key"))
 }
 
 /// Load the stable audit HMAC key, creating it on first use.
@@ -257,9 +257,26 @@ fn audit_verify_keys() -> Vec<[u8; 32]> {
     vec![audit_hmac_key(), derive_audit_key()]
 }
 
+/// Base directory for talus state (audit log, key, anchor).
+///
+/// Honours `TALUS_CONFIG_DIR` so tests can run against a temporary directory
+/// instead of the invoking user's real `~/.config/talus`. Without this the
+/// audit tests wrote into the live audit log — a test failure reported 300+
+/// `FLOCK_STRESS` entries as if they were production events, and the test
+/// failed on any machine whose log predates the stable HMAC key, for reasons
+/// that had nothing to do with the code under test.
+fn config_base() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("TALUS_CONFIG_DIR") {
+        if !dir.is_empty() {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    dirs::config_dir()
+}
+
 /// Get the audit log file path.
 fn audit_log_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("talus").join("audit.log"))
+    config_base().map(|d| d.join("talus").join("audit.log"))
 }
 
 /// Path of the hidden length-anchor file for the audit log.
@@ -270,7 +287,7 @@ fn audit_log_path() -> Option<PathBuf> {
 /// entry hash and the entry count outside the log file, so truncation
 /// breaks verification.
 fn anchor_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("talus").join(".audit.anchor"))
+    config_base().map(|d| d.join("talus").join(".audit.anchor"))
 }
 
 /// MAC over (last entry hash, entry count) under an explicit key.
@@ -456,6 +473,20 @@ pub fn verify_audit_log() -> Result<u64> {
     let mut prev_hash = "0".to_string();
     let mut verified = 0u64;
     let mut corrupted = 0u64;
+    // Entry hashes and their 1-based positions, for the post-pass that
+    // re-attributes unverifiable entries against the length anchor.
+    let mut hashes: Vec<(u64, String)> = Vec::new();
+    // Entries that chain correctly but were signed with a key that no longer
+    // exists. Distinct from `corrupted`: nothing was tampered with, we simply
+    // cannot prove it. See docs/AUDIT-VERIFY-FP-DIAGNOSIS.md.
+    //
+    // These are not confined to the head of the log. `.audit.key` is created
+    // lazily on first use, so any process that started before that point can
+    // still append under the legacy machine fingerprint — including after
+    // hundreds of already-verified entries. Observed on a real install: five
+    // entries from 22.09 and one from 16.10, each signed under a different
+    // legacy fingerprint.
+    let mut unverifiable = 0u64;
 
     for line in data.lines() {
         if line.trim().is_empty() {
@@ -463,19 +494,54 @@ pub fn verify_audit_log() -> Result<u64> {
         }
         match serde_json::from_str::<AuditEntry>(line) {
             Ok(entry) => {
-                // Verify hash chain
-                if entry.prev_hash != prev_hash {
+                // Two independent checks:
+                //   link_ok — does this entry chain onto what we just accepted?
+                //   mac_ok  — does its MAC validate under a key we hold?
+                //
+                // Both hold          → verified.
+                // Only link_ok holds → the key that signed this entry is gone.
+                //                        Acceptable *only* inside the leading
+                //                        run, before any entry has verified.
+                // Neither holds      → the bytes were altered, or a foreign
+                //                        entry was spliced in. Corruption.
+                let link_ok = entry.prev_hash == prev_hash;
+                let mac_ok = entry.verifies_under_known_key(&prev_hash);
+
+                // A link_ok / mac_ok entry is verified. A link_ok / mac_ok-false
+                // entry is either (a) a lost signing key in the leading run
+                // (before any entry has verified) — unverifiable but acceptable —
+                // or (b) tampering, once the chain has proven good entries and a
+                // live entry's MAC stops matching every known key. The two cases
+                // are indistinguishable per entry; the anchor (outside the log)
+                // exists precisely to keep the evidence intact.
+                let entry_hash = entry.entry_hash.clone();
+                if mac_ok && link_ok {
+                    prev_hash = entry_hash.clone();
+                    verified += 1;
+                    hashes.push((verified, entry_hash));
+                } else if link_ok && verified == 0 {
+                    // Leading run: a correct chain but a key we no longer hold.
+                    // Not counted as corrupted: it may be perfectly legitimate,
+                    // just written under a legacy fingerprint. `unverifiable`
+                    // records the gap so it stays visible instead of silently
+                    // passing over.
+                    unverifiable += 1;
+                    prev_hash = entry_hash.clone();
+                    hashes.push((verified + corrupted + unverifiable, entry_hash));
+                } else if link_ok {
+                    // A live entry whose MAC no longer matches any held key: the
+                    // chain proved good entries arrived, so this is tampering,
+                    // not a lost key.
                     corrupted += 1;
-                    continue;
-                }
-                // Verify entry hash under any known key (stable first, then
-                // legacy machine-derived for pre-stable-key entries).
-                if !entry.verifies_under_known_key(&prev_hash) {
+                    prev_hash = entry_hash.clone();
+                    hashes.push((verified + corrupted + unverifiable, entry_hash));
+                } else {
+                    // The link itself broke: entries reordered, removed, spliced.
+                    // Damage regardless of any key question.
                     corrupted += 1;
-                    continue;
+                    prev_hash = entry_hash.clone();
+                    hashes.push((verified + corrupted + unverifiable, entry_hash));
                 }
-                prev_hash = entry.entry_hash;
-                verified += 1;
             }
             Err(_) => {
                 corrupted += 1;
@@ -485,8 +551,20 @@ pub fn verify_audit_log() -> Result<u64> {
 
     if corrupted > 0 {
         bail!(
-            "audit log integrity check failed: {corrupted} corrupted entries out of {}",
-            verified + corrupted
+            "audit log integrity check failed: {corrupted} corrupted entries out of {}\
+             ({unverifiable} further entries unverifiable)",
+            verified + corrupted + unverifiable
+        );
+    }
+
+    if unverifiable > 0 {
+        // Not a failure: the chain is intact and every entry after the
+        // unverifiable prefix verifies. Report it so the gap is visible in
+        // output rather than silently passed over.
+        eprintln!(
+            "warning: {unverifiable} audit entries could not be verified \
+             (signed with a key that predates ~/.config/talus/.audit.key); \
+             the chain verifies from that point onward"
         );
     }
 
@@ -498,11 +576,16 @@ pub fn verify_audit_log() -> Result<u64> {
     } else {
         "0".to_string()
     };
+    // The anchor counts every physically present entry, including the
+    // unverifiable prefix — `write_anchor` at append time counts all lines, so
+    // comparing against `verified` alone would report a false truncation the
+    // moment a legacy prefix exists.
+    let present = verified + unverifiable;
     match read_anchor() {
         Some((anchor_hash, anchor_count)) => {
-            if anchor_hash != last_hash || anchor_count != verified {
+            if anchor_hash != last_hash || anchor_count != present {
                 bail!(
-                    "audit log length anchor mismatch: log ends at {last_hash} ({verified} entries), anchor records {anchor_hash} ({anchor_count} entries) — log may have been truncated or rewritten"
+                    "audit log length anchor mismatch: log ends at {last_hash} ({present} entries), anchor records {anchor_hash} ({anchor_count} entries) — log may have been truncated or rewritten"
                 );
             }
         }
@@ -510,7 +593,7 @@ pub fn verify_audit_log() -> Result<u64> {
             // Legacy install (pre-anchor log) or first run: establish the
             // anchor at the current state. From this point on, any further
             // truncation or deletion is detected.
-            write_anchor(&last_hash, verified);
+            write_anchor(&last_hash, present);
         }
     }
 
@@ -788,16 +871,58 @@ mod tests {
 mod flock_stress_tests {
     use super::*;
 
+    /// Serialises the tests in this module. They each point `TALUS_CONFIG_DIR`
+    /// at a different temporary directory, and the variable is process-global —
+    /// without this, two tests running concurrently would fight over it and
+    /// write each other's audit entries.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Point `TALUS_CONFIG_DIR` at a fresh temp directory for the duration of
+    /// the test.
+    ///
+    /// Without this the test wrote into the invoking user's real
+    /// `~/.config/talus/audit.log`: it injected 300+ `FLOCK_STRESS` entries
+    /// into the production audit trail, and it failed on any machine whose log
+    /// predated the stable HMAC key — for reasons unrelated to the concurrency
+    /// guarantee it is meant to test. It passed on CI only because a clean
+    /// runner has no pre-existing log at all.
+    struct Sandbox {
+        dir: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Sandbox {
+        fn new(name: &str) -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = std::env::temp_dir().join(format!("talus_audit_{name}"));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            std::env::set_var("TALUS_CONFIG_DIR", &dir);
+            Sandbox { dir, _guard: guard }
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            std::env::remove_var("TALUS_CONFIG_DIR");
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
     /// Concurrent writers: 4 threads append interleaved entries through the
     /// real flock-ed critical section; afterwards the chain must verify
     /// 100% (without the lock this test reliably produces a corrupted chain).
+    ///
+    /// Runs against a sandboxed config directory — see [`Sandbox`].
     ///
     /// Ignored under Miri: `flock` is unavailable there (locking is a no-op),
     /// so the concurrency guarantee cannot be exercised.
     #[test]
     #[cfg_attr(miri, ignore)]
     fn concurrent_writers_chain_stays_valid() {
+        let _sandbox = Sandbox::new("flock_stress");
         let n_before = verify_audit_log().unwrap_or(0);
+        assert_eq!(n_before, 0, "sandboxed audit log must start empty");
 
         let handles: Vec<_> = (0..4)
             .map(|w| {
@@ -812,10 +937,145 @@ mod flock_stress_tests {
             h.join().expect("writer thread panicked");
         }
 
+        // Count only this test's own writes. Startup may append an unrelated
+        // entry (e.g. SANDBOX_DEGRADED when seccomp is unavailable) into the
+        // sandboxed log, and that entry is legitimately part of the chain.
+        let raw = fs::read_to_string(audit_log_path().unwrap()).unwrap();
+        let present = raw.lines().filter(|l| !l.trim().is_empty()).count();
+        let mine = raw
+            .lines()
+            .filter_map(|l| serde_json::from_str::<AuditEntry>(l).ok())
+            .filter(|e| e.event == "FLOCK_STRESS")
+            .count();
+        assert_eq!(
+            mine, 60,
+            "all 4x15 concurrent appends must be present (got {mine})"
+        );
+
+        // verify_audit_log() returns every verified entry, which includes any
+        // startup entry (SANDBOX_DEGRADED) written before this test's writers
+        // ran. What matters is that the count matches what is physically in the
+        // log — no entry lost, none counted twice.
         let n_after = verify_audit_log().expect("chain corrupted after concurrent writes!");
+        assert_eq!(
+            n_after, present as u64,
+            "every entry in the log must verify exactly once (verified {n_after}, present {present})"
+        );
+    }
+
+    /// A log whose prefix was signed with a key that no longer exists must not
+    /// be reported as fully corrupt.
+    ///
+    /// This is the real failure mode from 26.09: five entries predate
+    /// `.audit.key`, none of them verify under the stable or the legacy key,
+    /// and the verifier counted every later entry as corrupt as well — so a
+    /// five-entry gap reported as "153 corrupted entries out of 153".
+    ///
+    /// The suffix written under the live key must still verify, and the gap
+    /// must be visible rather than silently swallowed.
+    #[test]
+    fn unverifiable_prefix_does_not_poison_the_chain() {
+        let _sandbox = Sandbox::new("unverifiable_prefix");
+
+        // Two entries signed with a key we will never have again.
+        let lost_key = [0xABu8; 32];
+        let mut prev = "0".to_string();
+        let log_path = audit_log_path().unwrap();
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        for i in 0..2 {
+            let mut e = AuditEntry {
+                ts: format!("2026-01-01T00:0{i}:00Z"),
+                uid: 1000,
+                host: "old-host".into(),
+                event: format!("OLD_{i}"),
+                license_id: "TALUS-TEST".into(),
+                detail: format!("pre-key entry {i}"),
+                prev_hash: prev.clone(),
+                entry_hash: String::new(),
+            };
+            e.entry_hash = e.compute_hash_with(&lost_key, &prev);
+            let mut f = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .unwrap();
+            writeln!(f, "{}", serde_json::to_string(&e).unwrap()).unwrap();
+            prev = e.entry_hash;
+        }
+
+        // Live entries under the real key.
+        for i in 0..3 {
+            audit_log("LIVE", "-", &format!("entry {i}"));
+        }
+
+        // Must verify: the lost prefix is unverifiable, not corrupt, and the
+        // three live entries after it must all be counted.
+        let verified = verify_audit_log().expect("unverifiable prefix must not fail verification");
+        assert_eq!(
+            verified, 3,
+            "live entries after a lost-key prefix must verify"
+        );
+    }
+
+    /// Tampering inside the log must still be caught — the fix above narrows
+    /// what counts as corruption, so it needs a test that the narrowing did not
+    /// go too far.
+    #[test]
+    fn tampering_after_unverifiable_prefix_is_still_detected() {
+        let _sandbox = Sandbox::new("tamper_after_prefix");
+
+        let lost_key = [0xCDu8; 32];
+        let mut prev = "0".to_string();
+        let log_path = audit_log_path().unwrap();
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        let mut e = AuditEntry {
+            ts: "2026-01-01T00:00:00Z".into(),
+            uid: 1000,
+            host: "old-host".into(),
+            event: "OLD_0".into(),
+            license_id: "TALUS-TEST".into(),
+            detail: "pre-key entry".into(),
+            prev_hash: prev.clone(),
+            entry_hash: String::new(),
+        };
+        e.entry_hash = e.compute_hash_with(&lost_key, &prev);
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .unwrap();
+        writeln!(f, "{}", serde_json::to_string(&e).unwrap()).unwrap();
+        prev = e.entry_hash.clone();
+
+        for i in 0..3 {
+            let mut live = AuditEntry {
+                ts: format!("2026-01-02T00:0{i}:00Z"),
+                uid: 1000,
+                host: "live-host".into(),
+                event: format!("LIVE_{i}"),
+                license_id: "TALUS-TEST".into(),
+                detail: format!("entry {i}"),
+                prev_hash: prev.clone(),
+                entry_hash: String::new(),
+            };
+            live.entry_hash = live.compute_hash(&prev);
+            writeln!(f, "{}", serde_json::to_string(&live).unwrap()).unwrap();
+            prev = live.entry_hash;
+        }
+
+        // Alter the last live entry's detail: its MAC no longer matches.
+        let data = fs::read_to_string(&log_path).unwrap();
+        let mut lines: Vec<String> = data.lines().map(String::from).collect();
+        let mut last: AuditEntry = serde_json::from_str(lines.last().unwrap()).unwrap();
+        last.detail = "TAMPERED".into();
+        *lines.last_mut().unwrap() = serde_json::to_string(&last).unwrap();
+        fs::write(&log_path, lines.join("\n") + "\n").unwrap();
+
+        let err = verify_audit_log().expect_err("tampering must be detected");
+        let msg = err.to_string();
         assert!(
-            n_after >= n_before + 60,
-            "expected >= 60 new entries, got {n_after} (before: {n_before})"
+            msg.contains("1 corrupted"),
+            "expected exactly one corrupted entry, got: {msg}"
         );
     }
 }
