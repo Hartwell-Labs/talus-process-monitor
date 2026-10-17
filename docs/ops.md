@@ -24,7 +24,8 @@ w tym pliku — tylko wskaźniki na `~/.secrets/talus/`.
 
 | Komponent | URL / lokalizacja | Storage | Rola |
 |---|---|---|---|
-| Primary | `https://talus-license-server.metaforicmail.workers.dev` | Turso (wspólny) | ruch produkcyjny |
+| Primary | `https://lic.hartwell-labs.pl` | Turso (wspólny) | ruch produkcyjny |
+| workers.dev alias | `https://talus-license-server.metaforicmail.workers.dev` | — | panel admina, awaryjnie |
 | Failover | `https://talus-license-failover.metaforicmail.workers.dev` | Turso (wspólny) | automatyczny zapas |
 | Baza | `https://talus-licenses-bartoszosiej.aws-eu-west-1.turso.io` | — | jedyne źródło prawdy |
 | D1 snapshot | Cloudflare D1 `talus-licenses` (id `77c07193-9bc8-44e5-a31f-616a25ad9fb9`) | — | zamrożona kopia z 2026-09-18 |
@@ -54,6 +55,46 @@ npx wrangler secret put ADMIN_TOKEN                       # primary
 npx wrangler secret put ADMIN_TOKEN -c wrangler.failover.toml
 ```
 
+## Sprzedaż — Stripe Managed Payments (2026-10)
+
+Talus Enterprise sprzedaje się przez Stripe. Stripe rozlicza sam (VAT, fraud,
+wsparcie klienta) i **nie wydaje klucza sklepu** — dlatego webhook zapisuje
+zwykły wiersz `pending` w `orders`, tak samo jak Polar, a klucz podpisuje
+`scripts/issuer-daemon.mjs`.
+
+```
+Klient płaci  →  checkout.session.completed
+              →  POST /api/v1/webhook/stripe   (podpis Stripe-Signature)
+              →  orders(status='pending', customer_id, subscription_id, payment_intent)
+              →  issuer-daemon   →  issue_license + bind + register
+              →  e-mail z kluczem  (Resend, important@hartwell-labs.pl)
+```
+
+Do zapamiętania przy rozmowie z klientem: **klucz leci mailem, nie z webówki.**
+Nigdy nie ufamy temu, co klient wpisał w przeglądarce — jedyne źródło prawdy to
+wiersz w `orders`.
+
+Sekrety (oba w `~/.config/hartwell/`, 0600):
+
+```bash
+npx wrangler secret put STRIPE_SECRET_KEY        # rk_live_... (restricted)
+npx wrangler secret put STRIPE_WEBHOOK_SECRET   # whsec_... — pokazywany RAZ przy tworzeniu endpointu
+```
+
+**Sekret webhooka nie da się odzyskać.** Stripe pokazuje go jednorazowo przy
+tworzeniu endpointu. Zgubiony = trzeba usunąć endpoint i utworzyć nowy, a wtedy
+trzeba go od razu zapisać do pliku.
+
+Zweryfikowanie, że webhook naprawdę działa (symulowany podpis, bez wpływu na
+pieniądze ani na prawdziwe zamówienia):
+
+```bash
+node --test license-server/test/stripe-webhook-test.mjs
+```
+
+Testy na żywo: poprawny podpis → 200, powtórzony event → 200 `already processed`
+(idempotencja), podpis sprzed 2 h → 401, podpis innym sekretem → 401.
+
 ## Kluczowe komendy
 
 ```bash
@@ -66,10 +107,10 @@ npx wrangler deploy
 npx wrangler deploy -c wrangler.failover.toml
 
 # health / stan
-curl https://talus-license-server.metaforicmail.workers.dev/api/v1/health
+curl https://lic.hartwell-labs.pl/api/v1/health
 curl https://talus-license-failover.metaforicmail.workers.dev/api/v1/health
 curl -H "Authorization: Bearer $(cat ~/.secrets/talus/admin_token)" \
-  https://talus-license-server.metaforicmail.workers.dev/api/v1/admin/stats
+  https://lic.hartwell-labs.pl/api/v1/admin/stats
 ```
 
 ## Test failover (end-to-end, wykonany 2026-09-18 — OK)

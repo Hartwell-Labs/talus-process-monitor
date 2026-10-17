@@ -374,7 +374,7 @@ spanning four components:
 2. Binary verifies the Ed25519 signature locally, computes the machine
    fingerprint (`T-…`), and POSTs `{license_key, machine_id, hostname,
    version}` to the activation server (default
-   `https://talus-license-server.metaforicmail.workers.dev`, override via
+   `https://lic.hartwell-labs.pl`, override via
    `TALUS_LICENSE_SERVER`).
 3. Server re-verifies the signature, checks expiry, revocation
    (`licenses.revoked` + `revocations`), and seats (`max_seats` from the

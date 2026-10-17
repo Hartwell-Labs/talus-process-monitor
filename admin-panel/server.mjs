@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.TALUS_PORT ?? 8787);
 const HOST = process.env.TALUS_HOST ?? '127.0.0.1';
-const UPSTREAM = process.env.TALUS_UPSTREAM ?? 'https://talus-license-server.metaforicmail.workers.dev';
+const UPSTREAM = process.env.TALUS_UPSTREAM ?? 'https://lic.hartwell-labs.pl';
 
 // ── Admin token resolution (never logged, never sent to the browser) ──────
 function load_token() {
