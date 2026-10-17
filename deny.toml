@@ -2,14 +2,21 @@
 version = 2
 yanked = "warn"
 ignore = [
-    # Unmaintained transitive crates (via im 15 in ftui-runtime dev-deps and
-    # build-only paths). No fixed versions exist upstream; not reachable from
-    # production binaries. Revisit when ftui-runtime drops `im`.
-    "RUSTSEC-2026-0247", # bitmaps (via im)
-    "RUSTSEC-2026-0248", # im
-    "RUSTSEC-2026-0251", # sized-chunks (via im)
+    # The `im` ignores are gone: ftui-runtime dropped `im` and `sized-chunks`
+    # on 28.09, and [patch.crates-io] makes the local copy authoritative, so
+    # cargo-deny no longer finds those crates in the graph. They were only ever
+    # in a dev-dependency and never reached a shipped binary. Leaving the
+    # entries would mean every CI run reporting "no crate matched advisory
+    # criteria" — a permanent reminder to remove an ignore that is no longer
+    # doing anything, and one nobody reads past the warning.
+    #
+    # `im` can come back. If it does, these four advisories are unfixed
+    # upstream and the ignore has to return with it:
+    #   RUSTSEC-2026-0247  bitmaps
+    #   RUSTSEC-2026-0248  im
+    #   RUSTSEC-2026-0251  sized-chunks
+    #   RUSTSEC-2026-0255  sized-chunks unsound
     "RUSTSEC-2023-0126", # unwraps on client requests (build-only path)
-    "RUSTSEC-2026-0255", # sized-chunks unsound (via im)
     # Patched in rustls 0.23.45+ / webpki 0.103.x — kept here only if an
     # older lockfile is audited; remove after CI confirms the update.
     "RUSTSEC-2026-0206",
