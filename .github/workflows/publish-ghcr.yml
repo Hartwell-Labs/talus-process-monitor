@@ -18,7 +18,34 @@ on:
 permissions: read-all
 
 jobs:
+  gate:
+    # A signed image on GHCR is a durable public artifact. Re-run the checks
+    # rather than trusting that CI passed on master: the tag and the release
+    # commit can differ, and the tag's version can disagree with the manifest
+    # (a `v1.0` tag exists in this repo while the manifest says 0.8.2).
+    name: gate (version matches tag)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Version in the repo matches the tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(grep -m1 '^version' process-monitor/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          echo "  tag:      $GITHUB_REF_NAME"
+          echo "  manifest: $manifest"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match process-monitor/Cargo.toml version $manifest — refusing to publish"
+            exit 1
+          fi
+
   build:
+    needs: gate
     permissions:
       packages: write
       id-token: write
