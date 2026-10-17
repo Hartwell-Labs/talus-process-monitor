@@ -14,6 +14,10 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to rebuild and re-publish (e.g. v0.8.3)'
+        required: true
 
 permissions: read-all
 
@@ -31,6 +35,11 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           persist-credentials: false
+          # Without this the gate would compare the tag you asked for while the
+          # build used whatever the default branch happened to hold — so a
+          # rebuild would sign and push a different binary than the one it
+          # claims to be rebuilding.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
 
       - name: Version in the repo matches the tag
         run: |

@@ -320,22 +320,64 @@ fn write_anchor(last_hash: &str, count: u64) {
 
 /// Read and authenticate the length anchor. Returns (last_hash, count).
 /// Returns None if missing, malformed, or MAC-invalid (treated as absent).
-fn read_anchor() -> Option<(String, u64)> {
-    let path = anchor_path()?;
-    let data = fs::read_to_string(path).ok()?;
+/// Read and authenticate the length anchor.
+///
+/// `Ok(None)` — the anchor file does not exist. That is the one case where
+///   re-establishing it is legitimate: a legacy install, or the first run.
+/// `Ok(Some(..))` — authenticated.
+/// `Err(..)` — the file exists but does not authenticate under any known key.
+///
+/// The distinction matters. This used to collapse "absent", "malformed" and
+/// "MAC-invalid" into a single `None`, which meant an attacker who deleted
+/// `.audit.anchor` had also deleted truncation detection: verification
+/// re-established the anchor from whatever the log now contained and reported
+/// a truncated log as valid. Reproduced: a 5-entry log cut to 3 entries is
+/// correctly rejected while the anchor survives, and silently accepted once the
+/// anchor is removed.
+///
+/// An unauthenticated anchor is therefore an error, not an absence.
+fn read_anchor() -> Result<Option<(String, u64)>> {
+    let path = match anchor_path() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let data = match fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "cannot read audit anchor {}: {e}",
+                path.display()
+            ))
+        }
+    };
     let parts: Vec<&str> = data.trim().split('|').collect();
     if parts.len() != 3 {
-        return None;
+        bail!(
+            "audit anchor at {} is malformed ({} fields, expected 3) — refusing to treat it as absent",
+            path.display(),
+            parts.len()
+        );
     }
-    let count: u64 = parts[1].parse().ok()?;
+    let count: u64 = parts[1].parse().with_context(|| {
+        format!(
+            "audit anchor at {} has an unparseable entry count",
+            path.display()
+        )
+    })?;
     // Anchors written before the stable key existed use the legacy key.
     let valid = audit_verify_keys()
         .iter()
         .any(|k| anchor_mac_with(k, parts[0], count) == parts[2]);
     if !valid {
-        return None;
+        bail!(
+            "audit anchor at {} does not authenticate under any known key — it was altered, or \
+             the signing key that wrote it is gone. Either way the log can no longer be proven \
+             intact, so it is not treated as if no anchor existed.",
+            path.display()
+        );
     }
-    Some((parts[0].to_string(), count))
+    Ok(Some((parts[0].to_string(), count)))
 }
 
 /// Heuristic evidence that a trial is being restarted on this machine.
@@ -357,7 +399,7 @@ pub fn trial_reset_suspected() -> bool {
     };
     if !log_path.exists() {
         // Log deleted while the anchor still records entries.
-        return matches!(read_anchor(), Some((_, c)) if c > 0);
+        return matches!(read_anchor(), Ok(Some((_, c))) if c > 0);
     }
     let data = fs::read_to_string(&log_path).unwrap_or_default();
     if data.contains("\"event\":\"TRIAL_STARTED\"") || data.contains("\"event\":\"TRIAL_EXPIRED\"")
@@ -365,8 +407,14 @@ pub fn trial_reset_suspected() -> bool {
         return true;
     }
     match read_anchor() {
-        Some((_, c)) => c > 0 && data.lines().filter(|l| !l.trim().is_empty()).count() < c as usize,
-        None => false,
+        Ok(Some((_, c))) => {
+            c > 0 && data.lines().filter(|l| !l.trim().is_empty()).count() < c as usize
+        }
+        Ok(None) => false,
+        // An anchor that will not authenticate is not the same as no anchor.
+        // Counting it as evidence of entries keeps the comparison above biting;
+        // failing open would let a deleted anchor hide a short log.
+        Err(_) => true,
     }
 }
 
@@ -453,7 +501,7 @@ pub fn verify_audit_log() -> Result<u64> {
     if !log_path.exists() {
         // A missing log is only legitimate when no entries were ever recorded.
         // An existing anchor for a non-empty state means the log was deleted.
-        return match read_anchor() {
+        return match read_anchor()? {
             None => Ok(0),
             Some((h, c)) if h == "0" && c == 0 => Ok(0),
             Some((h, c)) => bail!(
@@ -574,7 +622,10 @@ pub fn verify_audit_log() -> Result<u64> {
     // comparing against `verified` alone would report a false truncation the
     // moment a legacy prefix exists.
     let present = verified + unverifiable;
-    match read_anchor() {
+    // `?` is the whole point of the change: an anchor that will not
+    // authenticate aborts verification instead of being re-established from the
+    // log, which is what let a deleted `.audit.anchor` hide a truncated log.
+    match read_anchor()? {
         Some((anchor_hash, anchor_count)) => {
             if anchor_hash != last_hash || anchor_count != present {
                 bail!(
@@ -1119,6 +1170,64 @@ mod flock_stress_tests {
         assert!(
             msg.contains("broken chain links"),
             "expected chain-link damage to be named explicitly, got: {msg}"
+        );
+    }
+
+    /// An anchor that does not authenticate must fail the run, not be silently
+    /// re-established from whatever the log currently contains.
+    ///
+    /// This was fail-open. `read_anchor` returned `Option` and collapsed
+    /// "absent", "malformed" and "MAC-invalid" into `None`, so any edit to
+    /// `.audit.anchor` was discarded and verification rebuilt the anchor to
+    /// match the log — reporting a tampered audit trail as intact.
+    ///
+    /// Known limit, by design: *deleting* the anchor still reads as a first
+    /// run, because absence and never-existed are indistinguishable from inside
+    /// the directory that holds both. That is inside the documented threat
+    /// model ("a user who reads this file can forge entries"), so it is not
+    /// something this check can close.
+    #[test]
+    fn tampered_anchor_is_not_re_established() {
+        let _sandbox = Sandbox::new("tampered_anchor");
+
+        for i in 0..5 {
+            audit_log("LIVE", "-", &format!("entry {i}"));
+        }
+        verify_audit_log().expect("baseline: a freshly written log must verify");
+
+        // Rewrite the recorded count, leaving the MAC stale.
+        let path = anchor_path().unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+        let parts: Vec<&str> = original.trim().split('|').collect();
+        fs::write(&path, format!("{}|99|{}", parts[0], parts[2])).unwrap();
+
+        let err = verify_audit_log().expect_err("a tampered anchor must not be re-established");
+        assert!(
+            err.to_string().contains("does not authenticate"),
+            "expected the anchor to be named as unauthenticated, got: {err}"
+        );
+
+        // The anchor must be left alone, not quietly rewritten.
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("{}|99|{}", parts[0], parts[2]),
+            "verification must not overwrite the anchor it just rejected"
+        );
+    }
+
+    /// Same principle for a structurally broken anchor: three fields are the
+    /// contract, and anything else means the file was not written by us.
+    #[test]
+    fn malformed_anchor_is_rejected() {
+        let _sandbox = Sandbox::new("malformed_anchor");
+
+        audit_log("LIVE", "-", "entry 0");
+        fs::write(anchor_path().unwrap(), "not-an-anchor").unwrap();
+
+        let err = verify_audit_log().expect_err("a malformed anchor must fail the run");
+        assert!(
+            err.to_string().contains("malformed"),
+            "expected a malformed-anchor error, got: {err}"
         );
     }
 }

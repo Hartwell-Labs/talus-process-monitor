@@ -23,6 +23,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           persist-credentials: false
+          # The gate below validates the tag you asked for, so the build has to
+          # be that tag. A ref-less checkout builds the default branch instead —
+          # right version check, wrong binary.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
 
       - name: Version in the repo matches the tag
         # This is the only remaining path to a GitHub Release, so the check
