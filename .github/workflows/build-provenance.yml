@@ -13,8 +13,42 @@ permissions:
   contents: read
 
 jobs:
+  # ── Gate ───────────────────────────────────────────────────────────────
+  gate:
+    name: Gate (version matches tag)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Version in the repo matches the tag
+        # This is the only remaining path to a GitHub Release, so the check
+        # belongs here rather than in a separate workflow someone has to
+        # remember to run. The repo carries a v1.0 tag while the manifest says
+        # 0.8.2 — without this, that tag would publish 0.8.2 under the name
+        # v1.0, signed and attested, which is worse than an unsigned mistake.
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          clean="${tag#v}"
+          manifest="$(grep -m1 '^version' process-monitor/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          echo "  tag:      $tag"
+          echo "  manifest: $manifest"
+          if [ "$clean" != "$manifest" ]; then
+            echo "::error::tag $tag does not match process-monitor/Cargo.toml version $manifest — refusing to release"
+            exit 1
+          fi
+
   # ── Build Release Binaries ─────────────────────────────────────────────
   build:
+    needs: gate
     name: Build Release Artifacts
     runs-on: ubuntu-latest
     permissions:
