@@ -473,9 +473,6 @@ pub fn verify_audit_log() -> Result<u64> {
     let mut prev_hash = "0".to_string();
     let mut verified = 0u64;
     let mut corrupted = 0u64;
-    // Entry hashes and their 1-based positions, for the post-pass that
-    // re-attributes unverifiable entries against the length anchor.
-    let mut hashes: Vec<(u64, String)> = Vec::new();
     // Entries that chain correctly but were signed with a key that no longer
     // exists. Distinct from `corrupted`: nothing was tampered with, we simply
     // cannot prove it. See docs/AUDIT-VERIFY-FP-DIAGNOSIS.md.
@@ -494,54 +491,36 @@ pub fn verify_audit_log() -> Result<u64> {
         }
         match serde_json::from_str::<AuditEntry>(line) {
             Ok(entry) => {
-                // Two independent checks:
+                // Two independent checks, and they are not interchangeable:
+                //
                 //   link_ok — does this entry chain onto what we just accepted?
                 //   mac_ok  — does its MAC validate under a key we hold?
                 //
-                // Both hold          → verified.
-                // Only link_ok holds → the key that signed this entry is gone.
-                //                        Acceptable *only* inside the leading
-                //                        run, before any entry has verified.
-                // Neither holds      → the bytes were altered, or a foreign
-                //                        entry was spliced in. Corruption.
+                // A correct `link` is cheap to forge: an attacker with write
+                // access copies the previous `entry_hash` and the chain links
+                // again. So `link_ok` alone is NOT evidence of authenticity —
+                // only `mac_ok` is. That is why an unverifiable entry fails the
+                // run instead of being waved through: reporting it as "just an
+                // old key" would make content alteration undetectable.
+                //
+                // `prev_hash` always advances from the entry's claimed hash. Not
+                // doing so turned one damaged entry into "every following entry
+                // is corrupt", which is how a five-entry gap was reported as
+                // "153 corrupted entries out of 153".
                 let link_ok = entry.prev_hash == prev_hash;
                 let mac_ok = entry.verifies_under_known_key(&prev_hash);
-
-                // A link_ok / mac_ok entry is verified. A link_ok / mac_ok-false
-                // entry is either (a) a lost signing key in the leading run
-                // (before any entry has verified) — unverifiable but acceptable —
-                // or (b) tampering, once the chain has proven good entries and a
-                // live entry's MAC stops matching every known key. The two cases
-                // are indistinguishable per entry; the anchor (outside the log)
-                // exists precisely to keep the evidence intact.
                 let entry_hash = entry.entry_hash.clone();
+
                 if mac_ok && link_ok {
-                    prev_hash = entry_hash.clone();
                     verified += 1;
-                    hashes.push((verified, entry_hash));
-                } else if link_ok && verified == 0 {
-                    // Leading run: a correct chain but a key we no longer hold.
-                    // Not counted as corrupted: it may be perfectly legitimate,
-                    // just written under a legacy fingerprint. `unverifiable`
-                    // records the gap so it stays visible instead of silently
-                    // passing over.
-                    unverifiable += 1;
-                    prev_hash = entry_hash.clone();
-                    hashes.push((verified + corrupted + unverifiable, entry_hash));
                 } else if link_ok {
-                    // A live entry whose MAC no longer matches any held key: the
-                    // chain proved good entries arrived, so this is tampering,
-                    // not a lost key.
-                    corrupted += 1;
-                    prev_hash = entry_hash.clone();
-                    hashes.push((verified + corrupted + unverifiable, entry_hash));
+                    // Chains correctly, signed with a key we no longer hold.
+                    unverifiable += 1;
                 } else {
-                    // The link itself broke: entries reordered, removed, spliced.
-                    // Damage regardless of any key question.
+                    // Reordered, removed, or spliced: the chain itself broke.
                     corrupted += 1;
-                    prev_hash = entry_hash.clone();
-                    hashes.push((verified + corrupted + unverifiable, entry_hash));
                 }
+                prev_hash = entry_hash;
             }
             Err(_) => {
                 corrupted += 1;
@@ -551,20 +530,34 @@ pub fn verify_audit_log() -> Result<u64> {
 
     if corrupted > 0 {
         bail!(
-            "audit log integrity check failed: {corrupted} corrupted entries out of {}\
-             ({unverifiable} further entries unverifiable)",
-            verified + corrupted + unverifiable
+            "audit log integrity check failed: {corrupted} entries have broken chain links \
+             out of {present_total} ({verified} verified, {unverifiable} unverifiable) — \
+             entries were reordered, removed or spliced in",
+            present_total = verified + corrupted + unverifiable
         );
     }
 
     if unverifiable > 0 {
-        // Not a failure: the chain is intact and every entry after the
-        // unverifiable prefix verifies. Report it so the gap is visible in
-        // output rather than silently passed over.
-        eprintln!(
-            "warning: {unverifiable} audit entries could not be verified \
-             (signed with a key that predates ~/.config/talus/.audit.key); \
-             the chain verifies from that point onward"
+        // Reported as a distinct condition rather than folded into "corrupted",
+        // because the evidence points somewhere specific: these entries chain
+        // correctly, so nothing was reordered or deleted, but no key we hold can
+        // validate their MAC. The usual cause is `.audit.key` being created
+        // lazily — processes started before that point still sign with the
+        // legacy machine fingerprint (hostname + MAC + CPU + machine-id), which
+        // changes whenever any of those change.
+        //
+        // It is still a failure. A correct chain link proves nothing on its own:
+        // anyone with write access can splice an entry in by copying the
+        // previous `entry_hash`. Only a valid MAC is evidence of authenticity,
+        // so an entry we cannot check is a gap in the audit trail, not a
+        // footnote. Reporting it as harmless would make silent edits to the log
+        // undetectable.
+        bail!(
+            "{unverifiable} audit entries cannot be verified: the chain links correctly but no \
+             known key validates their MAC ({verified} verified). These were most likely signed \
+             before ~/.config/talus/.audit.key existed, under the legacy machine fingerprint. \
+             Because an unverifiable entry cannot be distinguished from an altered one, the \
+             audit trail is treated as incomplete rather than valid.",
         );
     }
 
@@ -966,15 +959,17 @@ mod flock_stress_tests {
     /// A log whose prefix was signed with a key that no longer exists must not
     /// be reported as fully corrupt.
     ///
-    /// This is the real failure mode from 26.09: five entries predate
-    /// `.audit.key`, none of them verify under the stable or the legacy key,
-    /// and the verifier counted every later entry as corrupt as well — so a
-    /// five-entry gap reported as "153 corrupted entries out of 153".
+    /// This is the real failure mode from 26.09: entries predating
+    /// `.audit.key` verify under neither the stable nor the legacy key, and the
+    /// verifier counted every later entry as corrupt as well — so a six-entry
+    /// gap was reported as "153 corrupted entries out of 153".
     ///
-    /// The suffix written under the live key must still verify, and the gap
-    /// must be visible rather than silently swallowed.
+    /// The gap must now be named for what it is. It still fails the run, because
+    /// an entry we cannot check is a hole in the audit trail and cannot be told
+    /// apart from an edited one. But it must not be described as chain damage:
+    /// nothing was reordered or deleted.
     #[test]
-    fn unverifiable_prefix_does_not_poison_the_chain() {
+    fn unverifiable_prefix_is_reported_distinctly_from_corruption() {
         let _sandbox = Sandbox::new("unverifiable_prefix");
 
         // Two entries signed with a key we will never have again.
@@ -1007,13 +1002,22 @@ mod flock_stress_tests {
         for i in 0..3 {
             audit_log("LIVE", "-", &format!("entry {i}"));
         }
+        let _ = prev;
 
-        // Must verify: the lost prefix is unverifiable, not corrupt, and the
-        // three live entries after it must all be counted.
-        let verified = verify_audit_log().expect("unverifiable prefix must not fail verification");
-        assert_eq!(
-            verified, 3,
-            "live entries after a lost-key prefix must verify"
+        // Fails, but for the right reason and with the right count.
+        let err = verify_audit_log().expect_err("an unverifiable entry is a gap in the trail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("2 audit entries cannot be verified"),
+            "expected 2 unverifiable entries reported, got: {msg}"
+        );
+        assert!(
+            msg.contains("3 verified"),
+            "the three live entries must still be counted as verified, got: {msg}"
+        );
+        assert!(
+            !msg.contains("broken chain links"),
+            "nothing was reordered or deleted, so this must not read as chain damage: {msg}"
         );
     }
 
@@ -1074,8 +1078,47 @@ mod flock_stress_tests {
         let err = verify_audit_log().expect_err("tampering must be detected");
         let msg = err.to_string();
         assert!(
-            msg.contains("1 corrupted"),
-            "expected exactly one corrupted entry, got: {msg}"
+            msg.contains("cannot be verified"),
+            "altering an entry breaks its MAC, which must surface as an unverifiable entry: {msg}"
+        );
+        assert!(
+            !msg.contains("broken chain links"),
+            "the chain links still hold after a content edit, so this is not link damage: {msg}"
+        );
+    }
+
+    /// Deleting or reordering entries breaks the chain link itself and must be
+    /// reported as such — a different failure from an unverifiable MAC, and the
+    /// distinction is the whole point of splitting the two.
+    #[test]
+    fn removed_entry_is_reported_as_broken_chain_link() {
+        let _sandbox = Sandbox::new("removed_entry");
+
+        for i in 0..5 {
+            audit_log("LIVE", "-", &format!("entry {i}"));
+        }
+
+        // Drop the middle entry: everything after it now chains onto the wrong
+        // `prev_hash`, which no MAC check can excuse.
+        let log_path = audit_log_path().unwrap();
+        let data = fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<String> = data.lines().map(String::from).collect();
+        let kept: Vec<&String> = lines.iter().filter(|l| !l.contains("entry 2")).collect();
+        fs::write(
+            &log_path,
+            kept.iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+
+        let err = verify_audit_log().expect_err("a removed entry must be detected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("broken chain links"),
+            "expected chain-link damage to be named explicitly, got: {msg}"
         );
     }
 }
