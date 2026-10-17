@@ -83,11 +83,30 @@ CREATE TABLE IF NOT EXISTS orders (
   store_key_hash  TEXT,
   store_key_hint  TEXT,
   license_id      TEXT,
+  -- Stripe resource ids, recorded at purchase time. `charge.refunded` names
+  -- only a charge, so these are what let a refund be traced back to the
+  -- licence it paid for. NULL for the other stores.
+  customer_id     TEXT,
+  subscription_id TEXT,
+  payment_intent  TEXT,
   created_at      TEXT NOT NULL,
   fulfilled_at    TEXT,
   PRIMARY KEY (store, order_id)
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status);
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders (customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_subscription ON orders (subscription_id);
+CREATE INDEX IF NOT EXISTS idx_orders_payment_intent ON orders (payment_intent);
+
+-- Webhook delivery ledger. Stripe retries an event for up to 3 days; claiming
+-- the event id before doing any work makes a redelivery a no-op. A handler
+-- that throws deletes its own claim so the retry can actually retry.
+CREATE TABLE IF NOT EXISTS stripe_events (
+  event_id     TEXT PRIMARY KEY,
+  type         TEXT NOT NULL,
+  received_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stripe_events_type ON stripe_events (type);
 
 -- The "translation dictionary": store key (hashed) → Talus license. The
 -- Talus license key itself is public data (signed payload + signature), so

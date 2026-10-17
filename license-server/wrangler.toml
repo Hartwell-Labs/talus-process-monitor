@@ -12,6 +12,18 @@ name = "talus-license-server"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
+# Custom domain instead of a workers.dev URL. Cloudflare then owns the DNS
+# record and the TLS certificate, so the Stripe webhook keeps working through
+# certificate renewals — a workers.dev hostname is not something you can hand
+# to a third party as a stable integration endpoint.
+routes = [
+  { pattern = "lic.hartwell-labs.pl", custom_domain = true },
+]
+
+# Kept on deliberately: admin-panel/server.mjs and the ops runbook default to
+# the workers.dev hostname, and the failover worker answers there too.
+workers_dev = true
+
 # Serve the admin panel's static assets as strings (imported by src/index.js).
 # Login = ADMIN_TOKEN + TOTP; session in D1 (hash-only).
 rules = [
@@ -35,3 +47,22 @@ enabled = false
 [vars]
 LICENSE_PUBLIC_KEY_HEX = "850e6bbdc5b5d66ae24973cef9e6e5baf887b2c775a2e17cd1b6cd2d8ae76845"
 TURSO_DATABASE_URL = "https://talus-licenses-bartoszosiej.aws-eu-west-1.turso.io"
+
+# ── Stripe Managed Payments ───────────────────────────────────────────────
+# Public configuration, safe to commit. The price and the redirect targets are
+# server-side on purpose: if the browser could name the price or the success
+# URL, anyone could point the button at a cheaper plan or their own domain.
+STRIPE_PRICE_ID = "price_1URciSLvyPZVfvPqz8UlNEZX"
+# STRIPE_PUBLISHABLE_KEY is intentionally absent: the checkout hands the
+# customer a hosted Stripe URL to redirect to, so the page never touches card
+# data and never needs a publishable key. Set it only if you later switch to
+# embedded checkout — get the value from Dashboard → Developers → API keys.
+#
+# Empty means "use the account default", which is also what the webhook
+# endpoint itself is configured on. Set to "2026-02-25.preview" only if a
+# preview-only field is needed — that version also changes charge rendering.
+STRIPE_API_VERSION = ""
+
+# Secrets (set once, never committed):
+#   npx wrangler secret put STRIPE_SECRET_KEY        # rk_live_...
+#   npx wrangler secret put STRIPE_WEBHOOK_SECRET   # whsec_... from `stripe listen` or the Dashboard

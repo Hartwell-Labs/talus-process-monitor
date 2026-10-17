@@ -59,6 +59,17 @@ import {
   resolve_key,
 } from './store-bridge.js';
 
+// Stripe Managed Payments: session creation, status lookup, and the
+// checkout.session.completed / charge.refunded webhook. Records the same
+// `pending` order row the other stores produce, plus the Stripe resource ids
+// needed to trace a refund back to a licence.
+import {
+  handle_stripe_webhook,
+  handle_create_checkout_session,
+  handle_checkout_status,
+  ensure_stripe_schema,
+} from './stripe-bridge.js';
+
 // Storage adapter: D1 binding when present (primary), otherwise Turso over
 // HTTP (shared storage for the failover deployment). Same surface either way.
 import { createDB } from './db.js';
@@ -222,6 +233,11 @@ export default {
       // exists, otherwise a Turso-backed D1-compatible shim (failover mode).
       env = { ...env, DB: createDB(env) };
 
+      // Storage is Turso and its token is only a Worker secret, so no local
+      // migration runner can reach the Stripe columns this Worker writes.
+      // Applied here instead: memoised per isolate, additive, idempotent.
+      await ensure_stripe_schema(env.DB);
+
       const url = new URL(request.url);
       const { pathname } = url;
 
@@ -259,6 +275,23 @@ export default {
       }
       if (pathname === '/api/v1/webhook/lemonsqueezy' && request.method === 'POST') {
         return handle_store_webhook(request, env, 'lemonsqueezy');
+      }
+      // ── Stripe: Managed Payments checkout + webhook ──────────────────────
+      if (pathname === '/api/v1/webhook/stripe' && request.method === 'POST') {
+        return handle_stripe_webhook(request, env, env.DB);
+      }
+      if (pathname === '/api/v1/checkout-session' && request.method === 'POST') {
+        return handle_create_checkout_session(request, env);
+      }
+      if (
+        pathname.startsWith('/api/v1/checkout-session/') &&
+        request.method === 'GET'
+      ) {
+        return handle_checkout_status(
+          request,
+          env,
+          decodeURIComponent(pathname.slice('/api/v1/checkout-session/'.length)),
+        );
       }
       if (pathname === '/api/v1/redeem-lookup' && request.method === 'POST') {
         return handle_redeem_lookup(request, env);
