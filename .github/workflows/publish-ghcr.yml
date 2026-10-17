@@ -1,7 +1,19 @@
 name: publish-ghcr
 
 on:
+  # Release tags only.
+  #
+  # This workflow builds an image, pushes it to GHCR and signs it with cosign,
+  # so every run costs a keyless Fulcio ceremony plus a registry write.
+  #
+  # It used to fire on every push to every branch. With `type=raw,value=latest`
+  # in the tag list that made `latest` track whichever commit landed last — so
+  # "latest" was a race between branches, not a release. Tag-only fixes that:
+  # `latest` now means "newest tagged release".
   push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 permissions: read-all
 
