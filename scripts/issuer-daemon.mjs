@@ -131,7 +131,9 @@ async function fulfill(order) {
     tier: lic.tier,
     org,
     features: lic.features,
-    max_nodes: lic.max_nodes,
+    // max_seats is the only limit the server enforces: it caps how many
+    // machines may activate this licence. max_nodes exists in the signed
+    // payload for tamper detection and nothing more, so it is not sent.
     max_seats: lic.seats,
     expires_at: lic.expires_at,
   });

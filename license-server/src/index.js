@@ -521,19 +521,22 @@ async function handle_activate(request, env) {
     }
     // Register on first sight. seat_count comes from the SIGNED payload, so
     // clients cannot inflate it — only the key holder can set it.
+    //
+    // payload.max_nodes is deliberately NOT stored. It exists in the signed
+    // payload solely so the client can spot a substituted payload; no code
+    // path ever enforced it. max_seats is the one limit that is enforced.
     const seat_count = Number(payload.seat_count);
     max_seats =
       Number.isInteger(seat_count) && seat_count > 0 ? seat_count : 1;
     await env.DB.prepare(
-      `INSERT INTO licenses (license_id, tier, org, features, max_nodes, max_seats, expires_at, revoked, issued_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)`,
+      `INSERT INTO licenses (license_id, tier, org, features, max_seats, expires_at, revoked, issued_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)`,
     )
       .bind(
         license_id,
         tier,
         str_field(payload.organization) ?? null,
         payload.features ? JSON.stringify(payload.features) : null,
-        Number(payload.max_nodes) || 0,
         max_seats,
         expires_at ?? null,
         str_field(payload.issued_at) ?? new Date().toISOString(),
@@ -830,7 +833,10 @@ async function handle_admin(request, env, pathname) {
     const seat_count = Number(body.value.max_seats);
     const max_seats =
       Number.isInteger(seat_count) && seat_count > 0 ? seat_count : 1;
-    const max_nodes = Number(body.value.max_nodes) || 0;
+    // max_nodes is NOT read from the request. It exists in the signed payload
+    // only so the client can detect a substituted payload, and nothing ever
+    // enforced it — a licence row that claims "10 nodes" limited nothing.
+    // `max_seats` is the single enforced limit. See schema.sql.
     const expires_at = str_field(body.value.expires_at);
     if (expires_at && !ISO_RE.test(expires_at)) {
       return json_response(
@@ -840,13 +846,12 @@ async function handle_admin(request, env, pathname) {
     }
     const now = now_iso();
     await env.DB.prepare(
-      `INSERT INTO licenses (license_id, tier, org, features, max_nodes, max_seats, expires_at, revoked, issued_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
+      `INSERT INTO licenses (license_id, tier, org, features, max_seats, expires_at, revoked, issued_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
        ON CONFLICT(license_id) DO UPDATE SET
          tier = excluded.tier,
          org = excluded.org,
          features = excluded.features,
-         max_nodes = excluded.max_nodes,
          max_seats = excluded.max_seats,
          expires_at = excluded.expires_at`,
     )
@@ -855,7 +860,6 @@ async function handle_admin(request, env, pathname) {
         tier,
         str_field(body.value.org) ?? null,
         body.value.features ? JSON.stringify(body.value.features) : null,
-        max_nodes,
         max_seats,
         expires_at ?? null,
         now,

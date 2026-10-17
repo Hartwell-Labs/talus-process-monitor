@@ -8,6 +8,7 @@ import {
   verify_stripe_signature,
   derive_expiry,
   encode_form,
+  seats_from_session,
 } from '../src/stripe-bridge.js';
 
 const SECRET = 'whsec_test_0123456789abcdef';
@@ -253,4 +254,49 @@ test('drops null and undefined instead of sending them as the string "null"', ()
 test('percent-encodes values that would otherwise break the body', () => {
   const out = decode_form(encode_form({ url: 'https://x.pl/a?b=c&d=e' }));
   assert.equal(out.url, 'https://x.pl/a?b=c&d=e');
+});
+
+// ── Node count → seats ────────────────────────────────────────────────────
+//
+// Talus is sold per machine: one key is one seat. If this returns 1 for a
+// fleet order, the customer pays for 10 machines and receives one licence.
+
+test('reads the node count the checkout stamped into session metadata', () => {
+  assert.equal(seats_from_session({ metadata: { node_count: '10' } }), 10);
+  assert.equal(seats_from_session({ metadata: { node_count: '250' } }), 250);
+});
+
+test('a fleet order yields one seat per machine', () => {
+  assert.equal(seats_from_session({ metadata: { node_count: '10' } }), 10);
+  assert.equal(seats_from_session({ metadata: { node_count: '42' } }), 42);
+});
+
+test('a single purchase is one seat', () => {
+  assert.equal(seats_from_session({ metadata: { node_count: '1' } }), 1);
+  assert.equal(seats_from_session({ metadata: {} }), 1);
+  assert.equal(seats_from_session({}), 1);
+  assert.equal(seats_from_session({ metadata: { node_count: null } }), 1);
+});
+
+test('a missing or malformed node count never mints extra seats', () => {
+  // The daemon signs one licence per seat, so anything unparseable must fall
+  // back to 1 rather than to NaN, Infinity or a default that over-issues.
+  for (const bad of ['', ' ', 'ten', '3.5', '-4', '0', 'NaN', '1e3', 'null']) {
+    assert.equal(
+      seats_from_session({ metadata: { node_count: bad } }),
+      1,
+      `should be 1 for ${JSON.stringify(bad)}`,
+    );
+  }
+});
+
+test('clamps an absurd node count instead of trusting it', () => {
+  assert.equal(seats_from_session({ metadata: { node_count: '99999' } }), 500);
+  assert.equal(seats_from_session({ metadata: { node_count: '999999' } }), 500);
+});
+
+test('node_count is a string, not a number, the way Stripe sends it', () => {
+  // Stripe returns metadata values as strings. A number would mean something
+  // upstream changed shape, so this asserts the real payload shape.
+  assert.equal(seats_from_session({ metadata: { node_count: '10' } }), 10);
 });

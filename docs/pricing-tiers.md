@@ -40,7 +40,7 @@ Everything in Community, plus:
 |---|---|---|
 | Term | perpetual · 1 year · 3 year | longer term → higher price |
 | Seats (machines) | 1 · 5 · 10 · unlimited | more seats → higher price |
-| Managed nodes (`max_nodes`) | 1 · 10 · 0 (unlimited) | more nodes → higher price |
+| ~~Managed nodes (`max_nodes`)~~ | **not a pricing dimension** | unenforced — see below |
 | Support level | best-effort · business hours · 48h SLA | higher SLA → higher price |
 | Organization | individual · team · enterprise | volume discounts possible |
 
@@ -49,6 +49,21 @@ Everything in Community, plus:
 - **Single-seat, 1 year** — evaluation by a small team.
 - **5 seats, perpetual** — small org standard.
 - **Unlimited seats + unlimited nodes, perpetual, 48h SLA** — enterprise-wide.
+
+## What actually shipped (2026-10)
+
+Talus is sold **per machine**: one purchased key is one seat, and `max_seats`
+is the only limit the server enforces. There is no separate node cap.
+
+| Tier | Price | Minimum |
+|---|---|---|
+| Community | free (MIT) | — |
+| Enterprise | 200 PLN / year / machine | 1 machine |
+| Enterprise Fleet | 30 USD / year / machine | 10 machines |
+
+The 10-node fleet floor is enforced in the Worker, not by Stripe: this account
+rejects graduated pricing (`tiering_config`) and `transform_quantity` accepts
+only `divide_by` and `round`, so a Price cannot express a minimum quantity.
 
 ## Where to set the actual amounts
 

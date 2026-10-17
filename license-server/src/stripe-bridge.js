@@ -31,6 +31,9 @@ const MAX_WEBHOOK_BODY = 64 * 1024;
 const SIGNATURE_TOLERANCE_SECONDS = 300;
 const STORE = 'stripe';
 
+// Fleet pricing starts here: below it the 30 USD/node rate does not apply.
+const FLEET_MIN_NODES = 10;
+
 // Blueprint-defined API version. Left empty by default (account default is
 // what the webhook endpoint itself uses, and Managed Payments was verified
 // working on it); override with STRIPE_API_VERSION to pin a preview release.
@@ -203,17 +206,83 @@ async function stripe_call(env, method, path, form = {}) {
 
 // ── Checkout session creation (the page calls this before rendering) ──────
 
-// Creates the Managed Payments Checkout Session for the Enterprise price and
-// returns the hosted URL. The price, the success/cancel destinations and the
-// tax behaviour are server-side configuration, never client input — otherwise
-// anyone could point the button at a cheaper price.
+// Two tiers, each with its own server-side price:
+//
+//   single  1 machine                STRIPE_PRICE_ID
+//   fleet   10 machines or more     STRIPE_FLEET_PRICE_ID, 30 USD/node/year
+//
+// The price is server-side configuration, never client input — otherwise
+// anyone could point the button at a cheaper plan. The only client-supplied
+// value is the node count, and it can only select a tier and a quantity within
+// that tier, never the price.
+//
+// The 10-node floor is enforced here because Stripe has no native minimum
+// quantity on a Price: `transform_quantity` accepts only `divide_by` and
+// `round`, and graduated pricing (`tiering_config`) is rejected by this
+// account. Rejecting is better than silently bumping — a customer who typed 3
+// should be told, not billed for 10.
 export async function handle_create_checkout_session(request, env) {
   if (!env.STRIPE_SECRET_KEY) {
     return json({ success: false, message: 'stripe not configured' }, 503);
   }
-  const price_id = str(env.STRIPE_PRICE_ID);
+
+  let body = {};
+  try {
+    const text = await request.text();
+    if (text) {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object') body = parsed;
+    }
+  } catch {
+    // An empty or malformed body is not fatal: it just means "single node".
+    body = {};
+  }
+
+  const tier = body.tier === 'fleet' ? 'fleet' : 'single';
+  const price_id = str(
+    tier === 'fleet' ? env.STRIPE_FLEET_PRICE_ID : env.STRIPE_PRICE_ID,
+  );
   if (!price_id) {
-    return json({ success: false, message: 'price not configured' }, 503);
+    return json(
+      { success: false, message: `${tier} price not configured` },
+      503,
+    );
+  }
+
+  const requested = Number(body.nodes);
+  const min_nodes = tier === 'fleet' ? FLEET_MIN_NODES : 1;
+  let nodes = min_nodes;
+
+  if (Number.isFinite(requested)) {
+    if (!Number.isInteger(requested)) {
+      return json(
+        { success: false, message: 'nodes must be a whole number' },
+        400,
+      );
+    }
+    if (requested < min_nodes) {
+      return json(
+        {
+          success: false,
+          message:
+            tier === 'fleet'
+              ? `fleet licences start at ${FLEET_MIN_NODES} nodes`
+              : 'single licence is one node — use tier "fleet" for more',
+          min_nodes: min_nodes,
+        },
+        400,
+      );
+    }
+    if (requested > MAX_SEATS_PER_ORDER) {
+      return json(
+        {
+          success: false,
+          message: `for more than ${MAX_SEATS_PER_ORDER} nodes contact us`,
+        },
+        400,
+      );
+    }
+    nodes = requested;
   }
 
   const origin = new URL(request.url).origin;
@@ -228,15 +297,17 @@ export async function handle_create_checkout_session(request, env) {
   try {
     const session = await stripe_call(env, 'POST', 'checkout/sessions', {
       mode: 'subscription',
-      line_items: [{ price: price_id, quantity: '1' }],
+      line_items: [{ price: price_id, quantity: String(nodes) }],
       'managed_payments[enabled]': 'true',
       success_url: `${success_url}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url,
       // VAT needs the billing address; Managed Payments needs it for the
       // indirect-tax liability it takes on.
       billing_address_collection: 'required',
-      metadata: { product: 'talus', tier: 'enterprise' },
-      subscription_data: { metadata: { product: 'talus', tier: 'enterprise' } },
+      metadata: { product: 'talus', tier, node_count: String(nodes) },
+      subscription_data: {
+        metadata: { product: 'talus', tier, node_count: String(nodes) },
+      },
       ...(customer_id ? { customer: customer_id } : {}),
     });
 
@@ -244,6 +315,8 @@ export async function handle_create_checkout_session(request, env) {
       success: true,
       session_id: session.id,
       url: session.url,
+      tier,
+      nodes,
       customer_id: customer_id ?? null,
       publishable_key: str(env.STRIPE_PUBLISHABLE_KEY) ?? null,
     });
@@ -446,6 +519,29 @@ async function release_event(db, event_id) {
     .run();
 }
 
+// How many machines a purchase covers. Talus is sold per machine: one seat is
+// one host that can activate, so a fleet order must carry its node count all
+// the way to the daemon or the customer pays for 10 keys and receives one.
+//
+// The count travels in session metadata (`node_count`), set server-side when
+// the session is created and by hand on the Payment Link. It is clamped anyway:
+// the daemon signs one licence per seat, so an inflated value would mint keys
+// nobody paid for, and a typo in the Dashboard would not be caught by anything
+// downstream. Absent metadata means a single-key purchase.
+const MAX_SEATS_PER_ORDER = 500;
+
+export function seats_from_session(session) {
+  const raw = str(session?.metadata?.node_count);
+  if (!raw) return 1;
+  // Digits only, no sign and no surrounding space. `parseInt` on its own is
+  // not enough: it maps '3.5' to 3, which would silently shorten a fleet order
+  // instead of rejecting it.
+  if (!/^\d+$/.test(raw)) return 1;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(n) || n < 1) return 1;
+  return Math.min(n, MAX_SEATS_PER_ORDER);
+}
+
 // A paid Checkout Session becomes a pending order — exactly the row the other
 // stores produce. `orders.order_id` is the session id, which is stable and
 // unique per purchase.
@@ -460,9 +556,7 @@ async function record_paid_session(db, session) {
   const payment_intent = str(session?.payment_intent);
   const now = now_iso();
 
-  // seats/expiry come from the subscription period, not from the payload's
-  // display fields, so a tampered `amount_total` cannot inflate a licence.
-  const seats = 1;
+  const seats = seats_from_session(session);
   const expires_at = derive_expiry(session, now);
 
   await db

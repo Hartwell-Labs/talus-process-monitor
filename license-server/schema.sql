@@ -5,13 +5,23 @@
 -- so the server becomes the source of truth for revocation from the first
 -- activation onwards. Pre-activation revocation is handled by the
 -- `revocations` table below.
+-- max_seats is the ONLY enforced limit: it caps how many machines may activate
+-- the licence. Talus is sold per machine, so one purchased key == one seat.
+--
+-- max_nodes is vestigial and deliberately no longer written. It exists in the
+-- signed payload (process-monitor/src/license.rs) purely so the client can
+-- detect a substituted payload, and no code path ever enforced it — a row
+-- claiming "10 nodes" limited nothing. The column stays so existing rows keep
+-- their shape and so the payload field remains legible if it is ever used
+-- again; dropping it would mean a 12-step SQLite table rebuild on a live
+-- payments database to delete a column nothing reads.
 CREATE TABLE IF NOT EXISTS licenses (
   license_id  TEXT PRIMARY KEY,
   tier        TEXT NOT NULL,
   org         TEXT,
   features    TEXT,
-  max_nodes   INTEGER NOT NULL DEFAULT 0,
-  max_seats   INTEGER NOT NULL DEFAULT 1,
+  max_nodes   INTEGER NOT NULL DEFAULT 0,  -- legacy, unenforced, not written
+  max_seats   INTEGER NOT NULL DEFAULT 1,  -- the enforced limit (machines)
   expires_at  TEXT,
   revoked     INTEGER NOT NULL DEFAULT 0,
   issued_at   TEXT NOT NULL
