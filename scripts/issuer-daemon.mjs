@@ -306,8 +306,13 @@ if (keyIdx >= 0) {
       await catchup_delivery();
       const { status, data } = await api('/api/v1/admin/orders', { status: 'pending' });
       if (status !== 200) throw new Error(`orders fetch failed: ${status}`);
+      // Stripe settles money itself and never hands over a store key, so the
+      // filter has to accept it explicitly: it qualifies on store alone. The
+      // fulfillment path below is store-agnostic — fulfill() mints a fresh
+      // signed licence for any order; only the store-key mapping inside it is
+      // Polar-specific.
       const pending = (data.orders ?? []).filter(
-        (o) => o.store_key_hash || o.store_key || o.store === 'polar',
+        (o) => o.store_key_hash || o.store_key || o.store === 'polar' || o.store === 'stripe',
       );
       if (pending.length === 0) {
         console.log(`[${new Date().toISOString()}] no pending orders`);
