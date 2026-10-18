@@ -92,6 +92,26 @@ pieniądze ani na prawdziwe zamówienia):
 node --test license-server/test/stripe-webhook-test.mjs
 ```
 
+### Podatek — `not_collecting`, czyli nic nie jest pobierane
+
+2026-10-18: kalkulacja dla polskiego klienta zwraca `taxability_reason:
+not_collecting`, `tax_amount_exclusive: 0`. Powód: **konto nie ma ani jednej
+rejestracji podatkowej** (`GET /v1/tax/registrations` → `[]`).
+
+To jest najczęstszy błąd przy Stripe Tax i najbardziej podstępny: Stripe **nie
+zwraca błędu**. Sesja ma `automatic_tax.enabled: true`, checkout wygląda
+poprawnie, a VAT po prostu się nie pojawia. Stripe pobiera podatek wyłącznie
+w jurysdykcjach, do których dodano rejestrację.
+
+Dopóki rejestracji nie ma, żadna kwota nie jest doliczana do żadnego kraju.
+
+Head office ma tylko `country: PL` (bez ulicy i kodu) — to wystarczy do
+utworzenia rejestracji, ale warto uzupełnić, bo Stripe używa go jako punktu
+wyjścia dla stawek.
+
+Schemat rejestracji (OSS, standardowa vs. uproszczona) **nie jest wyborem
+technicznym** — to decyzja księgowa. Ustala się ją z doradcą podatkowym.
+
 Testy na żywo: poprawny podpis → 200, powtórzony event → 200 `already processed`
 (idempotencja), podpis sprzed 2 h → 401, podpis innym sekretem → 401.
 

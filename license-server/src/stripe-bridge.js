@@ -239,12 +239,21 @@ export async function handle_create_checkout_session(request, env) {
   }
 
   const tier = body.tier === 'fleet' ? 'fleet' : 'single';
+
+  // Market choice, not a price choice: the caller picks which currency to be
+  // quoted and the server picks the matching price. Both tiers sell in both
+  // currencies, so a Polish buyer never converts through their own bank at a
+  // worse rate than NBP.
+  const currency = body.currency === 'usd' ? 'usd' : 'pln';
+
   const price_id = str(
-    tier === 'fleet' ? env.STRIPE_FLEET_PRICE_ID : env.STRIPE_PRICE_ID,
+    tier === 'fleet'
+      ? (currency === 'usd' ? env.STRIPE_FLEET_PRICE_USD : env.STRIPE_FLEET_PRICE_PLN)
+      : (currency === 'usd' ? env.STRIPE_PRICE_USD : env.STRIPE_PRICE_PLN),
   );
   if (!price_id) {
     return json(
-      { success: false, message: `${tier} price not configured` },
+      { success: false, message: `${tier}/${currency} price not configured` },
       503,
     );
   }
@@ -299,14 +308,20 @@ export async function handle_create_checkout_session(request, env) {
       mode: 'subscription',
       line_items: [{ price: price_id, quantity: String(nodes) }],
       'managed_payments[enabled]': 'true',
+      // Automatic tax is enabled per session; Managed Payments does not imply
+      // it. Without this Stripe hands back a session that collects nothing and
+      // returns no error, so the checkout looks correct and the tax simply never
+      // appears. Stripe only actually charges it where an active registration
+      // exists — see docs/ops.md.
+      'automatic_tax[enabled]': 'true',
       success_url: `${success_url}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url,
       // VAT needs the billing address; Managed Payments needs it for the
       // indirect-tax liability it takes on.
       billing_address_collection: 'required',
-      metadata: { product: 'talus', tier, node_count: String(nodes) },
+      metadata: { product: 'talus', tier, node_count: String(nodes), currency },
       subscription_data: {
-        metadata: { product: 'talus', tier, node_count: String(nodes) },
+        metadata: { product: 'talus', tier, node_count: String(nodes), currency },
       },
       ...(customer_id ? { customer: customer_id } : {}),
     });
@@ -317,6 +332,7 @@ export async function handle_create_checkout_session(request, env) {
       url: session.url,
       tier,
       nodes,
+      currency,
       customer_id: customer_id ?? null,
       publishable_key: str(env.STRIPE_PUBLISHABLE_KEY) ?? null,
     });
