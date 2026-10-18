@@ -5,7 +5,7 @@ name = "talus-desktop"
 version = "0.5.0"
 description = "Talus EDR — Desktop Dashboard"
 authors = ["arch"]
-license = "MIT"
+license-file = "../../LICENSE"
 edition = "2021"
 rust-version = "1.77.2"
 

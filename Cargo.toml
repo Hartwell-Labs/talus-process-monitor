@@ -51,8 +51,7 @@ ftui-widgets = { path = "frankentui/ftui-widgets" }
 [workspace.package]
 version = "0.8.2"
 edition = "2021"
-license = "MIT"
-
+license-file = "LICENSE"
 [profile.release]
 lto = true
 opt-level = 3

@@ -12,7 +12,7 @@
 
 # 🛡️ Talus — eBPF Ransomware Detection & Response for Linux
 
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT%20%2B%20commercial-orange?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-2021-DEA584?style=flat-square&logo=rust)
 ![eBPF](https://img.shields.io/badge/eBPF-Linux%205.8+-FCD900?style=flat-square&logo=linux)
 ![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go)
@@ -791,13 +791,47 @@ Talus includes a **30-day Enterprise trial** on first run. No activation require
 
 Enterprise licenses are sold directly by the author:
 
-- 🛒 Purchase via the payment link shared by the author (Gumroad / Lemon
-  Squeezy / bank transfer) — see the pricing **structure** in
-  [docs/pricing-tiers.md](docs/pricing-tiers.md) (amounts are set per sale,
-  not in the repo)
+- 🛒 Purchase online at [hartwell-labs.pl/talus](https://hartwell-labs.pl/talus)
+  — $50 per machine per year for a single machine, $30 per machine from ten
+  machines up. See the pricing **structure** in
+  [docs/pricing-tiers.md](docs/pricing-tiers.md)
 - 📧 Contact: [@BartoszOsiej](https://github.com/BartoszOsiej) — volume &
-  team agreements (10+ seats)
+  team agreements
 - 📜 Terms: [docs/EULA.txt](docs/EULA.txt)
+
+### Licensing, precisely
+
+The project is MIT licensed **with one exception**. See [LICENSE](LICENSE) and
+[LICENSE.commercial](LICENSE.commercial), and read [NOTICE](NOTICE) before
+relying on either.
+
+**MIT, permanently, with no key and no limits:**
+
+- the eBPF probes and the bpf object
+- scoring, sweep detectors, the MeMLP engine
+- the signed audit chain, the self-sandbox, the watchdog
+- the TUI, the JSON and plain-text output
+- the CLI, including every `license` subcommand
+
+**Commercial — the automatic response path:**
+
+- the function that terminates or suspends a detected process, and the
+  entitlement check that gates it
+
+Running the detector costs nothing and always will. Running it *without* the
+automatic response costs nothing. Running the automatic response on a machine
+where it can end a process needs a subscription — which is also the only thing
+the subscription buys, because it is the only part that is not MIT.
+
+Two things worth being clear about:
+
+1. **This split cannot undo history.** Versions of this repository published
+   before the split carried a plain MIT licence, and MIT is a grant that no
+   later notice can withdraw. Copies obtained earlier keep the response path.
+   See [NOTICE](NOTICE).
+2. **The entitlement check is a runtime gate, not a build boundary.** The
+   licence is the real boundary; anyone treating the technical one as the legal
+   one is relying on the wrong thing.
 
 ## Support & Services
 

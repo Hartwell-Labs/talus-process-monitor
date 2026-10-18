@@ -19,14 +19,6 @@ path = "src/lib.rs"
 name = "talus-monitor"
 path = "src/main.rs"
 
-
-[features]
-default = []
-web = ["dep:axum", "dep:tokio", "dep:tower", "dep:tower-http", "dep:prometheus-client", "dep:futures", "dep:tokio-util", "dep:parking_lot", "dep:rustls", "dep:tokio-rustls", "dep:rcgen", "dep:hyper-util"]
-kafka = ["dep:rdkafka", "dep:tokio"]
-clickhouse = ["dep:clickhouse-rs", "dep:tokio", "dep:futures"]
-memgraph = ["dep:tokio"]
-
 [dependencies]
 anyhow = "1"
 aya = "0.14.0"
@@ -60,30 +52,15 @@ ftui-widgets = { version = "0.6" }
 ftui-extras = { version = "0.6", features = ["charts", "canvas", "text-effects"] }
 
 # Web server (optional, enabled with --features web)
-axum = { version = "0.8.9", features = ["ws"], optional = true }
-tokio = { version = "1", features = ["full"], optional = true }
-tower = { version = "0.5", optional = true }
-tower-http = { version = "0.7", features = ["cors", "fs"], optional = true }
-prometheus-client = { version = "0.25", optional = true }
-futures = { version = "0.3", optional = true }
-tokio-util = { version = "0.7", optional = true }
-parking_lot = { version = "0.12", optional = true }
 
 # TLS for web dashboard
-rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
-tokio-rustls = { version = "0.26", optional = true }
-rcgen = { version = "0.14", optional = true }
 
 # hyper-util server builder for the TLS accept loop (axum enables only
 # `server` + `service`; the `auto` conn builder additionally needs http1/http2)
-hyper-util = { version = "0.1", optional = true, features = ["server-auto", "service", "tokio"] }
 
 # Kafka producer (optional, enabled with --features kafka)
-rdkafka = { version = "0.36", features = ["ssl-vendored", "curl-static"], optional = true }
 
 # ClickHouse storage (optional, enabled with --features clickhouse)
-clickhouse-rs = { version = "1.1.0-alpha.1", optional = true }
-
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

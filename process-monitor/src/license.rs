@@ -897,7 +897,6 @@ pub fn read_audit_log(max_entries: usize) -> Vec<String> {
 }
 
 /// Get license health status as a JSON-serializable struct.
-#[cfg(feature = "web")]
 pub fn license_health() -> LicenseHealth {
     match LicenseCache::load() {
         Ok(Some(cache)) => {
@@ -958,7 +957,6 @@ pub fn license_health() -> LicenseHealth {
 
 /// License health status for API responses.
 #[derive(Serialize)]
-#[cfg(feature = "web")]
 pub struct LicenseHealth {
     pub status: String,
     pub tier: String,
@@ -1886,7 +1884,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "web")]
     fn license_health_struct_serializes() {
         // Test that LicenseHealth can be serialized (used by web API)
         let health = LicenseHealth {

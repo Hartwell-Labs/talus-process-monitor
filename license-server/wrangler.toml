@@ -52,12 +52,20 @@ TURSO_DATABASE_URL = "https://talus-licenses-bartoszosiej.aws-eu-west-1.turso.io
 # Public configuration, safe to commit. The price and the redirect targets are
 # server-side on purpose: if the browser could name the price or the success
 # URL, anyone could point the button at a cheaper plan or their own domain.
-STRIPE_PRICE_ID = "price_1URciSLvyPZVfvPqz8UlNEZX"
-# Fleet tier: 30 USD per node per year, minimum 10 nodes. The 10-node floor is
-# enforced in the Worker, not by Stripe — this account rejects graduated
-# pricing (tiering_config), and transform_quantity accepts only divide_by and
-# round, so a Price cannot express a native minimum quantity.
-STRIPE_FLEET_PRICE_ID = "price_1URef7LvyPZVfvPqqFgXG5Cg"
+# Single tier, sold in both currencies. USD is what the site quotes and
+# what the primary market pays; the złoty price exists for a buyer who
+# asks for it, not as a second published price list.
+STRIPE_PRICE_PLN = "price_1URciSLvyPZVfvPqz8UlNEZX"
+STRIPE_PRICE_USD = "price_1URfDULvyPZVfvPqlI5iwDvo"
+# Fleet tier, minimum 10 nodes. Sold in both currencies so a Polish buyer is
+# not quoted in dollars and left to convert through their own bank at a worse
+# rate than NBP (3.8827, which is what 117 PLN / $30 is pegged to).
+#
+# The 10-node floor is enforced in the Worker, not by Stripe — this account
+# rejects graduated pricing (tiering_config), and transform_quantity accepts
+# only divide_by and round, so a Price cannot express a minimum quantity.
+STRIPE_FLEET_PRICE_PLN = "price_1URerSLvyPZVfvPqECK0Iy84"
+STRIPE_FLEET_PRICE_USD = "price_1URef7LvyPZVfvPqqFgXG5Cg"
 # STRIPE_PUBLISHABLE_KEY is intentionally absent: the checkout hands the
 # customer a hosted Stripe URL to redirect to, so the page never touches card
 # data and never needs a publishable key. Set it only if you later switch to

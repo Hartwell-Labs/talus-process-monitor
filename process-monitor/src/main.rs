@@ -171,16 +171,6 @@ struct MonitorArgs {
 }
 
 fn main() -> Result<()> {
-    // FIX(web): rustls 0.23 panics when both crypto providers (aws-lc-rs and
-    // ring) are enabled via feature unification. Install `ring` explicitly
-    // before any TLS code runs (no-op for the TUI-only build).
-    #[cfg(feature = "web")]
-    {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
-    }
-
     let cli = Cli::parse();
 
     match cli.command {
@@ -474,70 +464,17 @@ fn run_monitor(args: MonitorArgs) -> Result<()> {
     #[allow(unused_mut)]
     let mut pipeline = storage::StoragePipeline::new();
 
-    #[cfg(feature = "kafka")]
-    if let (Some(brokers), Some(topic)) = (&args.kafka_brokers, &args.kafka_topic) {
-        let cfg = storage::kafka::KafkaConfig {
-            brokers: brokers.clone(),
-            topic: topic.clone(),
-            ..Default::default()
-        };
-        match storage::kafka::KafkaProducer::start(cfg) {
-            Ok(p) => {
-                eprintln!("[talus] Kafka producer → {brokers} topic={topic}");
-                pipeline.kafka = Some(p);
-            }
-            Err(e) => eprintln!("[talus] WARN: Kafka init failed: {e}"),
-        }
-    }
-
-    #[cfg(feature = "clickhouse")]
-    if let Some(ref url) = args.clickhouse {
-        let cfg = storage::clickhouse::ClickHouseConfig {
-            url: url.clone(),
-            ..Default::default()
-        };
-        match storage::clickhouse::ClickHouseStore::start(cfg) {
-            Ok(s) => {
-                eprintln!("[talus] ClickHouse → {url}");
-                pipeline.clickhouse = Some(s);
-            }
-            Err(e) => eprintln!("[talus] WARN: ClickHouse init failed: {e}"),
-        }
-    }
-
-    #[cfg(feature = "memgraph")]
-    if let Some(ref url) = args.memgraph {
-        let cfg = storage::memgraph::MemGraphConfig {
-            url: url.clone(),
-            ..Default::default()
-        };
-        match storage::memgraph::MemGraphStore::start(cfg) {
-            Ok(s) => {
-                eprintln!("[talus] MemGraph → {url}");
-                pipeline.memgraph = Some(s);
-            }
-            Err(e) => eprintln!("[talus] WARN: MemGraph init failed: {e}"),
-        }
-    }
-
     if let Some(duration) = args.benchmark {
         let secs = duration.unwrap_or(10);
         run_benchmark(&mut monitor, secs)?;
     } else if args.diagnose {
         run_diagnose(&mut monitor)?;
-    } else if let Some(addr_str) = &args.web {
-        #[cfg(feature = "web")]
-        {
-            use std::net::SocketAddr;
-            let addr: SocketAddr = addr_str.parse().context("invalid web server address")?;
-            let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
-            rt.block_on(web::start_web_server(monitor, addr, args.alert_threshold))?;
-        }
-        #[cfg(not(feature = "web"))]
-        {
-            let _ = addr_str;
-            bail!("--web requires the 'web' feature. Rebuild with: cargo build --features web");
-        }
+    } else if args.web.is_some() {
+        bail!(
+            "--web is an Enterprise feature and is not in this build.\n\
+             This binary is MIT licensed and contains no dashboard code.\n\
+             See LICENSE, or contact contact@hartwell-labs.pl for Enterprise."
+        );
     } else if use_tui {
         eprintln!("[talus] TUI mode — q quit, p pause, ? help, Tab switch panel");
         tui::run(monitor, license_state)?;
