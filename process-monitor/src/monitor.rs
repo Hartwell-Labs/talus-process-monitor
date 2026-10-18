@@ -251,6 +251,9 @@ pub struct Monitor {
     rx: Receiver<Msg>,
     pub threshold: u64,
     pub auto_kill: bool,
+    /// What happens when a verdict fires. `NoResponse` unless a build installs
+    /// something else, so the MIT build observes without acting.
+    responder: Box<dyn Responder>,
     stats: HashMap<u32, ProcStats>,
     windows: HashMap<u32, VecDeque<Instant>>,
     /// PID → PPID mapping (resolved from /proc/<pid>/status).
@@ -285,21 +288,51 @@ pub struct Monitor {
 
 // ── Response: process termination ────────────────────────────────────────
 
-/// Send SIGKILL to a process. Returns true on success.
+/// Acts on a detection verdict.
 ///
-/// # Safety
+/// The detector decides *whether* something is ransomware; this decides what
+/// happens next. The split is deliberate and is the whole licensing model: the
+/// judgement — thresholds, scoring, the MeMLP engine, the audit chain — stays
+/// open and auditable, and the part that can end a process is not in this
+/// repository at all.
 ///
-/// Calls `kill(2)` with SIGKILL. The pid is cast from u32 to i32 which is
-/// safe for all valid PIDs (max value 4194304 on Linux, well within i32 range).
-/// SIGKILL cannot be caught, so the target process will terminate.
-fn kill_process(pid: u32) -> bool {
-    // SAFETY: kill(2) is a POSIX syscall. pid is within i32 range for valid PIDs.
-    // SIGKILL is a valid signal number. No pointer dereference involved.
-    let rc = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-    rc == 0
+/// The MIT build installs [`NoResponse`], so the flag is accepted and every
+/// verdict is reported without anything happening. The Enterprise build installs
+/// an implementation that terminates the process.
+pub trait Responder: Send {
+    /// A verdict fired for `pid`. `comm` is the process command, as read from
+    /// procfs, for the operator's logs.
+    fn on_verdict(&mut self, pid: u32, comm: &str) -> bool;
+}
+
+/// The responder used by the MIT build: it observes and never acts.
+///
+/// This is the default, so a build of this crate cannot terminate a process
+/// no matter which flags it is given. That is not a runtime check that can be
+/// removed — there is nothing here to remove.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoResponse;
+
+impl Responder for NoResponse {
+    fn on_verdict(&mut self, _pid: u32, _comm: &str) -> bool {
+        false
+    }
 }
 
 impl Monitor {
+    /// Install what acts on a verdict.
+    ///
+    /// Without this the monitor observes and reports but does nothing, which is
+    /// what the MIT build does. An Enterprise build calls this with an
+    /// implementation that terminates the process.
+    ///
+    /// `auto_kill` stays the operator's switch: this only says what happens when
+    /// the switch is on.
+    pub fn with_responder(mut self, responder: Box<dyn Responder>) -> Self {
+        self.responder = responder;
+        self
+    }
+
     /// Start the eBPF monitor.
     ///
     /// Loads the compiled eBPF object, attaches tracepoints to syscall entries,
@@ -424,6 +457,7 @@ impl Monitor {
             rx,
             threshold,
             auto_kill,
+            responder: Box::new(NoResponse),
             stats: HashMap::new(),
             windows: HashMap::new(),
             pid_to_ppid: HashMap::new(),
@@ -641,14 +675,23 @@ impl Monitor {
                         opens: stats.window_opens,
                         memlp: memlp_verdict,
                     }));
-                    // ── Response: terminate the offending process ──────────
+                    // ── Response: act on the verdict ───────────────────────────
                     if self.auto_kill {
-                        let result = kill_process(ev.pid);
+                        let result = self.responder.on_verdict(ev.pid, &ev.comm);
+                        // Say what actually happened. The MIT build has no
+                        // responder, and "SIGKILL sent" there would be a lie an
+                        // operator would believe — the exact failure that made
+                        // the old gate worth removing.
+                        let action = if result {
+                            format!("response sent to PID {} ({})", ev.pid, ev.comm)
+                        } else {
+                            format!("no response sent to PID {} ({})", ev.pid, ev.comm)
+                        };
                         outputs.push(Output::Action(ResponseAction {
                             ts: ev.ts.clone(),
                             pid: ev.pid,
                             comm: ev.comm.clone(),
-                            action: format!("SIGKILL sent to PID {} ({})", ev.pid, ev.comm),
+                            action,
                             success: result,
                         }));
                     }
@@ -1159,6 +1202,7 @@ impl Monitor {
             rx,
             threshold: 3,
             auto_kill: false,
+            responder: Box::new(NoResponse),
             stats: HashMap::new(),
             windows: HashMap::new(),
             pid_to_ppid: HashMap::new(),
@@ -1665,11 +1709,74 @@ mod tests {
             .collect();
         assert_eq!(actions.len(), 1, "auto-kill should emit one ResponseAction");
         if let Output::Action(act) = &outputs[3] {
-            assert!(act.action.contains("SIGKILL"));
             assert!(act.action.contains("99"));
         } else {
             panic!("expected ResponseAction at index 3");
         }
+    }
+
+    #[test]
+    fn mit_build_reports_the_verdict_but_acts_on_nothing() {
+        // The guarantee the licensing model rests on: a build of this crate, with
+        // --auto-kill set, reaches the verdict and then does nothing. The action
+        // reports failure, so an operator sees that no response happened rather
+        // than silently believing it did.
+        let mut monitor = Monitor::dummy();
+        monitor.auto_kill = true;
+        let mut outputs = Vec::new();
+        for _ in 0..3 {
+            monitor.handle_event(&open(4242, 1000, "/tmp/evil"), &mut outputs);
+        }
+        match outputs.iter().find_map(|o| match o {
+            Output::Action(a) => Some(a),
+            _ => None,
+        }) {
+            Some(action) => assert!(
+                !action.success,
+                "the MIT build must not report a successful response — it cannot send one"
+            ),
+            None => panic!("a verdict with --auto-kill should still be reported"),
+        }
+    }
+
+    #[test]
+    fn no_response_is_the_default_and_reports_failure() {
+        // Guards a future refactor from making something actionable the default.
+        let mut r = NoResponse;
+        assert!(!r.on_verdict(1, "init"));
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct CountingResponse(Arc<AtomicUsize>);
+    impl Responder for CountingResponse {
+        fn on_verdict(&mut self, _pid: u32, _comm: &str) -> bool {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+    }
+
+    #[test]
+    fn an_installed_responder_is_the_one_that_acts() {
+        // Proves the split is a real seam: the same verdict path calls out to
+        // whatever responder the build installed.
+        let hits = Arc::new(AtomicUsize::new(0));
+        let mut monitor = Monitor::dummy().with_responder(Box::new(CountingResponse(hits.clone())));
+        monitor.auto_kill = true;
+        let mut outputs = Vec::new();
+        for _ in 0..3 {
+            monitor.handle_event(&open(77, 1000, "/tmp/evil"), &mut outputs);
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "responder called once");
+        let action = outputs
+            .iter()
+            .find_map(|o| match o {
+                Output::Action(a) => Some(a),
+                _ => None,
+            })
+            .expect("action");
+        assert!(action.success, "an installed responder reports what it did");
     }
 
     #[test]

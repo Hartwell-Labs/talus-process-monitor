@@ -10,14 +10,7 @@
 //   --features clickhouse → ClickHouse inserter
 //   --features memgraph   → MemGraph Cypher client
 
-#[cfg(feature = "kafka")]
-pub mod kafka;
-
-#[cfg(feature = "clickhouse")]
-pub mod clickhouse;
-
-#[cfg(feature = "memgraph")]
-pub mod memgraph;
+use std::sync::Arc;
 
 use crate::monitor::{Alert, RecordedEvent};
 
@@ -69,52 +62,56 @@ impl From<&Alert> for StorageEvent {
 /// Unified storage pipeline that wraps all active backends.
 /// Methods are always compiled — internally gated by #[cfg].
 pub struct StoragePipeline {
-    #[cfg(feature = "kafka")]
-    pub kafka: Option<kafka::KafkaProducer>,
-    #[cfg(feature = "clickhouse")]
-    pub clickhouse: Option<clickhouse::ClickHouseStore>,
-    #[cfg(feature = "memgraph")]
-    pub memgraph: Option<memgraph::MemGraphStore>,
+    /// Registered destinations. Empty in the MIT build.
+    ///
+    /// A trait rather than three `Option<ConcreteType>` fields: the backends are
+    /// built in the private crate and the pipeline that feeds them is part of
+    /// the detector, so neither side can name the other concretely. Same seam
+    /// as `Responder`, and for the same reason — a runtime feature flag is not
+    /// a boundary.
+    sinks: Vec<Arc<dyn EventSink>>,
+}
+
+/// A destination for pipeline events.
+///
+/// Implementations live in the private crate. A failing sink must not stop the
+/// pipeline or the agent, so `accept` reports its own failures and returns
+/// nothing.
+pub trait EventSink: Send + Sync {
+    /// Human-readable name, used in start-up logging.
+    fn name(&self) -> &'static str;
+    /// Take one event. Called from the monitor thread.
+    fn accept(&self, event: &StorageEvent);
+    /// Take a batch of detector outputs. Optional.
+    fn accept_outputs(&self, _outputs: &[crate::monitor::Output]) {}
 }
 
 impl StoragePipeline {
     pub fn new() -> Self {
-        Self {
-            #[cfg(feature = "kafka")]
-            kafka: None,
-            #[cfg(feature = "clickhouse")]
-            clickhouse: None,
-            #[cfg(feature = "memgraph")]
-            memgraph: None,
-        }
+        Self { sinks: Vec::new() }
     }
 
-    /// Forward an event to all active storage backends.
-    #[allow(unused_variables)]
+    /// Register a destination.
+    pub fn register_sink(&mut self, sink: Arc<dyn EventSink>) {
+        self.sinks.push(sink);
+    }
+
+    /// Whether anything is listening.
+    pub fn has_sinks(&self) -> bool {
+        !self.sinks.is_empty()
+    }
+
+    /// Forward an event to every registered destination.
     pub fn forward_event(&self, event: &StorageEvent) {
-        #[cfg(feature = "kafka")]
-        if let Some(ref p) = self.kafka {
-            p.send(event.clone());
-        }
-        #[cfg(feature = "clickhouse")]
-        if let Some(ref s) = self.clickhouse {
-            s.insert(event.clone());
-        }
-        #[cfg(feature = "memgraph")]
-        if let Some(ref g) = self.memgraph {
-            g.ingest(event);
+        for sink in &self.sinks {
+            sink.accept(event);
         }
     }
 
     /// Forward a list of outputs to all active backends.
     pub fn forward_outputs(&self, outputs: &[crate::monitor::Output]) {
-        for output in outputs {
-            let ev = match output {
-                crate::monitor::Output::Event(ref e) => StorageEvent::from(e),
-                crate::monitor::Output::Alert(ref a) => StorageEvent::from(a),
-                crate::monitor::Output::Action(_) => continue,
-            };
-            self.forward_event(&ev);
+        for sink in &self.sinks {
+            sink.accept_outputs(outputs);
         }
     }
 }

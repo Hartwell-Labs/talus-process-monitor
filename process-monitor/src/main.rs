@@ -5,16 +5,12 @@
 //! scores per-process file-open rates in real-time, and terminates offending
 //! processes when a heuristic verdict fires.
 
-// The detection engine is a library as well as a binary, so the paid modules
-// can be built from a private crate that depends on this one. `lib.rs` owns
-// the module declarations; `main.rs` only adds what the binary needs.
-use talus_process_monitor::{license, memlp, monitor, sandbox, watchdog};
+// The detection engine is a library as well as a binary, so the paid modules can
+// be built from a private crate that depends on this one. `lib.rs` owns the
+// module declarations; `main.rs` only adds what the binary needs.
+use talus_process_monitor::{license, memlp, monitor, sandbox, storage, watchdog};
 
-mod ffi;
-mod storage;
 mod tui;
-#[cfg(feature = "web")]
-mod web;
 
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};

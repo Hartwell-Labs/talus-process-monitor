@@ -46,4 +46,5 @@ pub mod license;
 pub mod memlp;
 pub mod monitor;
 pub mod sandbox;
+pub mod storage;
 pub mod watchdog;
