@@ -2,18 +2,18 @@
 [extend]
 useDefault = true
 
+# One table, not an array of them. gitleaks 8.24 reads `allowlist`; the plural
+# `[[allowlists]]` form is silently ignored by the version CI installs, which is
+# why an entry there looked configured but never applied.
 [allowlist]
-  description = "Vendored third-party demo data (sqlite amalgamation etc.) — C identifiers, not secrets"
+  description = "Vendored third-party demo data and synthetic test fixtures — identifiers, not secrets"
   paths = [
     '''frankentui/ftui-demo-showcase/data/''',
+    '''license-server/test/''',
   ]
-
-  [[allowlists]]
-    description = "Stripe webhook test fixtures - synthetic secrets used to sign test payloads"
-    paths = [
-      'license-server/test/',
-    ]
-    regexes = [
-      'whsec_test_',
-      'whsec_someone_elses_secret',
-    ]
+  regexes = [
+    # Stripe webhook fixtures. These sign test payloads and are committed on
+    # purpose; a real key never appears in this tree.
+    '''whsec_test_''',
+    '''whsec_someone_elses_secret''',
+  ]
