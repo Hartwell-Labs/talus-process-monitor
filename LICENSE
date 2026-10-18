@@ -1,6 +1,58 @@
 MIT License
+===============================
 
 Copyright (c) 2026 Bartosz Osiej
+
+SCOPE
+-----
+
+The MIT License below governs this repository in full.
+
+Three things are not in this repository at all, because they are built from a
+separate, private crate called `talus-enterprise`:
+
+  * the automatic response path — terminating or suspending a detected process
+  * the web dashboard, its REST API, its WebSocket stream and Prometheus metrics
+  * the Kafka, ClickHouse and MemGraph exporters, and the C FFI library
+
+This is a boundary of distribution, not of configuration. There is no flag to
+pass and no check to remove: a build of this crate contains no `kill(2)` call,
+no dashboard and no exporter, because that source is not here. The seam exists
+in two traits — `monitor::Responder` and `storage::EventSink` — whose default
+implementations observe without acting, so a MIT build reaches a detection
+verdict and reports it as unacted.
+
+Everything that makes the detection trustworthy is here and stays MIT: the eBPF
+probes, the scoring and sweep detectors, the MeMLP engine, the signed audit
+chain, the self-sandbox, the watchdog, the TUI, the JSON and plain-text output,
+the storage pipeline, the CLI, and the FFI needed to read the audit chain.
+
+Nothing in this repository's history changes retroactively. MIT is a grant; see
+`NOTICE`.
+
+THE MIT LICENSE.
+
+That means, specifically:
+
+  * the `kill_process` function and the response-enforcement logic around it in
+    `process-monitor/src/monitor.rs`, and
+  * the code in `process-monitor/src/ffi.rs` that gates that path on a
+    commercial entitlement,
+
+are licensed under the separate terms in `LICENSE.commercial`, not under MIT.
+
+Everything else — the eBPF probes, the scoring and sweep detectors, the audit
+chain, the sandbox, the web dashboard, the REST API, the WebSocket stream, the
+SIEM exporters, the CLI, the TUI and the FFI library used to embed Talus — is
+MIT, permanently and without further condition. That is the whole detection
+engine, and it stays open source whatever happens to the commercial tier.
+
+Nothing in this exception changes the licence of any file in the repository's
+history before this notice was added. MIT is a grant; see `NOTICE` for what that
+means for copies obtained earlier.
+
+THE MIT LICENSE
+---------------
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

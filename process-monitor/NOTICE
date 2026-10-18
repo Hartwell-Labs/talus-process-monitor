@@ -2,21 +2,32 @@
 
 ## Licensing split
 
-This project is licensed in two parts. `LICENSE` is MIT with a single stated
-exception; `LICENSE.commercial` covers the exception.
+This repository is MIT licensed. Three things are not in it.
 
-**MIT, permanently and unconditionally:** the eBPF probes, the scoring and sweep
-detectors, the audit chain, the self-sandbox, the web dashboard, the REST API,
-the WebSocket stream, the SIEM and Kafka and ClickHouse and MemGraph exporters,
-the CLI, the TUI, and the C FFI library for embedding Talus in another product.
+**Here, MIT, permanently, with no key and no limits:**
 
-**Commercial:** the automatic response path — the function that terminates or
-suspends a detected process, and the entitlement check that gates it.
+- the eBPF probes and the bpf object
+- scoring, sweep detectors, the MeMLP engine
+- the signed audit chain, the self-sandbox, the watchdog
+- the TUI, the JSON and plain-text output
+- the storage pipeline, the CLI, and every `license` subcommand
 
-The split exists because the response path is the product. Everything that
-makes the detection trustworthy stays open, so that it can be read, audited,
-forked and trusted; the part that can end someone's process is what the licence
-covers.
+**Not here — built from the private `talus-enterprise` crate:**
+
+- the automatic response path: terminating or suspending a process
+- the web dashboard, its REST API, WebSocket stream and Prometheus metrics
+- the Kafka, ClickHouse and MemGraph exporters
+- the C FFI library for embedding Talus in another product
+
+The split is a boundary of distribution. A MIT build contains no `kill(2)`
+call, no dashboard and no exporter — not gated, absent. The detector decides;
+`monitor::Responder` is what acts, and its default observes. Likewise
+`storage::EventSink` feeds the exporters, and the default list is empty.
+
+The reason for the split is that the judgement stays auditable. Thresholds,
+scoring, the neural engine and the audit chain are what someone has to be able
+to read and verify before trusting an agent that can end a process. Everything
+that decides is open; only the part that acts is not.
 
 ## What this cannot do retroactively
 
