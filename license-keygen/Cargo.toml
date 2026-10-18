@@ -3,6 +3,7 @@ name = "talus-keygen"
 version = "0.1.0"
 edition = "2021"
 description = "License key generator for Talus Process Monitor"
+license = "MIT"
 license-file = "../LICENSE"
 [[bin]]
 name = "talus-keygen"

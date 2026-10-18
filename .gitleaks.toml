@@ -7,3 +7,13 @@ useDefault = true
   paths = [
     '''frankentui/ftui-demo-showcase/data/''',
   ]
+
+  [[allowlists]]
+    description = "Stripe webhook test fixtures - synthetic secrets used to sign test payloads"
+    paths = [
+      'license-server/test/',
+    ]
+    regexes = [
+      'whsec_test_',
+      'whsec_someone_elses_secret',
+    ]
