@@ -5,15 +5,14 @@
 //! scores per-process file-open rates in real-time, and terminates offending
 //! processes when a heuristic verdict fires.
 
-mod audit;
+// The detection engine is a library as well as a binary, so the paid modules
+// can be built from a private crate that depends on this one. `lib.rs` owns
+// the module declarations; `main.rs` only adds what the binary needs.
+use talus_process_monitor::{license, memlp, monitor, sandbox, watchdog};
+
 mod ffi;
-mod license;
-mod memlp;
-mod monitor;
-mod sandbox;
 mod storage;
 mod tui;
-mod watchdog;
 #[cfg(feature = "web")]
 mod web;
 

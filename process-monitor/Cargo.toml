@@ -1,14 +1,24 @@
 [package]
 repository = "https://github.com/BartoszOsiej/talus-process-monitor"
-name = "process-monitor"
+name = "talus-process-monitor"
 version = "0.8.2"
 edition = "2021"
 description = "eBPF-based real-time process and file operation monitor with TUI"
-license = "MIT"
+license-file = "../LICENSE"
 homepage = "https://bartoszosiej.github.io/talus-process-monitor/"
 documentation = "https://bartoszosiej.github.io/talus-process-monitor/field-guide.html"
 keywords = ["ebpf", "security", "ransomware", "monitoring", "edr"]
 categories = ["os::linux-apis", "command-line-utilities", "development-tools::profiling"]
+# Detection engine, exposed as a library so the paid modules can live in a
+# separate crate that is not published. See src/lib.rs.
+[lib]
+name = "talus_process_monitor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "talus-monitor"
+path = "src/main.rs"
+
 
 [features]
 default = []
