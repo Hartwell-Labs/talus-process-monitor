@@ -866,13 +866,22 @@ Two things worth being clear about:
 
 Need help deploying Talus, or want it tuned to your environment?
 
-- 🎉 **Launch offer (through Oct 31):** code `WEEK30` = 30% off everything below at checkout.
-- 🛠️ **Support Session — $150**: 60-minute 1:1 call + written config. Threshold
-  tuning for your workload, false-positive triage, systemd/alert routing,
-  response-playbook design. [Book instantly](https://buy.polar.sh/polar_cl_ZidnJwSp43rSD0VqSHiSCiGS9v3gJBGMGfmmv0nhv3L).
-- 🏢 **Enterprise — 200 PLN/year** (auto-renewing, cancel any time): [direct checkout](https://buy.stripe.com/4gMaEY2JYae4ekV2np2Fa02)
-  (auto-kill response, web dashboard, Kafka/ClickHouse export — full matrix above).
-- 📧 Volume, on-prem or custom integrations: bartosz.osiej2007@gmail.com
+Talus is sold per machine. One key is one seat; there is no separate
+"number of users" to buy.
+
+- **Enterprise — $50 per machine / year** (1–9 machines): [checkout](https://buy.stripe.com/4gMaEY2JYae4ekV2np2Fa02)
+- **Enterprise Fleet — $30 per machine / year** (10 machines and up): [checkout](https://buy.stripe.com/dRmbJ270e5XO1y96DF2Fa07)
+- **Support Session — $150**: 60-minute 1:1 call plus written config. Threshold
+  tuning for your workload, false-positive triage, systemd and alert routing,
+  response-playbook design. Email to book.
+- Volume, on-prem or custom integrations: contact@hartwell-labs.pl
+
+Prices are in USD everywhere. Polish customers are charged in dollars on the
+same product — there is no second price list.
+
+What Enterprise adds is in the table above, and none of it is in this
+repository. What this repository contains is MIT, permanently, and needs
+neither a key nor a checkout.
 
 ### How Licensing Works
 
@@ -887,12 +896,10 @@ talus-keygen issue ──► signed key (Ed25519) ──► customer
                same shared storage, transparent for the client)
 ```
 
-**Buying from a store (Polar / Gumroad / Lemon Squeezy)?** You don't need a
-special Talus key at all — paste the license key you received from the
-store straight into `process-monitor license activate <KEY>`. The activation server
-recognizes store purchases and translates the store key into your Talus
-license automatically (signing happens offline; store keys are stored only
-as hashes).
+Checkout runs on Stripe. A successful payment issues the key by email, and
+`process-monitor license activate <KEY>` binds it to one machine. Keys are
+signed offline and stored only as hashes, so a stolen database does not yield
+a usable licence.
 
 - Keys are **Ed25519-signed**; the binary embeds only the public key
 - The **activation server** (`license-server/`) holds the public key only —

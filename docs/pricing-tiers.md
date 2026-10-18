@@ -58,7 +58,7 @@ is the only limit the server enforces. There is no separate node cap.
 | Tier | Price | Minimum |
 |---|---|---|
 | Community | free (MIT) | — |
-| Enterprise | 200 PLN / year / machine | 1 machine |
+| Enterprise | 50 USD / year / machine | 1 machine |
 | Enterprise Fleet | 30 USD / year / machine | 10 machines |
 
 The 10-node fleet floor is enforced in the Worker, not by Stripe: this account
@@ -68,5 +68,8 @@ only `divide_by` and `round`, so a Price cannot express a minimum quantity.
 ## Where to set the actual amounts
 
 1. Decide amounts for each dimension above.
-2. Fill them in on the sales page / payment link (Gumroad, Lemon Squeezy…).
+2. Fill them in on the Stripe Payment Link. Live links:
+   - Enterprise $50/machine/yr, qty 1–9 — `buy.stripe.com/4gMaEY2JYae4ekV2np2Fa02`
+   - Enterprise Fleet $30/machine/yr, qty 10–500 — `buy.stripe.com/dRmbJ270e5XO1y96DF2Fa07`
+   Prices are USD for every customer; there is no PLN price list.
 3. Do **not** commit amounts into this repository — this file stays structural.
