@@ -3,8 +3,7 @@
 #
 # Usage:
 #   ./build.sh          # Build TUI-only (default, 1.7MB)
-#   ./build.sh --web    # Build with web server (2.5MB)
-#   ./build.sh --all    # Build both variants
+#   ./build.sh --all    # Build every variant
 #   ./build.sh --check  # Only check dependencies, don't build
 
 set -euo pipefail
@@ -21,18 +20,15 @@ step() { echo "==> $*"; }
 
 CHECK_ONLY=false
 BUILD_TUI=true
-BUILD_WEB=false
 
 for arg in "$@"; do
     case "$arg" in
-        --web)   BUILD_WEB=true; BUILD_TUI=false ;;
-        --all)   BUILD_WEB=true; BUILD_TUI=true ;;
+        --all)   BUILD_TUI=true ;;
         --check) CHECK_ONLY=true ;;
         --help|-h)
-            echo "Usage: ./build.sh [--web|--all|--check]"
+            echo "Usage: ./build.sh [--all|--check]"
             echo ""
             echo "  (default)  Build TUI-only variant"
-            echo "  --web      Build with web server (requires axum, tokio)"
             echo "  --all      Build both TUI and web variants"
             echo "  --check    Only check if dependencies are installed"
             exit 0 ;;
@@ -137,16 +133,9 @@ ok "eBPF built"
 
 if [ "$BUILD_TUI" = true ]; then
     step "Building userspace binary (TUI-only)..."
-    cargo build --release -p process-monitor --manifest-path "$SCRIPT_DIR/Cargo.toml"
+    cargo build --release -p talus-process-monitor --manifest-path "$SCRIPT_DIR/Cargo.toml"
     cp "$CARGO_TARGET_DIR/release/process-monitor" "$CARGO_TARGET_DIR/release/process-monitor-tui"
     ok "TUI binary: $CARGO_TARGET_DIR/release/process-monitor-tui"
-fi
-
-if [ "$BUILD_WEB" = true ]; then
-    step "Building userspace binary (with web server)..."
-    cargo build --release -p process-monitor --features web --manifest-path "$SCRIPT_DIR/Cargo.toml"
-    cp "$CARGO_TARGET_DIR/release/process-monitor" "$CARGO_TARGET_DIR/release/process-monitor-web"
-    ok "Web binary: $CARGO_TARGET_DIR/release/process-monitor-web"
 fi
 
 if [ "$BUILD_TUI" = true ]; then
@@ -158,7 +147,6 @@ echo "=== Build complete ==="
 echo ""
 echo "  eBPF:   $CARGO_TARGET_DIR/bpfel-unknown-none/bpf/build/process-monitor-ebpf/out/process_monitor_ebpf"
 [ "$BUILD_TUI" = true ] && echo "  TUI:    $CARGO_TARGET_DIR/release/process-monitor-tui (1.7MB)"
-[ "$BUILD_WEB" = true ] && echo "  Web:    $CARGO_TARGET_DIR/release/process-monitor-web (2.5MB)"
 echo ""
 echo "Run (requires root for eBPF):"
 echo "  sudo $CARGO_TARGET_DIR/release/process-monitor-tui"

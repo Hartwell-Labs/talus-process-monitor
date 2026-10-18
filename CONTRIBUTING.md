@@ -15,7 +15,7 @@ If your change touches the licensing code (`process-monitor/src/license.rs`,
 
 - **Never** commit, print, or log signing keys, admin tokens, or issued
   license keys. Keys live outside the repo (`~/.secrets/talus/license-keys/`).
-- `cargo test -p process-monitor --bin process-monitor` passes — including
+- `cargo test -p talus-process-monitor` passes — including
   `key_integrity_check`.
 - The activation server contract (`license-server/src/index.js`) stays
   compatible with the client in `license.rs` (endpoints, field names,

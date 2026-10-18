@@ -88,7 +88,7 @@ jobs:
       # ── Build Web variant ──────────────────────────────────────────────
       - name: Build Web binary
         run: |
-          cargo build --release --features web
+          cargo build --release
           cp target/release/process-monitor talus-web
 
       # ── Build eBPF object ─────────────────────────────────────────────

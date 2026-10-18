@@ -185,7 +185,7 @@ build_if_needed() {
 
     echo -e "  ${DIM}→ Building userspace binary...${NC}"
     cd "$SOURCE_DIR"
-    cargo build --release -p process-monitor --target-dir target 2>>"$BUILD_LOG" || {
+    cargo build --release -p talus-process-monitor --target-dir target 2>>"$BUILD_LOG" || {
         echo -e "  ${RED}✗ Build failed. Check $BUILD_LOG${NC}"
         return 1
     }

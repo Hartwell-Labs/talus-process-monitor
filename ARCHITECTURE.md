@@ -189,7 +189,7 @@ The main thread routes these by mode:
 | **JSON** | `run_json` — one JSON object per line: events, alerts, network (see schema in `README.md`) |
 | **Plain** | `run_plain` — human-readable timestamped lines with color |
 | **Diagnose** | `run_diagnose` — verifies tracepoint IDs, loads + attaches, listens 5 s, prints counters |
-| **Web** | `web.rs` — axum server with REST API, WebSocket, dashboard HTML, Prometheus `/metrics` (optional, `--features web`) |
+| **Web** | *Enterprise* — axum server with REST API, WebSocket, dashboard HTML, Prometheus `/metrics`. Built from a private crate; `--web` refuses in this build |
 
 Mode selection: `--tui` forces the TUI; otherwise `--json` / `--plain` select
 their modes; with no flags and a TTY stdout, the TUI is the default (non-TTY
@@ -303,7 +303,7 @@ openat entry   ──► EVENTS map ──► perf buffer ──► Msg::Event �
    a `ProcessEvent` (reuse or extend `event_type`).
 2. Load + attach it in `Monitor::start`.
 3. Map the new `event_type` in `to_recorded` and extend `Kind` enum.
-4. Add handling in `tui.rs` (panel), `main.rs` (JSON/plain), and `ffi.rs` (C API).
+4. Add handling in `tui.rs` (panel) and `main.rs` (JSON/plain). The C API is Enterprise — see the private crate.
 
 ### Change the alert heuristic
 

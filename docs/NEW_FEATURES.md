@@ -53,12 +53,11 @@ The TUI is the **default and primary interface**. Feature-rich cyberpunk dashboa
 ## 🌐 Web Dashboard (Optional)
 
 Full-featured web server with REST API, WebSocket live events, and cyberpunk dashboard.
-**Disabled by default.** Enable with `--features web`.
+**Enterprise.** Built from a private crate; `--web` refuses in this build.
 
 ### Enable
 
 ```bash
-cargo build --release --features web
 sudo process-monitor --web 0.0.0.0:8080
 ```
 
@@ -112,7 +111,7 @@ wscat -c ws://localhost:8080/ws
 ## 📊 Prometheus Metrics
 
 Built-in `/metrics` endpoint with OpenMetrics format.
-**Requires `--features web`.**
+**Enterprise — private crate.**
 
 ### Metrics
 

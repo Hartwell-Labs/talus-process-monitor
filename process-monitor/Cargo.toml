@@ -51,16 +51,10 @@ ftui-text = { version = "0.6" }
 ftui-widgets = { version = "0.6" }
 ftui-extras = { version = "0.6", features = ["charts", "canvas", "text-effects"] }
 
-# Web server (optional, enabled with --features web)
-
 # TLS for web dashboard
 
 # hyper-util server builder for the TLS accept loop (axum enables only
 # `server` + `service`; the `auto` conn builder additionally needs http1/http2)
-
-# Kafka producer (optional, enabled with --features kafka)
-
-# ClickHouse storage (optional, enabled with --features clickhouse)
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

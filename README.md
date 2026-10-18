@@ -83,10 +83,10 @@ sudo talus-monitor run monitor --auto-kill
 | **Event pipeline** | Kernel perf buffer → zero-copy ring → detection engine → TUI / JSON / WebSocket / Prometheus |
 | **Process tree** | Resolves PPID from `/proc`, builds hierarchical view with per-process alert counts |
 | **File ranking** | Most-opened files with Shannon entropy scoring (detects encrypted/randomised filenames) |
-| **Single binary** | Full LTO, `panic = "abort"`, symbol-stripped — 1.7 MB TUI, 2.5 MB with web |
-| **Kafka streaming** | Events → Kafka topics with lz4 compression, partitioned by PID |
-| **ClickHouse storage** | Batch inserts into MergeTree for analytics retention |
-| **MemGraph graph** | Process trees + file access as a graph (Cypher queries) |
+| **Single binary** | Full LTO, `panic = "abort"`, symbol-stripped — 1.7 MB TUI |
+| **Kafka streaming** | *Enterprise* — events → Kafka topics, partitioned by PID |
+| **ClickHouse storage** | *Enterprise* — batch inserts into MergeTree for retention |
+| **MemGraph graph** | *Enterprise* — process trees + file access as a graph |
 
 ---
 
@@ -222,26 +222,24 @@ This maps directly to a **Kafka-style** event pipeline: kernel perf buffer = top
 
 ## Storage & Pipeline
 
-Talus supports pluggable storage backends for event persistence and downstream analytics:
+Talus ships an event pipeline, `storage::StoragePipeline`, which routes events
+to destinations registered as `storage::EventSink`. The JSON and plain-text
+output go through it, so the pipeline is MIT and lives in this repository.
 
-```bash
-# Stream events to Kafka
-sudo process-monitor monitor --kafka-brokers localhost:9092 --kafka-topic talus-events
+**The destination list is empty in this build.** The three backends below are
+Enterprise, built from a private crate:
 
-# Store events in ClickHouse for analytics
-sudo process-monitor monitor --clickhouse http://localhost:8123
+| Backend | What it does | Flag |
+|---|---|---|
+| Kafka | events → topic, `lz4`, partitioned by PID | `--kafka-brokers`, `--kafka-topic` |
+| ClickHouse | batch inserts into MergeTree | `--clickhouse <URL>` |
+| MemGraph | process trees + file access as a Cypher graph | `--memgraph <URL>` |
 
-# Build process relationship graph in MemGraph
-sudo process-monitor monitor --memgraph http://localhost:7474
+The pipeline, the `EventSink` trait and the whole free output path are here;
+writing a new destination is a single trait implementation and needs no
+private code. The reference below describes the shipped backends.
 
-# Combine all backends
-sudo process-monitor monitor \
-  --kafka-brokers localhost:9092 --kafka-topic talus-events \
-  --clickhouse http://localhost:8123 \
-  --memgraph http://localhost:7474
-```
-
-### Kafka
+### Kafka (Enterprise)
 
 Events are sent to a configurable topic with `lz4` compression and partitioned by PID for ordering per-process:
 
@@ -250,7 +248,7 @@ Events are sent to a configurable topic with `lz4` compression and partitioned b
 | `--kafka-brokers` | — | Broker address (e.g. `localhost:9092`) |
 | `--kafka-topic` | `talus-events` | Topic name |
 
-### ClickHouse
+### ClickHouse (Enterprise)
 
 Events are batch-inserted into a `MergeTree` table partitioned by date:
 
@@ -267,7 +265,7 @@ PARTITION BY toYYYYMMDD(ts)
 ORDER BY (ts, kind, pid)
 ```
 
-### MemGraph
+### MemGraph (Enterprise)
 
 Process trees and file access patterns are stored as a graph:
 
@@ -439,8 +437,9 @@ sudo process-monitor monitor --json | jq .
 # Plain text log
 sudo process-monitor monitor --plain
 
-# Web dashboard (requires --features web build)
+# The web dashboard is not in this build.
 sudo process-monitor monitor --web 0.0.0.0:8080
+#   -> "--web is an Enterprise feature and is not in this build."
 
 # MeMLP neural detection engine (online training + JSON checkpoints)
 sudo process-monitor monitor --memlp
@@ -464,7 +463,7 @@ sudo process-monitor monitor --diagnose
 | `--memlp` | off | Enable the MeMLP neural detection engine |
 | `--memlp-checkpoint <PATH>` | `~/.local/share/talus/memlp.json` | MeMLP checkpoint (load on start, autosave every 30s) |
 | `--diagnose` | off | 5-second self-diagnostic |
-| `--web <ADDR>` | off | Start web server (requires `--features web`) |
+| `--web <ADDR>` | off | Enterprise only — always refuses in this build |
 
 ---
 
@@ -517,23 +516,20 @@ sudo process-monitor monitor --diagnose
 
 ## Web Dashboard
 
-Optional build with `--features web`:
+Enterprise. The dashboard, its REST API, the WebSocket stream and `/metrics`
+are built from a private crate and are not in this repository — see
+[Licensing](#licensing--pricing).
 
-```bash
-cargo build --release --features web
-sudo process-monitor monitor --web 0.0.0.0:8080
+What this build does with `--web`:
+
+```
+$ process-monitor monitor --web 0.0.0.0:8080
+--web is an Enterprise feature and is not in this build.
+This binary is MIT licensed and contains no dashboard code.
 ```
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/` | GET | Dashboard UI |
-| `/ws` | WebSocket | Live event stream |
-| `/api/v1/stats` | GET | Global statistics |
-| `/api/v1/processes` | GET | Tracked processes |
-| `/api/v1/files` | GET | Top opened files |
-| `/api/v1/extensions` | GET | Extension frequency |
-| `/api/v1/threshold` | POST | Update threshold at runtime |
-| `/metrics` | GET | Prometheus metrics |
+Endpoints, when running an Enterprise build: `/`, `/ws`, `/api/v1/stats`,
+`/api/v1/processes`, `/api/v1/files`, `/api/v1/extensions`, `/api/v1/license`.
 
 ---
 
@@ -553,14 +549,23 @@ All three consume the same detection engine — the agent is **headless-capable*
 
 ```
 talus-process-monitor/
-├── process-monitor/          # Userspace: detection engine + TUI + web + FFI
+├── process-monitor/          # Userspace: detection engine + TUI. MIT.
 │   └── src/
+│       ├── lib.rs            # the engine, as a library
 │       ├── main.rs           # CLI, mode selection, signal handling
-│       ├── monitor.rs        # eBPF loading, perf reader, detection, response
+│       ├── monitor.rs        # eBPF loading, perf reader, detection, Responder
 │       ├── tui.rs            # 7-panel frankentui (ftui) cyberpunk interface
-│       ├── web.rs            # axum web server (--features web)
-│       ├── ffi.rs            # C FFI bindings (libtalus)
-│       └── storage/          # Kafka / ClickHouse / MemGraph backends
+│       ├── license.rs        # key format, machine binding, entitlements
+│       ├── audit.rs          # signed hash-chain log
+│       ├── memlp.rs          # neural detection engine
+│       ├── sandbox.rs        # seccomp / caps / Landlock
+│       ├── watchdog.rs       # agent health
+│       └── storage/mod.rs    # event pipeline + EventSink seam
+│
+│   Enterprise, in a private crate and not in this tree:
+│     web.rs                  axum dashboard, REST API, WebSocket, /metrics
+│     ffi.rs                  C FFI bindings (libtalus)
+│     storage/{kafka,clickhouse,memgraph}.rs
 ├── process-monitor-ebpf/     # Kernel side (#![no_std], aya-ebpf)
 │   └── src/
 │       ├── main.rs           # execve/openat → PerfEventArray
@@ -571,7 +576,7 @@ talus-process-monitor/
 ├── c-ebpf/                   # Standalone C eBPF programs (ebpf.c, process_monitor.bpf.c)
 ├── go-agent/                 # Go CLI agent (HTTP/WebSocket client)
 ├── go-web/                   # Go web frontend (main.go)
-├── c-api/                    # C header for libtalus
+├── c-api/                    # C header for libtalus (Enterprise — header only, impl is private)
 ├── talus-tauri/              # Tauri desktop dashboard (React + Rust)
 ├── k8s/                      # Kubernetes manifests (DaemonSet, Service)
 ├── proto/                    # Protobuf schema (gRPC)
@@ -579,7 +584,7 @@ talus-process-monitor/
 ├── demos/                    # Recorded demo tape
 ├── docs/                     # Landing page, reports (TEST_REPORT, VERIFICATION-EBPF, NEW_FEATURES), licensing docs
 ├── screenshots/              # TUI screenshots
-├── build.sh                  # Build script (--web / --all / --check)
+├── build.sh                  # Build script (--all / --check)
 ├── install.sh                # Distro-aware installer
 ├── install-gui.sh            # Graphical (zenity) installer
 └── Cargo.toml                # Workspace definition
@@ -748,26 +753,45 @@ Webhook alarm via `TALUS_ALARM_WEBHOOK` env var.
 
 ## Licensing & Pricing
 
-Talus is available in two editions:
+Talus is MIT licensed and always will be. What you pay for is a different set
+of software, not a different tier of this one.
 
-| Feature | Community (Free) | Enterprise |
-|---------|:---:|:---:|
-| eBPF process monitoring | ✅ | ✅ |
-| TUI dashboard (7 panels) | ✅ | ✅ |
-| JSON / plain text output | ✅ | ✅ |
-| Ransomware detection alerts | ✅ | ✅ |
-| Auto-kill (EDR response) | ❌ | ✅ |
-| Web dashboard & REST API | ❌ | ✅ |
-| WebSocket live stream | ❌ | ✅ |
-| Prometheus /metrics | ❌ | ✅ |
-| Kafka event streaming | ❌ | ✅ |
-| ClickHouse analytics | ❌ | ✅ |
-| MemGraph process graphs | ❌ | ✅ |
-| C FFI library | ❌ | ✅ |
-| Agent sandboxing (seccomp/caps/Landlock) | ❌ | ✅ |
-| Signed audit log (hash chain) | ❌ | ✅ |
-| TLS + API auth on dashboard | ❌ | ✅ |
-| Priority support | ❌ | ✅ |
+**In this repository, MIT, no key, no limits, no expiry:**
+
+- eBPF process monitoring, 7-panel TUI, JSON and plain-text output
+- ransomware detection: scoring, sweep detectors, the MeMLP neural engine
+- the signed audit log (hash chain)
+- agent sandboxing (seccomp, capabilities, Landlock)
+- the storage pipeline and every `license` subcommand
+
+**Not in this repository — Hartwell Labs builds and ships these:**
+
+| Enterprise | What it is |
+|---|---|
+| Automatic response | terminate or suspend a process on a verdict |
+| Web dashboard & REST API | serve detection over HTTP with auth |
+| WebSocket live stream | push events to a browser |
+| Prometheus `/metrics` | scrape counters without parsing logs |
+| Kafka / ClickHouse / MemGraph | ship events into your existing stack |
+| C FFI library | embed Talus in another product |
+| Priority support | answered by the person who wrote it |
+
+There is no flag that turns any of this on, because none of it is here. The
+build in this repository contains no `kill(2)` call, no dashboard and no
+exporter. `monitor::Responder` is what acts on a detection verdict, and its
+default observes; `storage::EventSink` feeds the exporters, and the default
+list is empty. An MIT build with `--auto-kill` reaches the verdict and reports
+that no response was sent.
+
+### Why the split falls here
+
+The judgement is the part you have to be able to read before you trust an
+agent that can end a process: the thresholds, the scoring, the neural engine,
+the audit chain. That stays open and auditable. Only the part that acts is
+closed.
+
+Licence: MIT ([LICENSE](LICENSE)). Commercial terms for the table above:
+contact@hartwell-labs.pl.
 
 ### License Management
 
