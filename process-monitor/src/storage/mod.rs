@@ -86,6 +86,13 @@ pub trait EventSink: Send + Sync {
     fn accept_outputs(&self, _outputs: &[crate::monitor::Output]) {}
 }
 
+impl Default for StoragePipeline {
+    /// A pipeline with no destinations, which is what an MIT build has.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StoragePipeline {
     pub fn new() -> Self {
         Self { sinks: Vec::new() }

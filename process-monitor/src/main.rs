@@ -307,68 +307,35 @@ fn run_monitor(args: MonitorArgs) -> Result<()> {
     // ── Initialize license state ─────────────────────────────────────
     let license_state = license::init_license();
 
-    // ── Feature gating based on license ──────────────────────────────
-    if args.auto_kill && !license_state.allows("auto_kill") {
+    // --auto-kill is accepted and does nothing here. The detector reaches the
+    // verdict and reports "no response sent"; the responder that would act is
+    // in the private crate. Refusing the flag instead would suggest a licence
+    // would help, and it would not.
+    // Four flags remain that this build cannot honour. Saying so once is
+    // clearer than four license boxes, and it is the truth: a licence would not
+    // help, because the code they would enable is in a different repository.
+    let enterprise_only: &[(&str, bool)] = &[
+        ("--web", args.web.is_some()),
+        ("--kafka-brokers", args.kafka_brokers.is_some()),
+        ("--clickhouse", args.clickhouse.is_some()),
+        ("--memgraph", args.memgraph.is_some()),
+    ];
+    if let Some((flag, _)) = enterprise_only.iter().find(|(_, used)| *used) {
         eprintln!();
         eprintln!("╔══════════════════════════════════════════════════════════╗");
-        eprintln!("║  ENTERPRISE LICENSE REQUIRED                            ║");
+        eprintln!("║  ENTERPRISE — NOT IN THIS BUILD                          ║");
         eprintln!("║                                                          ║");
-        eprintln!("║  --auto-kill requires an Enterprise license.             ║");
+        eprintln!("║  {flag} needs the Enterprise build of Talus.                ║");
         eprintln!("║                                                          ║");
-        eprintln!("║  Upgrade:  talus license activate <KEY>                  ║");
-        eprintln!("║  Status:   talus license show                            ║");
+        eprintln!("║  This binary is MIT and contains no dashboard code,      ║");
+        eprintln!("║  no Kafka producer, no ClickHouse or MemGraph client.    ║");
+        eprintln!("║  A licence key would not change that — the source is not  ║");
+        eprintln!("║  in this repository.                                     ║");
+        eprintln!("║                                                          ║");
+        eprintln!("║  Enterprise:  contact@hartwell-labs.pl                     ║");
         eprintln!("╚══════════════════════════════════════════════════════════╝");
         eprintln!();
-        bail!("--auto-kill requires Enterprise license");
-    }
-    if args.web.is_some() && !license_state.allows("web") {
-        eprintln!();
-        eprintln!("╔══════════════════════════════════════════════════════════╗");
-        eprintln!("║  ENTERPRISE LICENSE REQUIRED                            ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  --web requires an Enterprise license.                   ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  Upgrade:  talus license activate <KEY>                  ║");
-        eprintln!("║  Status:   talus license show                            ║");
-        eprintln!("╚══════════════════════════════════════════════════════════╝");
-        eprintln!();
-        bail!("--web requires Enterprise license");
-    }
-    if args.kafka_brokers.is_some() && !license_state.allows("kafka") {
-        eprintln!();
-        eprintln!("╔══════════════════════════════════════════════════════════╗");
-        eprintln!("║  ENTERPRISE LICENSE REQUIRED                            ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  --kafka-brokers requires an Enterprise license.         ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  Upgrade:  talus license activate <KEY>                  ║");
-        eprintln!("╚══════════════════════════════════════════════════════════╝");
-        eprintln!();
-        bail!("--kafka-brokers requires Enterprise license");
-    }
-    if args.clickhouse.is_some() && !license_state.allows("clickhouse") {
-        eprintln!();
-        eprintln!("╔══════════════════════════════════════════════════════════╗");
-        eprintln!("║  ENTERPRISE LICENSE REQUIRED                            ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  --clickhouse requires an Enterprise license.            ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  Upgrade:  talus license activate <KEY>                  ║");
-        eprintln!("╚══════════════════════════════════════════════════════════╝");
-        eprintln!();
-        bail!("--clickhouse requires Enterprise license");
-    }
-    if args.memgraph.is_some() && !license_state.allows("memgraph") {
-        eprintln!();
-        eprintln!("╔══════════════════════════════════════════════════════════╗");
-        eprintln!("║  ENTERPRISE LICENSE REQUIRED                            ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  --memgraph requires an Enterprise license.              ║");
-        eprintln!("║                                                          ║");
-        eprintln!("║  Upgrade:  talus license activate <KEY>                  ║");
-        eprintln!("╚══════════════════════════════════════════════════════════╝");
-        eprintln!();
-        bail!("--memgraph requires Enterprise license");
+        bail!("{flag} is an Enterprise feature");
     }
 
     let bpf_path = resolve_bpf_path(args.bpf.as_ref())?;
@@ -416,12 +383,18 @@ fn run_monitor(args: MonitorArgs) -> Result<()> {
     // trial with its remaining window, not as "Community" with a phantom
     // "Enterprise Trial" organization line.
     let trial_days = crate::license::trial_days_remaining();
+    // A key in this build unlocks nothing: the code it would enable is in a
+    // private crate. Saying "Enterprise" here would be claiming a capability
+    // this binary does not have, which is the one thing the split exists to
+    // stop. The key is still shown and still validated — it is the same key
+    // the Enterprise build takes — it just does not change this banner.
     let tier_label = if license_state.is_activated {
-        format!("{}Enterprise{}", banner_color, "\x1b[0m")
-    } else if let Some(days) = trial_days {
-        format!("\x1b[33mEnterprise Trial ({}d left)\x1b[0m", days.max(0))
+        format!(
+            "{}MIT (key accepted — Enterprise features are in a different build)",
+            banner_color
+        )
     } else {
-        "\x1b[33mCommunity\x1b[0m".to_string()
+        "\x1b[33mMIT\x1b[0m".to_string()
     };
 
     eprintln!();
