@@ -126,8 +126,17 @@ jobs:
             -Z build-std=core \
             --manifest-path process-monitor-ebpf/Cargo.toml
 
-          cp target/bpfel-unknown-none/bpf/build/process-monitor-ebpf/out/process_monitor_ebpf \
-             talus-ebpf.o
+          # The object lands in the build script's OUT_DIR, which cargo suffixes
+          # with a hash of the compiler and the flags, so it is found rather
+          # than written down. A path pinned here would break the next time the
+          # runner image moved, and it would break it as a "cannot stat".
+          obj="$(find target/bpfel-unknown-none \
+            -type f -name process_monitor_ebpf | head -1)"
+          if [ -z "$obj" ]; then
+            echo "::error::the eBPF build produced no object"
+            exit 1
+          fi
+          cp "$obj" talus-ebpf.o
           ls -la talus-ebpf.o
 
       # ── Generate checksums ─────────────────────────────────────────────
