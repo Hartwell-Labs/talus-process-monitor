@@ -50,14 +50,19 @@ which it could be done, and it is now.
   * Running the automatic response on a machine where it can end a process:
     needs a subscription at hartwell-labs.pl.
 
-The entitlement check is enforced in `process-monitor/src/ffi.rs` against the
-server at lic.hartwell-labs.pl. Removing it is explicitly outside the
-evaluation allowance in clause 2 of `LICENSE.commercial`.
+The entitlement check is not here either. It lives in the `talus-enterprise`
+crate and runs against the server at lic.hartwell-labs.pl. In this repository
+there is nothing to remove: a build of it cannot respond to a verdict, so there
+is no gate to bypass and no check to delete.
 
-## A caveat that is not ours to fix
+## The caveat this design retired
 
-The response path is a small amount of code inside a mostly-MIT file. A carve-out
-at the level of "one function in `monitor.rs`" is legally meaningful and
-technically leaky at the same time: the enforcement is a runtime gate, not a
-build-time boundary. The licence is the actual boundary. Anyone relying on the
-technical one as if it were the legal one is relying on the wrong thing.
+An earlier version of this notice carried a warning worth keeping in mind,
+because it is the mistake this repository is now arranged to avoid. The response
+path used to be a small amount of code inside a mostly-MIT file, carved out at
+the level of "one function in `monitor.rs`" and gated at run time. That was
+legally meaningful and technically leaky at the same time: the enforcement was a
+runtime check, and the licence was the only real boundary. Anyone relying on the
+technical one as if it were the legal one was relying on the wrong thing.
+
+There is no carve-out here to rely on. There is a crate boundary.

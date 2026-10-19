@@ -24,9 +24,8 @@ SOFTWARE.
 
 ## Scope of this grant
 
-The MIT terms above govern this repository in full.
-
-The MIT License below governs this repository in full.
+The MIT terms above govern this repository in full. Everything that is not in
+it is not in it because it is elsewhere, not because it is withheld.
 
 Three things are not in this repository at all, because they are built from a
 separate, private crate called `talus-enterprise`:
@@ -49,24 +48,3 @@ the storage pipeline, the CLI, and the FFI needed to read the audit chain.
 
 Nothing in this repository's history changes retroactively. MIT is a grant; see
 `NOTICE`.
-
-THE MIT LICENSE.
-
-That means, specifically:
-
-  * the `kill_process` function and the response-enforcement logic around it in
-    `process-monitor/src/monitor.rs`, and
-  * the code in `process-monitor/src/ffi.rs` that gates that path on a
-    commercial entitlement,
-
-are licensed under the separate terms in `LICENSE.commercial`, not under MIT.
-
-Everything else — the eBPF probes, the scoring and sweep detectors, the audit
-chain, the sandbox, the web dashboard, the REST API, the WebSocket stream, the
-SIEM exporters, the CLI, the TUI and the FFI library used to embed Talus — is
-MIT, permanently and without further condition. That is the whole detection
-engine, and it stays open source whatever happens to the commercial tier.
-
-Nothing in this exception changes the licence of any file in the repository's
-history before this notice was added. MIT is a grant; see `NOTICE` for what that
-means for copies obtained earlier.
