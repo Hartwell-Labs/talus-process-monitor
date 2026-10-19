@@ -235,7 +235,10 @@ jobs:
       contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
-      base-name: "talus-process-monitor"
+      # provenance-name, not base-name: SLSA v2 renamed it and does not declare
+      # base-name at all. With compile and base-name both undeclared, GitHub
+      # rejected every tagged run at startup without a message.
+      provenance-name: "multiple.intoto.jsonl"
       upload-assets: true
       # The input is compile-generator. Passing `compile` instead - which is what
       # this said from the first version - makes GitHub reject the entire run
