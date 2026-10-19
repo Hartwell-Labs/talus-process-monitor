@@ -8,7 +8,7 @@
 // The detection engine is a library as well as a binary, so the paid modules can
 // be built from a private crate that depends on this one. `lib.rs` owns the
 // module declarations; `main.rs` only adds what the binary needs.
-use crate::{license, memlp, monitor, sandbox, storage, watchdog};
+use crate::{license, sandbox, storage, watchdog};
 
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -28,6 +28,11 @@ use clap::{Parser, Subcommand};
 /// shared code asks here instead: the MIT build passes nothing, and
 /// `NoResponse` plus an empty sink list is what every unlisted capability
 /// resolves to.
+/// Derived so that the observing build is the default, and adding a third
+/// capability later cannot silently make it act by default. A hand-written
+/// `Default` would have been the same code today and a trap the day somebody
+/// added a field.
+#[derive(Default)]
 pub struct Hooks {
     /// Installed on the monitor. Without it, verdicts are reported and nothing
     /// happens.
@@ -37,19 +42,24 @@ pub struct Hooks {
     pub sinks: Option<fn(&mut storage::StoragePipeline)>,
 }
 
-impl Default for Hooks {
-    fn default() -> Self {
-        Hooks {
-            responder: None,
-            sinks: None,
-        }
-    }
-}
-
 use serde_json::json;
 
 static QUIT: AtomicBool = AtomicBool::new(false);
 
+/// Where the compiled eBPF object is looked for when an explicit `--bpf` was
+/// not given and the embedded object is not being used.
+///
+/// Note what this is not: a release binary embeds the object with
+/// `include_bytes!`, and `resolve_bpf_path` returns `<embedded>` before
+/// reaching this list. These paths only matter for a build from source that
+/// wants to load the object from disk instead.
+///
+/// They are checked with `Path::exists`, which does not expand globs. A
+/// `bpfel-unknown-none/*/build/...` pattern here would silently never match,
+/// which is why none is written: the real object path carries a hash suffix
+/// that changes with the toolchain, and a list of literals cannot track it.
+/// Resolving that properly means walking the directory, not listing more
+/// strings.
 const BPF_CANDIDATES: &[&str] = &[
     "target/bpfel-unknown-none/release/process-monitor-ebpf",
     "target/release/process-monitor-ebpf",
@@ -62,12 +72,19 @@ const BPF_CANDIDATES: &[&str] = &[
     name = "talus",
     version,
     about = "eBPF-based endpoint security agent for Linux",
-    long_about = "Talus is a detect-and-respond security agent that hooks syscalls at the\n\
-                  kernel level via eBPF tracepoints, scores per-process file-open rates\n\
-                  in real-time, and terminates offending processes on heuristic verdict.\n\n\
-                  Enterprise features (web dashboard, auto-kill, Kafka, ClickHouse, MemGraph)\n\
-                  require a valid Enterprise license. Run `talus license show` for details."
+    long_about = "Talus is an endpoint security agent for Linux. It hooks syscalls at the\n\
+                  kernel level via eBPF tracepoints and scores per-process file-open\n\
+                  rates in real time, raising a verdict when a process does something\n\
+                  no ordinary program does.\n\n\
+                  This build reports. It has no code that can terminate a process, so\n\
+                  a verdict here is always reported as unacted - that is what the\n\
+                  output says, and it is not a placeholder.\n\n\
+                  The response path, the web dashboard and the SIEM exporters are a\n\
+                  separate build. See NOTICE in the repository for why the split is\n\
+                  a boundary of distribution rather than a licence flag."
 )]
+/// Command-line surface. The fields are private and filled by clap; both
+/// builds share this one definition, so they cannot disagree about a flag.
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -124,6 +141,7 @@ enum LicenseAction {
 }
 
 #[derive(Parser)]
+/// Everything `run_monitor` needs, collected by clap.
 pub struct MonitorArgs {
     /// Path to the compiled eBPF program
     #[arg(short, long, value_name = "PATH")]
@@ -195,6 +213,13 @@ pub struct MonitorArgs {
     memlp_checkpoint: Option<PathBuf>,
 }
 
+/// The one entry point, called by both builds.
+///
+/// The MIT binary calls this with `Hooks::default()` and gets a detector that
+/// observes. The Enterprise binary calls it with a responder and a sink list
+/// and gets the same detector with the ability to act. Neither build owns a
+/// parser, so the two cannot disagree about what a flag means - which is the
+/// failure that a runtime licence gate over a shared codebase invites.
 pub fn main_with(hooks: Hooks) -> Result<()> {
     let cli = Cli::parse();
 
@@ -319,6 +344,11 @@ impl Default for MonitorArgs {
     }
 }
 
+/// Attach, run and shut down the detector.
+///
+/// `hooks` is what makes this the same function in both builds: a MIT build
+/// arrives with no responder and no sinks, and so reports verdicts without
+/// acting on them.
 pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
     // Give the diagnose mode a clear, helpful non-root message before
     // Monitor::start would bail with a generic error.
@@ -505,6 +535,10 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
     Ok(())
 }
 
+/// Decide which eBPF object to load.
+///
+/// Returns the marker path `<embedded>` when the binary carries its own object,
+/// which is the normal case for a release build.
 pub fn resolve_bpf_path(explicit: Option<&PathBuf>) -> Result<PathBuf> {
     let mut tried: Vec<String> = Vec::new();
 
@@ -926,6 +960,7 @@ extern "C" fn handle_signal(_: libc::c_int) {
     QUIT.store(true, Ordering::SeqCst);
 }
 
+/// Stream events as newline-delimited JSON until interrupted.
 pub fn run_json(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> Result<()> {
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
@@ -991,6 +1026,7 @@ pub fn run_json(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> R
     Ok(())
 }
 
+/// Stream events as human-readable lines, filtering known-noisy processes.
 pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> Result<()> {
     use colored::Colorize;
     const NOISY: &[&str] = &[
