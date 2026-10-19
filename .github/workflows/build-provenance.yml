@@ -92,21 +92,43 @@ jobs:
           cp target/release/process-monitor talus-web
 
       # ── Build eBPF object ─────────────────────────────────────────────
+      # The recipe from build.sh. Three details of it are load-bearing:
+      # -Z build-std=core is what gives the bpfel target a core to link against,
+      # the LLVM symlink fix is what stops bpf-linker choking on the sub-1KB
+      # linker script nightly ships, and the object lands under .../out/, not
+      # .../release/, because the bpf profile puts build scripts in the target
+      # directory. Without any one of the three this job fails, and it takes
+      # the release down with it.
       - name: Build eBPF program (nightly)
         run: |
-          rustup toolchain install nightly --component rust-src
+          set -euo pipefail
+          rustup toolchain install nightly --profile minimal --component rust-src
           cargo install bpf-linker --git https://github.com/alessandrod/bpf-linker --force
-          RUSTLIB_ROOT="$(rustc +nightly --print sysroot)"
-          RUSTLIB="${RUSTLIB_ROOT}/lib"
-          for f in "$RUSTLIB"/libLLVM.so.*; do
-            [ -f "$f" ] || break
-            LD_LIBRARY_PATH="$(dirname "$f"):$LD_LIBRARY_PATH"
-            export LD_LIBRARY_PATH
+
+          RUSTLIB="$(rustc +nightly --print sysroot)/lib"
+          for script in "$RUSTLIB"/libLLVM-*-rust-*.so; do
+            [ -f "$script" ] || continue
+            [ "$(stat -c%s "$script")" -lt 1024 ] || continue
+            real="$(grep -oP '(?<=INPUT\()[^)]+' "$script" || true)"
+            if [ -n "$real" ] && [ -f "$RUSTLIB/$real" ]; then
+              mv "$script" "${script}.script"
+              ln -s "$real" "$script"
+              echo "  fixed LLVM symlink: $(basename "$script")"
+            fi
+          done
+          for real_llvm in "$RUSTLIB"/libLLVM.so.*; do
+            [ -f "$real_llvm" ] || break
+            export LD_LIBRARY_PATH="$(dirname "$real_llvm"):${LD_LIBRARY_PATH:-}"
             break
           done
+
           cargo +nightly build --profile bpf --target bpfel-unknown-none \
+            -Z build-std=core \
             --manifest-path process-monitor-ebpf/Cargo.toml
-          cp target/bpfel-unknown-none/release/process-monitor-ebpf talus-ebpf.o
+
+          cp target/bpfel-unknown-none/bpf/build/process-monitor-ebpf/out/process_monitor_ebpf \
+             talus-ebpf.o
+          ls -la talus-ebpf.o
 
       # ── Generate checksums ─────────────────────────────────────────────
       - name: Generate SHA-256 and SHA-512 checksums
