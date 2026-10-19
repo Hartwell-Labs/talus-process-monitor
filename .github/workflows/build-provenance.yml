@@ -237,7 +237,12 @@ jobs:
     with:
       base-name: "talus-process-monitor"
       upload-assets: true
-      compile: false
+      # The input is compile-generator. Passing `compile` instead - which is what
+      # this said from the first version - makes GitHub reject the entire run
+      # before any job starts, silently. Every tagged release of this repository
+      # has therefore reported startup_failure: v0.8.1, v0.8.1-f, v0.8.2. The
+      # artifacts on those releases were uploaded by hand.
+      compile-generator: false
 
   # ── GitHub Artifact Attestation ─────────────────────────────────────────
   attest:
