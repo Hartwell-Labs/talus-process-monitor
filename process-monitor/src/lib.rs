@@ -42,9 +42,11 @@
 // each carry their own documentation and the lints apply to them as well.
 
 pub mod audit;
+pub mod cli;
 pub mod license;
 pub mod memlp;
 pub mod monitor;
 pub mod sandbox;
 pub mod storage;
+pub mod tui;
 pub mod watchdog;
