@@ -1,3 +1,13 @@
+> **Moved.** This repository now lives at
+> [`Hartwell-Labs/talus-process-monitor`](https://github.com/Hartwell-Labs/talus-process-monitor).
+> GitHub redirects the old address, so old links still work — but a
+> redirect is invisible. Anyone arriving from a bookmark never learns the
+> project moved, or that it is maintained from the organisation rather than
+> from a personal account.
+>
+> Copyright and history are unchanged. The repository was transferred, not
+> copied, so every commit, release, tag and issue came with it.
+
 <div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BartoszOsiej/BartoszOsiej/stats/svg/banner-dark.svg" />
