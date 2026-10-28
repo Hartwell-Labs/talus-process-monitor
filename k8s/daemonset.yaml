@@ -32,7 +32,7 @@ spec:
           image: ghcr.io/bartoszosiej/talus-process-monitor:latest
           imagePullPolicy: Always
           command:
-            - process-monitor
+            - talus-monitor
           args:
             - --web
             - "0.0.0.0:8080"

@@ -1,5 +1,5 @@
 [package]
-repository = "https://github.com/BartoszOsiej/talus-process-monitor"
+repository = "https://github.com/Hartwell-Labs/talus-process-monitor"
 name = "talus-process-monitor"
 version = "0.8.2"
 edition = "2021"

@@ -221,11 +221,11 @@ ensure_bpf_linker() {
 # ---- uninstall ----------------------------------------------------------------
 if [ "$UNINSTALL" = "1" ]; then
     if [ "$SYSTEM" = "1" ]; then
-        as_root rm -f "$SYSTEM_BIN/process-monitor" "$SYSTEM_LIB/process-monitor-ebpf"
+        as_root rm -f "$SYSTEM_BIN/talus-monitor" "$SYSTEM_LIB/process-monitor-ebpf"
         as_root rmdir "$SYSTEM_LIB" 2>/dev/null || true
         info "removed: $SYSTEM_BIN/process-monitor, $SYSTEM_LIB/process-monitor-ebpf"
     else
-        rm -f "$PREFIX_USER_BIN/process-monitor" "$PREFIX_USER_LIB/process-monitor-ebpf"
+        rm -f "$PREFIX_USER_BIN/talus-monitor" "$PREFIX_USER_LIB/process-monitor-ebpf"
         rmdir "$PREFIX_USER_LIB" 2>/dev/null || true
         info "removed: $PREFIX_USER_BIN/process-monitor, $PREFIX_USER_LIB/process-monitor-ebpf"
     fi
@@ -267,25 +267,25 @@ info "Building (this uses CARGO_TARGET_DIR=$CARGO_TARGET_DIR)..."
 if [ "$SYSTEM" = "1" ]; then
     info "Installing to system locations..."
     as_root install -d "$SYSTEM_BIN" "$SYSTEM_LIB"
-    as_root install -m 0755 "$CARGO_TARGET_DIR/release/process-monitor" "$SYSTEM_BIN/process-monitor"
+    as_root install -m 0755 "$CARGO_TARGET_DIR/release/talus-monitor" "$SYSTEM_BIN/talus-monitor"
     as_root install -m 0644 "$CARGO_TARGET_DIR/bpfel-unknown-none/release/process-monitor-ebpf" "$SYSTEM_LIB/process-monitor-ebpf"
     echo ""
     echo "Installed."
     echo "Run (eBPF requires root):"
-    echo "  sudo process-monitor"
-    echo "  sudo process-monitor --json"
+    echo "  sudo talus-monitor monitor"
+    echo "  sudo talus-monitor monitor --json"
 else
     info "Installing to user locations..."
     install -d "$PREFIX_USER_BIN" "$PREFIX_USER_LIB"
-    install -m 0755 "$CARGO_TARGET_DIR/release/process-monitor" "$PREFIX_USER_BIN/process-monitor"
+    install -m 0755 "$CARGO_TARGET_DIR/release/talus-monitor" "$PREFIX_USER_BIN/talus-monitor"
     install -m 0644 "$CARGO_TARGET_DIR/bpfel-unknown-none/release/process-monitor-ebpf" "$PREFIX_USER_LIB/process-monitor-ebpf"
     echo ""
     echo "Installed."
     [ "${PATH#*"$PREFIX_USER_BIN"}" = "$PATH" ] &&
-        echo "Note: add $PREFIX_USER_BIN to your PATH to run 'process-monitor' directly."
+        echo "Note: add $PREFIX_USER_BIN to your PATH to run 'talus-monitor' directly."
     echo "Run (eBPF requires root):"
-    echo "  sudo $PREFIX_USER_BIN/process-monitor"
-    echo "  sudo $PREFIX_USER_BIN/process-monitor --json"
+    echo "  sudo $PREFIX_USER_BIN/talus-monitor"
+    echo "  sudo $PREFIX_USER_BIN/talus-monitor monitor --json"
 fi
 
 echo ""

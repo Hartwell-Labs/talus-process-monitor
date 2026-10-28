@@ -27,6 +27,13 @@ const EVENT_COMM_LEN: usize = 16;
 const EVENT_FILENAME_LEN: usize = 64;
 const EVENT_ARGV_LEN: usize = 128;
 const WINDOW_SECS: u64 = 1;
+/// A PID with no events for this long is forgotten (stats, window, parent link,
+/// behavioural features). It is re-created on its next event.
+const IDLE_PID_TTL_SECS: u64 = 600;
+/// Tighter TTL used while more than `MAX_TRACKED_PIDS` PIDs are tracked
+/// (fork storms), so memory stays bounded without evicting busy processes.
+const PRESSURE_PID_TTL_SECS: u64 = 30;
+const MAX_TRACKED_PIDS: usize = 65_536;
 
 /// Learning rate for MeMLP online training (conservative — one step per alert).
 const MEMLP_LEARNING_RATE: f32 = 0.03;
@@ -258,6 +265,12 @@ pub struct Monitor {
     windows: HashMap<u32, VecDeque<Instant>>,
     /// PID → PPID mapping (resolved from /proc/<pid>/status).
     pid_to_ppid: HashMap<u32, u32>,
+    /// Last time each PID produced an event; drives idle eviction.
+    last_seen: HashMap<u32, Instant>,
+    /// Process names (`comm`, max 15 bytes) whose burst alerts are suppressed.
+    /// Their events are still counted and shown; only the alert (and any
+    /// response driven by it) is skipped. Empty by default.
+    ignore_comms: Vec<String>,
     /// Per-path open count for the "Top Files" panel.
     file_counts: HashMap<String, u64>,
     /// Extension → open count for extension-frequency tracking.
@@ -328,6 +341,22 @@ impl Monitor {
     ///
     /// `auto_kill` stays the operator's switch: this only says what happens when
     /// the switch is on.
+    /// Suppress burst alerts for these process names (e.g. `rsync`, `cc1`).
+    /// Names are compared against the kernel `comm`, which is truncated to 15
+    /// bytes, so longer names are truncated the same way.
+    pub fn with_ignored_comms<I, S>(mut self, comms: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.ignore_comms = comms
+            .into_iter()
+            .map(|c| c.as_ref().chars().take(EVENT_COMM_LEN - 1).collect::<String>())
+            .filter(|c| !c.is_empty())
+            .collect();
+        self
+    }
+
     pub fn with_responder(mut self, responder: Box<dyn Responder>) -> Self {
         self.responder = responder;
         self
@@ -461,6 +490,8 @@ impl Monitor {
             stats: HashMap::new(),
             windows: HashMap::new(),
             pid_to_ppid: HashMap::new(),
+            last_seen: HashMap::new(),
+            ignore_comms: Vec::new(),
             file_counts: HashMap::new(),
             ext_counts: HashMap::new(),
             rate_history: VecDeque::new(),
@@ -533,6 +564,7 @@ impl Monitor {
             self.tick_opens = 0;
             self.tick_alerts = 0;
             self.tick_start = Instant::now();
+            self.prune_idle();
             // ── MeMLP: decay per-PID behavioural windows (1s half-life) ──
             // Keep entries with recent activity, drop fully-stale ones so the
             // map stays bounded by live processes.
@@ -572,6 +604,13 @@ impl Monitor {
         let stats = self.stats.entry(ev.pid).or_default();
         stats.pid = ev.pid;
         stats.comm = ev.comm.clone();
+        self.last_seen.insert(ev.pid, Instant::now());
+
+        // NOTE: deliberately no state reset on Exec. The execve tracepoint fires
+        // on entry even when the exec fails, so resetting the burst window here
+        // would let a process dodge the threshold by interleaving cheap failing
+        // execve() calls. Stale state from a recycled PID is bounded by the 1 s
+        // window and the idle-PID TTL instead.
 
         // Resolve PPID from /proc on first encounter.
         if let std::collections::hash_map::Entry::Vacant(e) = self.pid_to_ppid.entry(ev.pid) {
@@ -634,14 +673,14 @@ impl Monitor {
                 // Track file extensions.
                 if let Some(ref ext) = ev.extension {
                     if !ext.is_empty() {
-                        *stats.extensions.entry(ext.clone()).or_insert(0) += 1;
-                        *self.ext_counts.entry(ext.clone()).or_insert(0) += 1;
+                        bump_count(&mut stats.extensions, ext);
+                        bump_count_capped(&mut self.ext_counts, ext, MAX_TRACKED_EXTS);
                     }
                 }
 
                 // Track per-file open count.
                 if let Some(ref file) = ev.file {
-                    *self.file_counts.entry(file.clone()).or_insert(0) += 1;
+                    bump_count_capped(&mut self.file_counts, file, MAX_TRACKED_FILES);
                 }
 
                 let now = Instant::now();
@@ -656,7 +695,10 @@ impl Monitor {
                 stats.window_opens = window.len() as u64;
                 self.tick_opens += 1;
 
-                if self.threshold > 0 && stats.window_opens == self.threshold {
+                if self.threshold > 0
+                    && stats.window_opens == self.threshold
+                    && !self.ignore_comms.contains(&ev.comm)
+                {
                     stats.alerts += 1;
                     self.tick_alerts += 1;
                     // ── MeMLP: online training step + neural verdict ────
@@ -700,12 +742,76 @@ impl Monitor {
             Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod => {
                 // FS/signal events — track in file counts for the Top Files panel.
                 if let Some(ref file) = ev.file {
-                    *self.file_counts.entry(file.clone()).or_insert(0) += 1;
+                    bump_count_capped(&mut self.file_counts, file, MAX_TRACKED_FILES);
                 }
                 self.tick_opens += 1;
             }
         }
         outputs.push(Output::Event(ev.clone()));
+    }
+
+    /// Once per second: let `window_opens` decay for quiet processes and forget
+    /// PIDs that have been idle past the TTL, so per-PID maps stay bounded by
+    /// recently-live processes instead of every PID ever seen.
+    fn prune_idle(&mut self) {
+        let now = Instant::now();
+        let cutoff = now - Duration::from_secs(WINDOW_SECS);
+        let stats = &mut self.stats;
+        self.windows.retain(|pid, w| {
+            while w.front().is_some_and(|t| *t < cutoff) {
+                w.pop_front();
+            }
+            if let Some(s) = stats.get_mut(pid) {
+                s.window_opens = w.len() as u64;
+            }
+            !w.is_empty()
+        });
+
+        let ttl = Duration::from_secs(if self.last_seen.len() > MAX_TRACKED_PIDS {
+            PRESSURE_PID_TTL_SECS
+        } else {
+            IDLE_PID_TTL_SECS
+        });
+        let stale: Vec<u32> = self
+            .last_seen
+            .iter()
+            .filter(|(_, t)| now.duration_since(**t) > ttl)
+            .map(|(pid, _)| *pid)
+            .collect();
+        for pid in stale {
+            self.last_seen.remove(&pid);
+            self.stats.remove(&pid);
+            self.windows.remove(&pid);
+            self.pid_to_ppid.remove(&pid);
+            self.pid_features.remove(&pid);
+        }
+    }
+
+    /// The `n` busiest processes by current window, plus the `n / 8` (min 8)
+    /// heaviest by lifetime opens, de-duplicated. Cheaper than
+    /// [`Monitor::stats_sorted`] on hosts with many tracked PIDs because only
+    /// the selected entries are cloned (including their extension maps).
+    pub fn stats_top(&self, n: usize) -> Vec<ProcStats> {
+        let mut by_window: Vec<&ProcStats> = self.stats.values().collect();
+        let mut by_total = by_window.clone();
+        let k_total = (n / 8).max(8);
+        if n < by_window.len() {
+            by_window.select_nth_unstable_by(n, |a, b| b.window_opens.cmp(&a.window_opens));
+            by_window.truncate(n);
+        }
+        if k_total < by_total.len() {
+            by_total.select_nth_unstable_by(k_total, |a, b| b.total_opens.cmp(&a.total_opens));
+            by_total.truncate(k_total);
+        }
+        let mut seen = std::collections::HashSet::with_capacity(by_window.len() + by_total.len());
+        let mut out: Vec<ProcStats> = by_window
+            .into_iter()
+            .chain(by_total)
+            .filter(|p| seen.insert(p.pid))
+            .cloned()
+            .collect();
+        out.sort_by_key(|s| std::cmp::Reverse(s.window_opens));
+        out
     }
 
     pub fn stats_sorted(&self) -> Vec<ProcStats> {
@@ -716,23 +822,24 @@ impl Monitor {
 
     /// Top-N most-opened files, sorted by count descending.
     pub fn top_files(&self, n: usize) -> Vec<FileRank> {
-        let mut files: Vec<FileRank> = self
-            .file_counts
-            .iter()
-            .map(|(path, &count)| {
-                let ext = extract_extension(path);
-                let entropy = shannon_entropy(path);
-                FileRank {
-                    path: path.clone(),
-                    count,
-                    extension: ext,
-                    entropy,
-                }
+        // Select the top-n by count first; extension + entropy (and the path
+        // clone) are computed for those n only, not for every file ever seen.
+        let mut ranked: Vec<(&String, u64)> =
+            self.file_counts.iter().map(|(p, &c)| (p, c)).collect();
+        if n < ranked.len() {
+            ranked.select_nth_unstable_by(n, |a, b| b.1.cmp(&a.1));
+            ranked.truncate(n);
+        }
+        ranked.sort_by_key(|r| std::cmp::Reverse(r.1));
+        ranked
+            .into_iter()
+            .map(|(path, count)| FileRank {
+                path: path.clone(),
+                count,
+                extension: extract_extension(path),
+                entropy: shannon_entropy(path),
             })
-            .collect();
-        files.sort_by_key(|b| std::cmp::Reverse(b.count));
-        files.truncate(n);
-        files
+            .collect()
     }
 
     /// Extension frequency map (extension → total open count across all processes).
@@ -811,11 +918,10 @@ impl Monitor {
 
         // Sort children by name for stable display.
         for children in children_map.values_mut() {
-            children.sort_by_key(|pid| {
-                self.stats
-                    .get(pid)
-                    .map(|s| s.comm.clone())
-                    .unwrap_or_default()
+            children.sort_by(|a, b| {
+                let ca = self.stats.get(a).map_or("", |s| s.comm.as_str());
+                let cb = self.stats.get(b).map_or("", |s| s.comm.as_str());
+                ca.cmp(cb)
             });
         }
 
@@ -828,11 +934,10 @@ impl Monitor {
             })
             .copied()
             .collect();
-        roots.sort_by_key(|pid| {
-            self.stats
-                .get(pid)
-                .map(|s| s.comm.clone())
-                .unwrap_or_default()
+        roots.sort_by(|a, b| {
+            let ca = self.stats.get(a).map_or("", |s| s.comm.as_str());
+            let cb = self.stats.get(b).map_or("", |s| s.comm.as_str());
+            ca.cmp(cb)
         });
 
         // Build recursively.
@@ -882,6 +987,43 @@ impl Monitor {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+/// Increment `map[key]`, allocating the key only the first time it is seen.
+/// (`entry(key.clone())` allocated a `String` on every event.)
+#[inline]
+fn bump_count(map: &mut HashMap<String, u64>, key: &str) {
+    if let Some(c) = map.get_mut(key) {
+        *c += 1;
+    } else {
+        map.insert(key.to_owned(), 1);
+    }
+}
+
+/// Upper bound on distinct file paths tracked for the top-files ranking.
+/// A long-running agent on a busy host would otherwise grow this map forever.
+const MAX_TRACKED_FILES: usize = 50_000;
+/// Upper bound on distinct extensions tracked globally.
+const MAX_TRACKED_EXTS: usize = 4_096;
+
+/// Like [`bump_count`], but the map never holds more than `cap` keys.
+///
+/// Behaviour is identical until the map is full. When a *new* key arrives at
+/// the cap, one-hit keys (the long tail) are pruned first; if the map is
+/// still full of repeat keys, the new key is not tracked. The hot keys that
+/// drive the rankings are never evicted, so `top_files` stays accurate.
+fn bump_count_capped(map: &mut HashMap<String, u64>, key: &str, cap: usize) {
+    if let Some(c) = map.get_mut(key) {
+        *c += 1;
+        return;
+    }
+    if map.len() >= cap {
+        map.retain(|_, c| *c > 1);
+        if map.len() >= cap {
+            return;
+        }
+    }
+    map.insert(key.to_owned(), 1);
+}
 
 /// Extract file extension (without the dot). Empty string for dotfiles / no ext.
 fn extract_extension(path: &str) -> String {
@@ -1016,6 +1158,38 @@ fn spawn_reader(
         })
         .context("failed to spawn reader thread")
 }
+/// Decode a raw kernel event record from bytes, exactly as the poll loop does.
+///
+/// Layout: `event_type`(1) `pid`(4 LE) `uid`(4 LE) `ktime_ns`(8 LE)
+/// `comm`(16) `filename`(64) `argv`(128). Returns `None` for short input.
+/// Exists so the decoding path can be fuzzed without eBPF; it must never panic.
+#[doc(hidden)]
+pub fn decode_event_bytes(data: &[u8]) -> Option<RecordedEvent> {
+    const LEN: usize = 1 + 4 + 4 + 8 + EVENT_COMM_LEN + EVENT_FILENAME_LEN + EVENT_ARGV_LEN;
+    if data.len() < LEN {
+        return None;
+    }
+    let u32_at = |o: usize| u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
+    let mut comm = [0u8; EVENT_COMM_LEN];
+    comm.copy_from_slice(&data[17..17 + EVENT_COMM_LEN]);
+    let mut filename = [0u8; EVENT_FILENAME_LEN];
+    filename.copy_from_slice(&data[33..33 + EVENT_FILENAME_LEN]);
+    let mut argv = [0u8; EVENT_ARGV_LEN];
+    argv.copy_from_slice(&data[97..97 + EVENT_ARGV_LEN]);
+    let raw = ProcessEvent {
+        event_type: data[0],
+        pid: u32_at(1),
+        uid: u32_at(5),
+        ktime_ns: u64::from_le_bytes([
+            data[9], data[10], data[11], data[12], data[13], data[14], data[15], data[16],
+        ]),
+        comm,
+        filename,
+        argv,
+    };
+    Some(to_recorded(&raw))
+}
+
 fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
     let ts = Local::now().format("%H:%M:%S%.3f").to_string();
     let argv = raw.argv_str();
@@ -1206,6 +1380,8 @@ impl Monitor {
             stats: HashMap::new(),
             windows: HashMap::new(),
             pid_to_ppid: HashMap::new(),
+            last_seen: HashMap::new(),
+            ignore_comms: Vec::new(),
             file_counts: HashMap::new(),
             ext_counts: HashMap::new(),
             rate_history: VecDeque::new(),
@@ -1874,5 +2050,152 @@ mod tests {
         let monitor = Monitor::dummy();
         assert_eq!(monitor.total_events, 0);
         assert_eq!(monitor.total_lost, 0);
+    }
+    #[test]
+    fn capped_counter_is_bounded_and_keeps_hot_keys() {
+        let mut m: HashMap<String, u64> = HashMap::new();
+        for _ in 0..5 {
+            bump_count_capped(&mut m, "hot", 4);
+        }
+        for i in 0..100 {
+            bump_count_capped(&mut m, &format!("cold{i}"), 4);
+        }
+        assert!(m.len() <= 4, "map exceeded cap: {}", m.len());
+        assert_eq!(m.get("hot"), Some(&5), "hot key must survive pruning");
+    }
+
+    #[test]
+    fn capped_counter_matches_plain_counter_below_cap() {
+        let mut a: HashMap<String, u64> = HashMap::new();
+        let mut b: HashMap<String, u64> = HashMap::new();
+        for k in ["x", "y", "x", "z", "x", "y"] {
+            bump_count(&mut a, k);
+            bump_count_capped(&mut b, k, 100);
+        }
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // handle_event → /proc
+    fn window_opens_decays_when_process_goes_quiet() {
+        let mut monitor = Monitor::dummy();
+        let mut outputs = Vec::new();
+        for _ in 0..5 {
+            monitor.handle_event(&open(7, 0, "/a"), &mut outputs);
+        }
+        assert_eq!(monitor.stats.get(&7).unwrap().window_opens, 5);
+        // Age every timestamp past the window, as if the process went quiet.
+        for t in monitor.windows.get_mut(&7).unwrap().iter_mut() {
+            *t -= Duration::from_secs(WINDOW_SECS + 1);
+        }
+        monitor.prune_idle();
+        assert_eq!(monitor.stats.get(&7).unwrap().window_opens, 0);
+        assert!(!monitor.windows.contains_key(&7), "empty window is dropped");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // handle_event → /proc
+    fn idle_pids_are_evicted_and_active_ones_kept() {
+        let mut monitor = Monitor::dummy();
+        let mut outputs = Vec::new();
+        monitor.handle_event(&open(10, 0, "/a"), &mut outputs);
+        monitor.handle_event(&open(11, 0, "/b"), &mut outputs);
+        *monitor.last_seen.get_mut(&10).unwrap() -=
+            Duration::from_secs(IDLE_PID_TTL_SECS + 1);
+        monitor.prune_idle();
+        assert!(!monitor.stats.contains_key(&10));
+        assert!(!monitor.last_seen.contains_key(&10));
+        assert!(!monitor.pid_to_ppid.contains_key(&10));
+        assert!(monitor.stats.contains_key(&11));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // handle_event → /proc
+    fn exec_events_do_not_reset_the_burst_window() {
+        // Anti-evasion: interleaving (possibly failing) execve calls between
+        // opens must not keep a process under the alert threshold.
+        let mut monitor = Monitor::dummy(); // threshold = 3
+        let mut outputs = Vec::new();
+        for _ in 0..4 {
+            monitor.handle_event(&open(20, 0, "/a.txt"), &mut outputs);
+            let mut exec = open(20, 0, "/bin/true");
+            exec.kind = Kind::Exec;
+            exec.file = None;
+            exec.extension = None;
+            monitor.handle_event(&exec, &mut outputs);
+        }
+        assert!(
+            outputs.iter().any(|o| matches!(o, Output::Alert(_))),
+            "burst of opens must still alert despite interleaved execs"
+        );
+        assert_eq!(monitor.stats.get(&20).unwrap().window_opens, 4);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // handle_event → /proc
+    fn stats_top_is_bounded_deduped_and_sorted() {
+        let mut monitor = Monitor::dummy();
+        let mut outputs = Vec::new();
+        for pid in 1..=40u32 {
+            for _ in 0..pid {
+                monitor.handle_event(&open(pid, 0, "/f"), &mut outputs);
+            }
+        }
+        let top = monitor.stats_top(5);
+        let mut pids: Vec<u32> = top.iter().map(|s| s.pid).collect();
+        let before = pids.len();
+        pids.sort_unstable();
+        pids.dedup();
+        assert_eq!(before, pids.len(), "no duplicates");
+        assert!(top.len() < 40, "bounded, not all PIDs");
+        assert_eq!(top[0].pid, 40, "busiest first");
+        assert!(top.windows(2).all(|w| w[0].window_opens >= w[1].window_opens));
+        let all = monitor.stats_top(1000);
+        assert_eq!(all.len(), 40, "n above PID count returns everything");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // handle_event → /proc
+    fn ignored_comm_never_alerts_but_is_still_counted() {
+        let mut monitor = Monitor::dummy().with_ignored_comms(["probe"]); // threshold = 3
+        let mut outputs = Vec::new();
+        for _ in 0..10 {
+            monitor.handle_event(&open(5, 0, "/tmp/x"), &mut outputs);
+        }
+        assert!(!outputs.iter().any(|o| matches!(o, Output::Alert(_))));
+        assert_eq!(monitor.stats.get(&5).unwrap().total_opens, 10);
+        assert_eq!(monitor.stats.get(&5).unwrap().alerts, 0);
+        // A different process name is unaffected.
+        let mut other = open(6, 0, "/tmp/y");
+        other.comm = "evil".into();
+        for _ in 0..3 {
+            monitor.handle_event(&other, &mut outputs);
+        }
+        assert!(outputs.iter().any(|o| matches!(o, Output::Alert(_))));
+    }
+
+    #[test]
+    fn ignored_comms_are_truncated_like_kernel_comm_and_empty_dropped() {
+        let monitor = Monitor::dummy().with_ignored_comms(["averyveryverylongprocessname", ""]);
+        assert_eq!(monitor.ignore_comms, vec!["averyveryverylo".to_string()]);
+    }
+
+    #[test]
+    fn decode_event_bytes_rejects_short_and_handles_garbage() {
+        assert!(decode_event_bytes(&[]).is_none());
+        assert!(decode_event_bytes(&[0u8; 10]).is_none());
+        let full = 1 + 4 + 4 + 8 + EVENT_COMM_LEN + EVENT_FILENAME_LEN + EVENT_ARGV_LEN;
+        for t in 0..=u8::MAX {
+            let mut buf = vec![0xFFu8; full + 7];
+            buf[0] = t; // includes unknown event types
+            let _ = decode_event_bytes(&buf); // must not panic
+        }
+        let mut open = vec![0u8; full];
+        open[0] = EVENT_OPENAT;
+        open[17..22].copy_from_slice(b"probe");
+        open[33..44].copy_from_slice(b"/tmp/a.LOCK");
+        let ev = decode_event_bytes(&open).unwrap();
+        assert_eq!(ev.comm, "probe");
+        assert_eq!(ev.extension.as_deref(), Some("lock"));
     }
 }

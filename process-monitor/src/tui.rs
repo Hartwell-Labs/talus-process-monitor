@@ -66,19 +66,32 @@ const NOISY_COMMS: &[&str] = &[
 
 // ── Palette — cohesive cyberpunk ─────────────────────────────────────────
 
-const BLUE: PackedRgba = PackedRgba::rgb(88, 166, 255);
+/// Base background: deep matte navy (#1a1b26).
+const BG: PackedRgba = PackedRgba::rgb(26, 27, 38);
+const BLUE: PackedRgba = PackedRgba::rgb(122, 162, 247);
 
 const GREEN: PackedRgba = PackedRgba::rgb(80, 200, 120);
-const RED: PackedRgba = PackedRgba::rgb(248, 81, 73);
+/// Blood red — reserved for emergency alerts (high-entropy ransomware markers).
+const RED: PackedRgba = PackedRgba::rgb(220, 20, 45);
 const AMBER: PackedRgba = PackedRgba::rgb(250, 180, 50);
 const PURPLE: PackedRgba = PackedRgba::rgb(160, 120, 240);
 
 const CYAN: PackedRgba = PackedRgba::rgb(100, 210, 245);
-const DIM: PackedRgba = PackedRgba::rgb(65, 72, 88);
-const FG: PackedRgba = PackedRgba::rgb(170, 180, 200);
-const BRIGHT: PackedRgba = PackedRgba::rgb(230, 235, 248);
-const BORDER: PackedRgba = PackedRgba::rgb(40, 46, 62);
-const BORDER_HI: PackedRgba = PackedRgba::rgb(88, 166, 255);
+const DIM: PackedRgba = PackedRgba::rgb(86, 95, 137);
+const FG: PackedRgba = PackedRgba::rgb(169, 177, 214);
+const BRIGHT: PackedRgba = PackedRgba::rgb(192, 202, 245);
+const BORDER: PackedRgba = PackedRgba::rgb(41, 46, 66);
+const BORDER_HI: PackedRgba = PackedRgba::rgb(122, 162, 247);
+
+// ── Layout / gateway constants ────────────────────────────────────────────
+
+/// Link shown on the first-run gateway frame.
+const GATEWAY_URL: &str = "https://hartwell-labs.pl";
+/// Height (rows) of the telemetry card in the right-hand 30% column.
+const TELEMETRY_H: u16 = 11;
+/// Demo-mode figures (only used when `TALUS_TUI_DEMO=1`).
+const DEMO_EPS: f64 = 280_000.0;
+const DEMO_CPU: f64 = 7.6;
 
 // ── Panels ────────────────────────────────────────────────────────────────
 
@@ -145,7 +158,16 @@ struct Snapshot {
     total: u64,
     lost: u64,
     uptime: u64,
+    /// `false` for a light snapshot (events + counters only): the process
+    /// tree, per-process stats, top files and extension maps are then empty
+    /// and `apply_snapshot` leaves the existing panels untouched.
+    refresh: bool,
 }
+
+/// Minimum interval between full (heavy) snapshots built by the poll thread.
+const HEAVY_REFRESH: Duration = Duration::from_millis(200);
+/// Max processes carried per heavy snapshot (busiest by window + heaviest by lifetime).
+const TUI_PROC_LIMIT: usize = 128;
 
 /// Row in the heatmap: process name + per-extension counts.
 struct HeatmapRow {
@@ -227,6 +249,21 @@ struct App_ {
     search_hits: usize,
     // ── mouse hit-testing: stored body area from last render ──
     body_area: Cell<Rect>,
+    // ── 70/30 layout hit-testing ──
+    left_area: Cell<Rect>,
+    side_area: Cell<Rect>,
+    // ── first-run gateway frame ──
+    gateway: bool,
+    gateway_sel: usize,
+    gateway_note: String,
+    gateway_link_area: Cell<Rect>,
+    gateway_cont_area: Cell<Rect>,
+    // ── live telemetry (view-only; derived from snapshot counters) ──
+    demo: bool,
+    eps: f64,
+    eps_mark: (Instant, u64),
+    cpu_pct: f64,
+    cpu_mark: u64,
 }
 
 #[allow(dead_code)]
@@ -300,10 +337,67 @@ impl App_ {
             search_buf: String::new(),
             search_hits: 0,
             body_area: Cell::new(Rect::default()),
+            left_area: Cell::new(Rect::default()),
+            side_area: Cell::new(Rect::default()),
+            gateway: gateway_should_show(),
+            gateway_sel: 0,
+            gateway_note: String::new(),
+            gateway_link_area: Cell::new(Rect::default()),
+            gateway_cont_area: Cell::new(Rect::default()),
+            demo: std::env::var("TALUS_TUI_DEMO").map(|v| v == "1").unwrap_or(false),
+            eps: 0.0,
+            eps_mark: (Instant::now(), 0),
+            cpu_pct: 0.0,
+            cpu_mark: proc_cpu_ticks().unwrap_or(0),
+        }
+    }
+
+    /// Recompute events/s and this process's CPU% once per second.
+    fn sample_telemetry(&mut self, total: u64) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.eps_mark.0).as_secs_f64();
+        if dt < 1.0 {
+            return;
+        }
+        self.eps = total.saturating_sub(self.eps_mark.1) as f64 / dt;
+        self.eps_mark = (now, total);
+        if let Some(ticks) = proc_cpu_ticks() {
+            // SAFETY: sysconf has no preconditions.
+            let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
+            self.cpu_pct = ticks.saturating_sub(self.cpu_mark) as f64 / hz / dt * 100.0;
+            self.cpu_mark = ticks;
+        }
+    }
+
+    /// Try to open the gateway link in the user's browser.
+    fn open_gateway_link(&mut self) {
+        let ok = StdCommand::new("xdg-open")
+            .arg(GATEWAY_URL)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok();
+        self.gateway_note = if ok {
+            "opening in your browser...".to_string()
+        } else {
+            format!("could not launch a browser - visit {GATEWAY_URL}")
+        };
+    }
+
+    /// Leave the gateway frame and remember that it has been seen.
+    fn leave_gateway(&mut self) {
+        self.gateway = false;
+        if let Some(path) = gateway_marker_path() {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(path, b"seen\n");
         }
     }
 
     fn apply_snapshot(&mut self, s: Snapshot) {
+        self.sample_telemetry(s.total);
         for e in &s.events {
             let kind_tag = match e.kind.as_str() {
                 "Exec" => "EXEC  ",
@@ -388,6 +482,12 @@ impl App_ {
                 self.alert_count += 1;
                 self._alerts.push(line.as_str());
             }
+        }
+        if !s.refresh {
+            self.total = s.total;
+            self.lost = s.lost;
+            self.uptime = s.uptime;
+            return;
         }
         let system_comms = [
             "systemd",
@@ -512,6 +612,41 @@ impl Model for App_ {
 
     fn update(&mut self, msg: Msg) -> Cmd<Msg> {
         match msg {
+            // ── first-run gateway: arrow-navigable + mouse-clickable ──
+            Msg::Key(k) if self.gateway && k.kind == KeyEventKind::Press => {
+                if k.modifiers.contains(Modifiers::CTRL) && k.code == KeyCode::Char('c') {
+                    return Cmd::Quit;
+                }
+                match k.code {
+                    KeyCode::Char('q') => return Cmd::Quit,
+                    KeyCode::Escape => self.leave_gateway(),
+                    KeyCode::Up | KeyCode::Left | KeyCode::BackTab | KeyCode::Char('k') => {
+                        self.gateway_sel = self.gateway_sel.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Right | KeyCode::Tab | KeyCode::Char('j') => {
+                        self.gateway_sel = (self.gateway_sel + 1).min(1);
+                    }
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        if self.gateway_sel == 0 {
+                            self.open_gateway_link();
+                        } else {
+                            self.leave_gateway();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Msg::Mouse(m) if self.gateway => {
+                if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                    if self.gateway_link_area.get().contains(m.x, m.y) {
+                        self.gateway_sel = 0;
+                        self.open_gateway_link();
+                    } else if self.gateway_cont_area.get().contains(m.x, m.y) {
+                        self.gateway_sel = 1;
+                        self.leave_gateway();
+                    }
+                }
+            }
             Msg::Key(k) if k.kind == KeyEventKind::Press => {
                 if self.help {
                     self.help = false;
@@ -603,29 +738,12 @@ impl Model for App_ {
                         self.collapsed[self.focused.min(6)] = false;
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
-                        // Hit-test: split body area into 3 columns like draw_body
-                        let ba = self.body_area.get();
-                        if m.y >= ba.y && m.y < ba.bottom() && m.x >= ba.x && m.x < ba.right() {
-                            let col_w = ba.width / 3;
-                            let rel_x = m.x - ba.x;
-                            let col = (rel_x / col_w).min(2) as usize;
-                            // Within middle column, check top/bottom split
-                            if col == 1 {
-                                let mid_y = ba.y + ba.height * 55 / 100;
-                                self.focused = if m.y < mid_y { 1 } else { 4 };
-                            } else if col == 2 {
-                                let third = ba.height / 3;
-                                let rel_y = m.y - ba.y;
-                                self.focused = if rel_y < third {
-                                    2
-                                } else if rel_y < third * 2 {
-                                    3
-                                } else {
-                                    5
-                                };
-                            } else {
-                                self.focused = 0;
-                            }
+                        // Hit-test the 70/30 split from draw_body
+                        let (la, sa) = (self.left_area.get(), self.side_area.get());
+                        if la.contains(m.x, m.y) {
+                            self.focused = 0;
+                        } else if sa.contains(m.x, m.y) && self.focused == 0 {
+                            self.focused = 1;
                         }
                     }
                     _ => {}
@@ -646,13 +764,17 @@ impl Model for App_ {
         let area = Rect::from_size(frame.buffer.width(), frame.buffer.height());
 
         // Fill entire screen with dark background
-        let bg = PackedRgba::rgb(10, 14, 22);
+        let bg = BG;
         for y in 0..area.height {
             for x in 0..area.width {
                 if let Some(cell) = frame.buffer.get_mut(x, y) {
                     cell.bg = bg;
                 }
             }
+        }
+
+        if self.gateway {
+            return self.draw_gateway(frame, area);
         }
 
         if self.help {
@@ -771,32 +893,147 @@ impl App_ {
     }
 
     fn draw_body(&self, f: &mut Frame, area: Rect) {
-        // Always 35/35/30 — collapsed panels just render as thin bars
+        // Strict asymmetric split: 70% event stream | 30% telemetry + detail.
         let cols = Flex::horizontal()
-            .constraints([
-                Constraint::Percentage(35.0),
-                Constraint::Percentage(35.0),
-                Constraint::Percentage(30.0),
-            ])
+            .constraints([Constraint::Percentage(70.0), Constraint::Percentage(30.0)])
             .split(area);
-
-        let mid = Flex::vertical()
-            .constraints([Constraint::Percentage(55.0), Constraint::Percentage(45.0)])
+        let side = Flex::vertical()
+            .constraints([Constraint::Fixed(TELEMETRY_H), Constraint::Min(0)])
             .split(cols[1]);
-        let right = Flex::vertical()
-            .constraints([
-                Constraint::Percentage(35.0),
-                Constraint::Percentage(35.0),
-                Constraint::Percentage(30.0),
-            ])
-            .split(cols[2]);
 
         self.draw_events(f, cols[0]);
-        self.draw_procs(f, mid[0]);
-        self.draw_exts_chart(f, mid[1]);
-        self.draw_net(f, right[0]);
-        self.draw_files(f, right[1]);
-        self.draw_heatmap(f, right[2]);
+        self.draw_telemetry(f, side[0]);
+        // The detail panel under the telemetry card follows focus (Tab / 1-6);
+        // with the event stream focused it shows PROCESSES.
+        match self.focused {
+            2 => self.draw_net(f, side[1]),
+            3 => self.draw_files(f, side[1]),
+            4 => self.draw_exts_chart(f, side[1]),
+            5 => self.draw_heatmap(f, side[1]),
+            _ => self.draw_procs(f, side[1]),
+        }
+
+        self.left_area.set(cols[0]);
+        self.side_area.set(side[1]);
+    }
+
+    /// Right-hand telemetry card: throughput, CPU, counters, license tier.
+    fn draw_telemetry(&self, f: &mut Frame, area: Rect) {
+        let b = Block::new()
+            .title(" TELEMETRY ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(BORDER));
+        let inner = b.inner(area);
+        b.render(area, f);
+
+        let (eps, cpu, src, src_color) = if self.demo {
+            (DEMO_EPS, DEMO_CPU, "DEMO", AMBER)
+        } else {
+            (self.eps, self.cpu_pct, "LIVE", GREEN)
+        };
+        let (tier, tier_color) = if self.is_activated {
+            ("ENTERPRISE", GREEN)
+        } else {
+            ("COMMUNITY", AMBER)
+        };
+        let row = |label: &str, value: String, color: PackedRgba| {
+            Line::from_spans(vec![
+                Span::styled(format!(" {label:<9}"), Style::new().fg(DIM)),
+                Span::styled(value, Style::new().fg(color).attrs(StyleFlags::BOLD)),
+            ])
+        };
+        let lines = vec![
+            row("source", src.to_string(), src_color),
+            row("events/s", fmt_rate(eps), BRIGHT),
+            row("cpu", format!("{cpu:.1}%"), BRIGHT),
+            row("total", self.total.to_string(), FG),
+            row("lost", self.lost.to_string(), if self.lost > 0 { AMBER } else { FG }),
+            row(
+                "alerts",
+                self.alert_count.to_string(),
+                if self.alert_count > 0 { RED } else { FG },
+            ),
+            row("uptime", fmt_dur(self.uptime), FG),
+            row("status", tier.to_string(), tier_color),
+        ];
+        Paragraph::new(ftui_text::Text::from_lines(lines)).render(inner, f);
+    }
+
+    /// First-run gateway: a rounded frame with a clickable, arrow-navigable link.
+    fn draw_gateway(&self, f: &mut Frame, area: Rect) {
+        let w = area.width.min(60);
+        let h = area.height.min(13);
+        let x = area.x + (area.width - w) / 2;
+        let y = area.y + (area.height - h) / 2;
+        let frame_area = Rect::new(x, y, w, h);
+
+        let b = Block::new()
+            .title(" talus ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(BORDER_HI));
+        let inner = b.inner(frame_area);
+        b.render(frame_area, f);
+
+        let row_rect = |r: u16| Rect::new(inner.x, inner.y + r, inner.width, 1);
+        let sel = self.gateway_sel;
+
+        if inner.height > 1 {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                "  talus  eBPF process monitor",
+                Style::new().fg(BRIGHT).attrs(StyleFlags::BOLD),
+            )]))
+            .render(row_rect(1), f);
+        }
+        if inner.height > 2 {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                "  Hartwell Labs",
+                Style::new().fg(DIM),
+            )]))
+            .render(row_rect(2), f);
+        }
+        if inner.height > 4 {
+            let link_style = if sel == 0 {
+                Style::new().fg(CYAN).attrs(StyleFlags::BOLD | StyleFlags::UNDERLINE)
+            } else {
+                Style::new().fg(BLUE).attrs(StyleFlags::UNDERLINE)
+            };
+            let marker = if sel == 0 { "> " } else { "  " };
+            Paragraph::new(Line::from_spans(vec![
+                Span::styled(format!("  {marker}"), Style::new().fg(CYAN)),
+                Span::styled(GATEWAY_URL, link_style),
+            ]))
+            .render(row_rect(4), f);
+            self.gateway_link_area.set(row_rect(4));
+        }
+        if inner.height > 5 {
+            let (marker, style) = if sel == 1 {
+                ("> ", Style::new().fg(CYAN).attrs(StyleFlags::BOLD))
+            } else {
+                ("  ", Style::new().fg(FG))
+            };
+            Paragraph::new(Line::from_spans(vec![
+                Span::styled(format!("  {marker}"), Style::new().fg(CYAN)),
+                Span::styled("Continue to monitor", style),
+            ]))
+            .render(row_rect(5), f);
+            self.gateway_cont_area.set(row_rect(5));
+        }
+        if inner.height > 7 && !self.gateway_note.is_empty() {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                format!("  {}", self.gateway_note),
+                Style::new().fg(AMBER),
+            )]))
+            .render(row_rect(7), f);
+        }
+        if inner.height > 8 {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                "  up/down select  enter open  click  esc skip  q quit",
+                Style::new().fg(DIM),
+            )]))
+            .render(row_rect(inner.height - 1), f);
+        }
     }
 
     fn block<'a>(&self, idx: usize, title: &'a str) -> Block<'a> {
@@ -1405,6 +1642,42 @@ fn trunc(s: &str, max: usize) -> String {
     }
 }
 
+fn fmt_rate(v: f64) -> String {
+    if v >= 1_000_000.0 {
+        format!("{:.2}M", v / 1_000_000.0)
+    } else if v >= 1_000.0 {
+        format!("{:.1}k", v / 1_000.0)
+    } else {
+        format!("{v:.0}")
+    }
+}
+
+/// utime + stime of this process, in clock ticks (from /proc/self/stat).
+fn proc_cpu_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // Fields after the ")" that closes comm; index 0 is field 3 (state).
+    let rest = stat.rsplit_once(')')?.1;
+    let mut it = rest.split_whitespace();
+    let utime: u64 = it.nth(11)?.parse().ok()?;
+    let stime: u64 = it.next()?.parse().ok()?;
+    Some(utime + stime)
+}
+
+fn gateway_marker_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("talus").join("tui-gateway-seen"))
+}
+
+/// The gateway shows on first run only. `TALUS_TUI_GATEWAY=1` forces it,
+/// `TALUS_TUI_GATEWAY=0` suppresses it.
+fn gateway_should_show() -> bool {
+    match std::env::var("TALUS_TUI_GATEWAY").as_deref() {
+        Ok("1") => return true,
+        Ok("0") => return false,
+        _ => {}
+    }
+    gateway_marker_path().is_some_and(|p| !p.exists())
+}
+
 fn fmt_dur(s: u64) -> String {
     if s < 60 {
         format!("{}s", s)
@@ -1430,7 +1703,7 @@ fn ext_color(ext: &str) -> PackedRgba {
 
 pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel::<Snapshot>();
-    let mut tick: u64 = 0;
+    let mut last_heavy: Option<Instant> = None;
     let h = thread::Builder::new()
         .name("poll".into())
         .spawn(move || loop {
@@ -1461,33 +1734,52 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                     Output::Action(_) => None,
                 })
                 .collect();
-            tick += 1;
-            if tick.is_multiple_of(6) || !evts.is_empty() {
-                let tree_raw = {
-                    let tree = monitor.build_process_tree();
-                    Monitor::flatten_tree(&tree)
-                        .into_iter()
-                        .map(|(depth, node)| {
-                            (
-                                depth,
-                                node.pid,
-                                node.comm.clone(),
-                                node.total_opens,
-                                node.alerts,
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                };
-                let snap = Snapshot {
-                    events: evts,
-                    stats: monitor.stats_sorted(),
-                    tree: tree_raw,
-                    top_files: monitor.top_files(20),
-                    exts: monitor.extension_counts().clone(),
-                    rates: monitor.rate_history().clone(),
-                    total: monitor.total_events,
-                    lost: monitor.total_lost,
-                    uptime: monitor.uptime().as_secs(),
+            let refresh = last_heavy.is_none_or(|t| t.elapsed() >= HEAVY_REFRESH);
+            if refresh || !evts.is_empty() {
+                let snap = if refresh {
+                    last_heavy = Some(Instant::now());
+                    let tree_raw = {
+                        let tree = monitor.build_process_tree();
+                        Monitor::flatten_tree(&tree)
+                            .into_iter()
+                            .map(|(depth, node)| {
+                                (
+                                    depth,
+                                    node.pid,
+                                    node.comm.clone(),
+                                    node.total_opens,
+                                    node.alerts,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    Snapshot {
+                        events: evts,
+                        stats: monitor.stats_top(TUI_PROC_LIMIT),
+                        tree: tree_raw,
+                        top_files: monitor.top_files(20),
+                        exts: monitor.extension_counts().clone(),
+                        rates: monitor.rate_history().clone(),
+                        total: monitor.total_events,
+                        lost: monitor.total_lost,
+                        uptime: monitor.uptime().as_secs(),
+                        refresh: true,
+                    }
+                } else {
+                    // Light snapshot: events and counters only. The expensive
+                    // aggregates are rebuilt at most every HEAVY_REFRESH.
+                    Snapshot {
+                        events: evts,
+                        stats: Vec::new(),
+                        tree: Vec::new(),
+                        top_files: Vec::new(),
+                        exts: std::collections::HashMap::new(),
+                        rates: VecDeque::new(),
+                        total: monitor.total_events,
+                        lost: monitor.total_lost,
+                        uptime: monitor.uptime().as_secs(),
+                        refresh: false,
+                    }
                 };
                 if tx.send(snap).is_err() {
                     break;
@@ -1496,7 +1788,10 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
             thread::sleep(Duration::from_millis(16));
         })?;
     let app = App_::new(rx, &license);
-    let res = App::new(app).screen_mode(ScreenMode::AltScreen).run();
+    let res = App::new(app)
+        .screen_mode(ScreenMode::AltScreen)
+        .with_mouse()
+        .run();
     let _ = h.join();
     res.map_err(|e| anyhow::anyhow!("tui: {}", e))
 }

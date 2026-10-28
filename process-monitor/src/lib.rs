@@ -49,4 +49,5 @@ pub mod monitor;
 pub mod sandbox;
 pub mod storage;
 pub mod tui;
+pub mod update;
 pub mod watchdog;

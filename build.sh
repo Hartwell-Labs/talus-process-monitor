@@ -134,19 +134,14 @@ ok "eBPF built"
 if [ "$BUILD_TUI" = true ]; then
     step "Building userspace binary (TUI-only)..."
     cargo build --release -p talus-process-monitor --manifest-path "$SCRIPT_DIR/Cargo.toml"
-    cp "$CARGO_TARGET_DIR/release/process-monitor" "$CARGO_TARGET_DIR/release/process-monitor-tui"
-    ok "TUI binary: $CARGO_TARGET_DIR/release/process-monitor-tui"
-fi
-
-if [ "$BUILD_TUI" = true ]; then
-    cp "$CARGO_TARGET_DIR/release/process-monitor-tui" "$CARGO_TARGET_DIR/release/process-monitor"
+    ok "Binary: $CARGO_TARGET_DIR/release/talus-monitor"
 fi
 
 echo ""
 echo "=== Build complete ==="
 echo ""
 echo "  eBPF:   $CARGO_TARGET_DIR/bpfel-unknown-none/bpf/build/process-monitor-ebpf/out/process_monitor_ebpf"
-[ "$BUILD_TUI" = true ] && echo "  TUI:    $CARGO_TARGET_DIR/release/process-monitor-tui (1.7MB)"
+[ "$BUILD_TUI" = true ] && echo "  TUI:    $CARGO_TARGET_DIR/release/talus-monitor"
 echo ""
 echo "Run (requires root for eBPF):"
-echo "  sudo $CARGO_TARGET_DIR/release/process-monitor-tui"
+echo "  sudo $CARGO_TARGET_DIR/release/talus-monitor monitor"

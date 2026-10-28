@@ -68,7 +68,7 @@ find_binaries() {
     EBPF_OBJ=""
 
     # Find userspace binary
-    TUI_BIN=$(find "$SOURCE_DIR/target/release" -maxdepth 1 -name "process-monitor" -type f 2>/dev/null | head -1)
+    TUI_BIN=$(find "$SOURCE_DIR/target/release" -maxdepth 1 -name "talus-monitor" -type f 2>/dev/null | head -1)
 
     # Find eBPF object — look in multiple locations
     EBPF_OBJ=$(find "$SOURCE_DIR/target" -path "*/release/*" -name "*.bpf.o" -type f 2>/dev/null | head -1)
@@ -190,7 +190,7 @@ build_if_needed() {
         return 1
     }
 
-    TUI_BIN=$(find "$SOURCE_DIR/target/release" -maxdepth 1 -name "process-monitor" -type f | head -1)
+    TUI_BIN=$(find "$SOURCE_DIR/target/release" -maxdepth 1 -name "talus-monitor" -type f | head -1)
     echo -e "  ${GREEN}✓ Build successful${NC}"
 
     # Try to find eBPF object (might not exist if nightly not available)
