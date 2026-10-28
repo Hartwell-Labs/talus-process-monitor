@@ -195,7 +195,7 @@ enum Msg {
 }
 
 /// Max events to batch before flushing to the monitor channel.
-const READER_BATCH_SIZE: usize = 256;
+const READER_BATCH_SIZE: usize = 512;
 
 // ── Monitor core ──────────────────────────────────────────────────────────
 
@@ -1209,8 +1209,8 @@ fn spawn_reader(
         .spawn(move || {
             // Batch events to amortize MPSC channel lock contention at high
             // throughput (300K+ events/sec). Only cheap Copy structs (ProcessEvent
-            // + latency) cross the channel; String allocation / Local::now() is
-            // deferred to the poll thread via to_recorded().
+            // + latency) cross the channel; String allocation is deferred to
+            // the poll thread via to_recorded() with zero-cost ktime_ns.
             let mut batch: Vec<(ProcessEvent, u64)> = Vec::with_capacity(READER_BATCH_SIZE);
             loop {
                 let mut idle = true;
