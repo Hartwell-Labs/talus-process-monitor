@@ -1,24 +1,17 @@
-# Accepted RustSec advisories (consumed by `cargo audit` / CI).
+# Accepted RustSec advisories (cargo-audit v0.22 `[advisories].ignore`).
 #
 # rustybuzz 0.20.1 (RUSTSEC-2026-0206) and ttf-parser 0.25.1
 # (RUSTSEC-2026-0192) are UNMAINTAINED upstream with no newer release.
-# They enter this workspace only through the vendored
+# In this workspace they are reachable only through the vendored
 # `frankentui/ftui-text` crate's OPTIONAL `shaping = ["dep:rustybuzz"]`
-# feature: no workspace member enables `shaping`, `cargo tree -i` cannot reach
-# either crate from talus-monitor's runtime graph, and the only bench that
-# could exercise them (`shaped_render_bench`) is never built by
-# `cargo build`/`cargo test`. They are therefore NOT compiled into the shipped
-# talus-monitor binary — they are lockfile-only entries, not runnable code.
-#
-# Durable fix (out of scope here): swap ftui-text's shaping backend from
-# `rustybuzz` to the maintained `allsorts` crate (vendor PR in frankentui/).
+# feature — default off and NOT enabled by any workspace member. `cargo tree`
+# cannot reach either crate from talus-monitor's runtime graph, so they are
+# not compiled into the shipped talus-monitor binary (lockfile-only entries).
+# Durable fix: swap ftui-text's shaping backend from `rustybuzz` to the
+# maintained `allsorts` crate (vendor PR in frankentui/).
 
-[[ignore]]
-name = "rustybuzz"
-version = "=0.20.1"
-reason = "unmaintained upstream; optional shaping dep of vendored ftui-text, un-enabled in runtime graph; not shipped; pending allsorts swap"
-
-[[ignore]]
-name = "ttf-parser"
-version = "=0.25.1"
-reason = "unmaintained upstream; transitive of rustybuzz (vendored ftui-text shaping); not shipped"
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0206",  # rustybuzz 0.20.1 — unmaintained
+  "RUSTSEC-2026-0192",  # ttf-parser 0.25.1 — unmaintained
+]
