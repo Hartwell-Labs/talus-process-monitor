@@ -1796,7 +1796,7 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                     break;
                 }
             }
-            thread::sleep(Duration::from_millis(100)); // 10 FPS cap — monitoring, not gaming
+            thread::sleep(Duration::from_millis(200)); // 5 FPS — TUI only needs situational awareness
         })?;
     let app = App_::new(rx, &license);
     // The default frame budget (16 ms, frame skipping allowed) makes the
