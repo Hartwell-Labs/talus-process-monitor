@@ -29,7 +29,7 @@ spec:
           effect: NoExecute
       containers:
         - name: talus
-          image: ghcr.io/bartoszosiej/talus-process-monitor:latest
+          image: ghcr.io/Hartwell-Labs/talus-process-monitor:latest
           imagePullPolicy: Always
           command:
             - talus-monitor

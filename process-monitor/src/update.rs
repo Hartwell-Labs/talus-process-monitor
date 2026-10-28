@@ -11,9 +11,10 @@
 //!   binary is kept next to it as `<name>.prev`).
 //!
 //! The checksum file is published in the same release as the binary, so it
-//! detects corruption and truncated downloads but NOT a compromised release.
-//! Releases are also signed with cosign; verify with the command shown in the
-//! release notes if that matters for your threat model.
+//! detects corruption and truncated downloads. Releases are also signed with
+//! cosign; `update --install` verifies the blob automatically when the
+//! `cosign` binary is available, and otherwise points at the release-notes
+//! command. SHA-256 remains the mandatory integrity gate.
 
 use std::fs;
 use std::io::{self, Write};
@@ -93,9 +94,11 @@ pub fn run(repo: &str, install: bool, assume_yes: bool, asset: &str) -> Result<(
     }
     eprintln!("[talus] ✓ sha256 verified: {actual}");
 
+    verify_with_cosign(&client, &release, &data, repo, asset)?;
+
     replace_running_binary(&data)?;
     eprintln!("[talus] ✓ updated to {}. Restart talus to use it.", release.tag_name);
-    eprintln!("[talus]   to verify the signature: see the release notes for the cosign command.");
+    eprintln!("[talus]   cosign signature verification attempted above (install `cosign` to enable it).");
     Ok(())
 }
 
@@ -132,6 +135,83 @@ fn find_asset<'a>(release: &'a Release, repo: &str, name: &str) -> Result<&'a As
         bail!("asset URL {} is outside {prefix}; refusing", asset.browser_download_url);
     }
     Ok(asset)
+}
+
+/// Best-effort supply-chain check for the release signature.
+///
+/// If the release publishes cosign artifacts (`{asset}.sig` + `{asset}.bundle`)
+/// AND the `cosign` binary is on PATH, the downloaded blob is verified with
+/// `cosign verify-blob` and a failure aborts the install. When `cosign` is not
+/// installed, or the release omits signing artifacts, a warning is printed and
+/// installation proceeds on the SHA-256 gate already checked above — this never
+/// silently downgrades integrity, it only adds an *additional* signature check.
+fn verify_with_cosign(
+    client: &reqwest::blocking::Client,
+    release: &Release,
+    data: &[u8],
+    repo: &str,
+    asset: &str,
+) -> Result<()> {
+    let prefix = format!("https://github.com/{repo}/releases/download/");
+
+    let (Some(sig), Some(bundle)) = (
+        release
+            .assets
+            .iter()
+            .find(|a| a.name == format!("{asset}.sig") && a.browser_download_url.starts_with(&prefix)),
+        release
+            .assets
+            .iter()
+            .find(|a| a.name == format!("{asset}.bundle") && a.browser_download_url.starts_with(&prefix)),
+    ) else {
+        eprintln!(
+            "[talus] ⚠ cosign artifacts ({asset}.sig/.bundle) not in release {}; verified via SHA-256 only. Run: cosign verify-blob {asset} --signature {asset}.sig --bundle {asset}.bundle",
+            release.tag_name
+        );
+        return Ok(());
+    };
+
+    // `cosign` missing? warn + continue (SHA-256 already gated) — never silent.
+    if std::process::Command::new("cosign")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_err()
+    {
+        eprintln!("[talus] ⚠ `cosign` not installed; signature not verified. Install cosign and re-run `update --install`. SHA-256 integrity gate passed.");
+        return Ok(());
+    }
+
+    let sig_data = download(client, &sig.browser_download_url)?;
+    let bundle_data = download(client, &bundle.browser_download_url)?;
+    let dir = std::env::temp_dir();
+    let blob = dir.join(format!(".talus-{asset}.blob"));
+    let sig_path = dir.join(format!(".talus-{asset}.sig"));
+    let bundle_path = dir.join(format!(".talus-{asset}.bundle"));
+    std::fs::write(&blob, data)?;
+    std::fs::write(&sig_path, &sig_data)?;
+    std::fs::write(&bundle_path, &bundle_data)?;
+
+    let status = std::process::Command::new("cosign")
+        .arg("verify-blob")
+        .arg(&blob)
+        .arg("--signature")
+        .arg(&sig_path)
+        .arg("--bundle")
+        .arg(&bundle_path)
+        .status()?;
+    let _ = std::fs::remove_file(&blob);
+    let _ = std::fs::remove_file(&sig_path);
+    let _ = std::fs::remove_file(&bundle_path);
+
+    if !status.success() {
+        bail!(
+            "cosign signature verification FAILED for {asset} - release is not authentic; nothing installed"
+        );
+    }
+    eprintln!("[talus] ✓ cosign signature verified for {asset}");
+    Ok(())
 }
 
 fn download(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
