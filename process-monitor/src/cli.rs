@@ -758,7 +758,7 @@ pub fn run_diagnose(monitor: &mut Monitor) -> Result<()> {
                     | Kind::Mkdir
                     | Kind::Unlink
                     | Kind::Kill
-                    | Kind::Chmod => {}
+                    | Kind::Chmod | Kind::Unknown => {}
                 },
                 Output::Alert(_) => alerts += 1,
                 Output::Action(_) => {}
@@ -873,7 +873,7 @@ pub fn run_benchmark(monitor: &mut Monitor, secs: u64) -> Result<()> {
                         Kind::Connect | Kind::Accept | Kind::SendTo | Kind::RecvFrom => {
                             total_net += 1
                         }
-                        Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod => total_other += 1,
+                        Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => total_other += 1,
                     }
                 }
                 Output::Alert(_) => {}
@@ -1022,6 +1022,7 @@ pub fn run_json(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> R
                         Kind::Unlink => "unlink",
                         Kind::Kill => "kill",
                         Kind::Chmod => "chmod",
+                        Kind::Unknown => "unknown",
                     };
                     let value = json!({
                         "ts": ev.ts,
@@ -1133,7 +1134,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                                 addr.dimmed()
                             );
                         }
-                        Kind::Mkdir | Kind::Unlink | Kind::Chmod => {
+                        Kind::Mkdir | Kind::Unlink | Kind::Chmod | Kind::Unknown => {
                             let kind_str = format!("{:?}", ev.kind).to_uppercase();
                             let path = ev.file.as_deref().unwrap_or("?");
                             println!(

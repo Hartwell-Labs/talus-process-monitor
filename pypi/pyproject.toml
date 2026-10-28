@@ -21,11 +21,11 @@ classifiers = [
   "Topic :: Security",
 ]
 [project.urls]
-Homepage = "https://bartoszosiej.github.io/talus-process-monitor/"
+Homepage = "https://hartwell-labs.pl/talus-process-monitor/"
 Repository = "https://github.com/BartoszOsiej/talus-process-monitor"
-Changelog = "https://bartoszosiej.github.io/talus-process-monitor/changelog.html"
-Documentation = "https://bartoszosiej.github.io/talus-process-monitor/field-guide.html"
-"Comparison" = "https://bartoszosiej.github.io/talus-process-monitor/comparison.html"
+Changelog = "https://hartwell-labs.pl/talus-process-monitor/changelog.html"
+Documentation = "https://hartwell-labs.pl/talus-process-monitor/field-guide.html"
+"Comparison" = "https://hartwell-labs.pl/talus-process-monitor/comparison.html"
 "Sponsor / Support" = "https://github.com/BartoszOsiej/talus-process-monitor#support--services"
 
 [project.scripts]

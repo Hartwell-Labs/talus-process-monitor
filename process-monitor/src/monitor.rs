@@ -81,6 +81,7 @@ pub enum Kind {
     Unlink,
     Kill,
     Chmod,
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -656,6 +657,7 @@ impl Monitor {
                         .observe_fs(true);
                 }
                 Kind::Kill => {}
+                Kind::Unknown => {}
             }
         }
 
@@ -739,7 +741,7 @@ impl Monitor {
                     }
                 }
             }
-            Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod => {
+            Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => {
                 // FS/signal events — track in file counts for the Top Files panel.
                 if let Some(ref file) = ev.file {
                     bump_count_capped(&mut self.file_counts, file, MAX_TRACKED_FILES);
@@ -1345,7 +1347,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         }
         _ => RecordedEvent {
             ts,
-            kind: Kind::Exec,
+            kind: Kind::Unknown,
             pid: raw.pid,
             uid: raw.uid,
             comm: raw.comm_str(),
