@@ -48,9 +48,6 @@ pub const TUI_SNAPSHOT_EVENT_CAP: usize = 50;
 /// snapshots. 256 entries is enough to cover a 200ms poll cycle at even 1.3K
 /// events/sec while keeping memory bounded.
 const MONITOR_EVENT_RING_CAP: usize = 256;
-/// Maximum events processed per poll() call. Bounds frame time so the TUI
-/// thread never falls behind by more than one poll cycle.
-const POLL_MAX_EVENTS: usize = 2000;
 
 // ── eBPF event record (must match kernel-side #[repr(C)]) ────────────────
 
@@ -70,6 +67,10 @@ pub struct ProcessEvent {
 unsafe impl aya::Pod for ProcessEvent {}
 
 impl ProcessEvent {
+    fn comm_bytes(&self) -> &[u8] {
+        let end = self.comm.iter().position(|&c| c == 0).unwrap_or(self.comm.len());
+        &self.comm[..end]
+    }
     fn comm_str(&self) -> String {
         cstr_to_string(&self.comm)
     }
@@ -96,6 +97,24 @@ pub enum Kind {
     Kill,
     Chmod,
     Unknown,
+}
+
+impl From<u8> for Kind {
+    fn from(event_type: u8) -> Self {
+        match event_type {
+            0 => Kind::Exec,
+            1 => Kind::Open,
+            2 => Kind::Connect,
+            3 => Kind::Accept,
+            4 => Kind::SendTo,
+            5 => Kind::RecvFrom,
+            6 => Kind::Mkdir,
+            7 => Kind::Unlink,
+            8 => Kind::Kill,
+            9 => Kind::Chmod,
+            _ => Kind::Unknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -294,7 +313,7 @@ pub struct Monitor {
     /// Ring buffer of recent events for TUI display. Avoids cloning every
     /// event in handle_event — events are moved here (ownership transfer,
     /// no allocation) and drained with a cap in poll().
-    event_ring: std::collections::VecDeque<RecordedEvent>,
+    event_ring: std::collections::VecDeque<ProcessEvent>,
     /// Last time each PID produced an event; drives idle eviction.
     last_seen: HashMap<u32, Instant>,
     /// Process names (`comm`, max 15 bytes) whose burst alerts are suppressed.
@@ -508,7 +527,7 @@ impl Monitor {
             .try_into()
             .context("'EVENTS' is not a PerfEventArray")?;
 
-        let (tx, rx) = mpsc::sync_channel(8);
+        let (tx, rx) = mpsc::sync_channel(64);  // 64×512 = 32K-event buffer — absorbs bursts
         let reader = spawn_reader(perf_array, tx)?;
 
         let now = Instant::now();
@@ -571,26 +590,23 @@ impl Monitor {
 
     pub fn poll(&mut self) -> Vec<Output> {
         let mut outputs = Vec::new();
-        // Cap total events processed per poll to bound frame time. Even with
-        // sync_channel backpressure, a burst can queue several batches; capping
-        // prevents the poll thread from falling further behind.
-        let mut remaining: usize = POLL_MAX_EVENTS;
-        while remaining > 0 {
-            match self.rx.try_recv() {
-                Ok(Msg::Lost(n)) => {
-                    self.total_lost += n;
-                }
-                Ok(Msg::Events(batch)) => {
-                    let take = batch.len().min(remaining);
-                    self.total_events += take as u64;
-                    for (raw, latency_ns) in batch.into_iter().take(take) {
+        // Process ALL available events — no cap, no dropping. The 200ms TUI
+        // interval and sync_channel(64) provide the backpressure, not event
+        // loss. At 30K evts/s, processing ~6K events takes ~30ms — well
+        // within the 200ms frame budget.
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Msg::Lost(n) => self.total_lost += n,
+                Msg::Events(batch) => {
+                    self.total_events += batch.len() as u64;
+                    for (raw, latency_ns) in batch {
                         self.record_latency(latency_ns);
-                        let ev = to_recorded(&raw);
-                        self.handle_event(ev, &mut outputs);
+                        // handle_event takes &ProcessEvent — zero String allocations
+                        // in the hot path. to_recorded is called only in
+                        // drain_display_events (50 events per 200ms poll).
+                        self.handle_event(&raw, &mut outputs);
                     }
-                    remaining = remaining.saturating_sub(take);
                 }
-                Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
         // Accumulate rate samples every ~1 second.
@@ -658,6 +674,8 @@ impl Monitor {
     /// Move events from the internal ring buffer into `outputs`, capped at
     /// [`TUI_SNAPSHOT_EVENT_CAP`].  The **most recent** events are kept; older
     /// ones are dropped so the TUI always shows the tail, not the head.
+    /// Only the displayed events (max 50 per poll) are converted via
+    /// `to_recorded()` — the remaining 30K/sec stay as raw Copy structs.
     pub fn drain_display_events(&mut self, outputs: &mut Vec<Output>) {
         let len = self.event_ring.len();
         let skip = len.saturating_sub(TUI_SNAPSHOT_EVENT_CAP);
@@ -665,9 +683,9 @@ impl Monitor {
         for _ in 0..skip {
             self.event_ring.pop_front();
         }
-        // Drain the remaining (newest) events in order.
-        for ev in self.event_ring.drain(..) {
-            outputs.push(Output::Event(ev));
+        // Drain the remaining (newest) events, converting to DisplayEvent.
+        while let Some(raw) = self.event_ring.pop_front() {
+            outputs.push(Output::Event(to_recorded(&raw)));
         }
     }
 
@@ -676,15 +694,20 @@ impl Monitor {
         self.latency.record(latency_ns);
     }
 
-    pub(crate) fn handle_event(&mut self, ev: RecordedEvent, outputs: &mut Vec<Output>) {
-        let stats = self.stats.entry(ev.pid).or_default();
-        stats.pid = ev.pid;
-        // Only clone comm when it actually changed — at 30K evts/s this avoids
-        // 30K heap allocations/sec since most events from a PID share its comm.
-        if stats.comm != ev.comm {
-            stats.comm = ev.comm.clone();
+    pub(crate) fn handle_event(&mut self, raw: &ProcessEvent, outputs: &mut Vec<Output>) {
+        let pid = raw.pid;
+        let uid = raw.uid;
+        let ts_ns = raw.ktime_ns;
+        let kind = Kind::from(raw.event_type);
+
+        let stats = self.stats.entry(pid).or_default();
+        stats.pid = pid;
+        // Only allocate comm String when it actually changed — at 30K evts/s this
+        // avoids 30K heap allocations/sec since most events from a PID share its comm.
+        if stats.comm.as_bytes() != raw.comm_bytes() {
+            stats.comm = raw.comm_str();
         }
-        self.last_seen.insert(ev.pid, Instant::now());
+        self.last_seen.insert(pid, Instant::now());
 
         // NOTE: deliberately no state reset on Exec. The execve tracepoint fires
         // on entry even when the exec fails, so resetting the burst window here
@@ -693,53 +716,39 @@ impl Monitor {
         // window and the idle-PID TTL instead.
 
         // Collect for deferred PPID resolution (avoids per-event /proc I/O).
-        if self.pid_to_ppid.contains_key(&ev.pid) {
-            // already resolved
-        } else {
-            self.pending_ppids.insert(ev.pid);
+        if !self.pid_to_ppid.contains_key(&pid) {
+            self.pending_ppids.insert(pid);
         }
 
         // ── MeMLP: feed the live event stream to the neural engine ──────
         if self.memlp.is_some() {
-            match ev.kind {
+            match kind {
                 Kind::Exec => {
-                    self.pid_features
-                        .entry(ev.pid)
-                        .or_default()
-                        .observe_exec(false);
+                    self.pid_features.entry(pid).or_default().observe_exec(false);
                 }
                 Kind::Connect | Kind::Accept | Kind::SendTo | Kind::RecvFrom => {
-                    self.pid_features
-                        .entry(ev.pid)
-                        .or_default()
-                        .observe_exec(true);
+                    self.pid_features.entry(pid).or_default().observe_exec(true);
                 }
                 Kind::Open => {
-                    let entropy = ev.file.as_deref().map(shannon_entropy).unwrap_or(0.0);
-                    self.pid_features.entry(ev.pid).or_default().observe_open(
-                        ev.file.as_deref().unwrap_or(""),
-                        ev.extension.as_deref(),
-                        entropy,
+                    let filename = raw.filename_str();
+                    let ext = extract_extension(&filename);
+                    let entropy = shannon_entropy(&filename);
+                    self.pid_features.entry(pid).or_default().observe_open(
+                        &filename, Some(&ext), entropy,
                     );
                 }
                 Kind::Mkdir => {
-                    self.pid_features
-                        .entry(ev.pid)
-                        .or_default()
-                        .observe_fs(false);
+                    self.pid_features.entry(pid).or_default().observe_fs(false);
                 }
                 Kind::Unlink | Kind::Chmod => {
-                    self.pid_features
-                        .entry(ev.pid)
-                        .or_default()
-                        .observe_fs(true);
+                    self.pid_features.entry(pid).or_default().observe_fs(true);
                 }
                 Kind::Kill => {}
                 Kind::Unknown => {}
             }
         }
 
-        match ev.kind {
+        match kind {
             Kind::Exec => {
                 stats.total_execs += 1;
                 self.tick_execs += 1;
@@ -750,21 +759,19 @@ impl Monitor {
                 self.tick_execs += 1;
             }
             Kind::Open => {
-                // Track file extensions.
-                if let Some(ref ext) = ev.extension {
-                    if !ext.is_empty() {
-                        bump_count_capped(&mut stats.extensions, ext, MAX_TRACKED_EXTS);
-                        bump_count_capped(&mut self.ext_counts, ext, MAX_TRACKED_EXTS);
-                    }
+                // Track file extensions and per-file open count.
+                // filename_str() allocates — unavoidable for stats tracking, but
+                // file_counts/ext_counts are bounded maps (lazy eviction).
+                let filename = raw.filename_str();
+                let ext = extract_extension(&filename);
+                if !ext.is_empty() {
+                    bump_count_capped(&mut stats.extensions, &ext, MAX_TRACKED_EXTS);
+                    bump_count_capped(&mut self.ext_counts, &ext, MAX_TRACKED_EXTS);
                 }
-
-                // Track per-file open count.
-                if let Some(ref file) = ev.file {
-                    bump_count_capped(&mut self.file_counts, file, MAX_TRACKED_FILES);
-                }
+                bump_count_capped(&mut self.file_counts, &filename, MAX_TRACKED_FILES);
 
                 let now = Instant::now();
-                let window = self.windows.entry(ev.pid).or_default();
+                let window = self.windows.entry(pid).or_default();
                 let cutoff = now - Duration::from_secs(WINDOW_SECS);
                 while window.front().is_some_and(|t| *t < cutoff) {
                     window.pop_front();
@@ -777,13 +784,13 @@ impl Monitor {
 
                 if self.threshold > 0
                     && stats.window_opens == self.threshold
-                    && !self.ignore_comms.contains(&ev.comm)
+                    && !self.ignore_comms.iter().any(|ic| ic.as_bytes() == raw.comm_bytes())
                 {
                     stats.alerts += 1;
                     self.tick_alerts += 1;
                     // ── MeMLP: throttled training + verdict ────────────
                     let memlp_verdict = if let Some(model) = self.memlp.as_mut() {
-                        let feats = self.pid_features.entry(ev.pid).or_default().features();
+                        let feats = self.pid_features.entry(pid).or_default().features();
                         // Train AND assess only on every Nth alert to bound CPU at
                         // high alert rates (e.g. 300K evts/s thresh=3 → thousands
                         // of alerts/sec). Most alerts are false positives from
@@ -797,50 +804,50 @@ impl Monitor {
                     } else {
                         None
                     };
+                    let comm = raw.comm_str();
                     outputs.push(Output::Alert(Alert {
-                        ts: format_ktime(ev.ts_ns),
-                        pid: ev.pid,
-                        uid: ev.uid,
-                        comm: ev.comm.clone(),
+                        ts: format_ktime(ts_ns),
+                        pid,
+                        uid,
+                        comm: comm.clone(),
                         opens: stats.window_opens,
                         memlp: memlp_verdict,
                     }));
                     // ── Response: act on the verdict ───────────────────────────
                     if self.auto_kill {
-                        let result = self.responder.on_verdict(ev.pid, &ev.comm);
-                        // Say what actually happened. The MIT build has no
-                        // responder, and "SIGKILL sent" there would be a lie an
-                        // operator would believe — the exact failure that made
-                        // the old gate worth removing.
+                        let result = self.responder.on_verdict(pid, &comm);
                         let action = if result {
-                            format!("response sent to PID {} ({})", ev.pid, ev.comm)
+                            format!("response sent to PID {} ({})", pid, comm)
                         } else {
-                            format!("no response sent to PID {} ({})", ev.pid, ev.comm)
+                            format!("no response sent to PID {} ({})", pid, comm)
                         };
                         outputs.push(Output::Action(ResponseAction {
-                            ts: format_ktime(ev.ts_ns),
-                            pid: ev.pid,
-                            comm: ev.comm.clone(),
+                            ts: format_ktime(ts_ns),
+                            pid,
+                            comm,
                             action,
                             success: result,
                         }));
                     }
                 }
             }
-            Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => {
-                // FS/signal events — track in file counts for the Top Files panel.
-                if let Some(ref file) = ev.file {
-                    bump_count_capped(&mut self.file_counts, file, MAX_TRACKED_FILES);
+            Kind::Mkdir | Kind::Unlink | Kind::Chmod => {
+                // FS events — track in file counts for the Top Files panel.
+                let path = raw.filename_str();
+                if !path.is_empty() {
+                    bump_count_capped(&mut self.file_counts, &path, MAX_TRACKED_FILES);
                 }
                 self.tick_opens += 1;
             }
+            Kind::Kill | Kind::Unknown => {
+                self.tick_opens += 1;
+            }
         }
-        // Move event into ring buffer for TUI display (ownership transfer,
-        // zero-alloc — no per-event clone). Drained with a cap in poll().
+        // Push raw ProcessEvent (Copy, zero-alloc) to ring buffer for TUI display.
         if self.event_ring.len() >= MONITOR_EVENT_RING_CAP {
             self.event_ring.pop_front();
         }
-        self.event_ring.push_back(ev);
+        self.event_ring.push_back(*raw);
     }
 
     /// Once per second: let `window_opens` decay for quiet processes and forget
@@ -1495,7 +1502,7 @@ fn cstr_to_string(arr: &[u8]) -> String {
 #[cfg(test)]
 impl Monitor {
     pub(crate) fn dummy() -> Self {
-        let (_tx, rx) = mpsc::sync_channel(8);
+        let (_tx, rx) = mpsc::sync_channel(64);
         let handle = thread::spawn(|| loop {
             thread::sleep(Duration::from_secs(60));
         });
@@ -1537,18 +1544,26 @@ impl Monitor {
 mod tests {
     use super::*;
 
-    fn open(pid: u32, uid: u32, file: &str) -> RecordedEvent {
-        RecordedEvent {
-            ts_ns: 0,
-            kind: Kind::Open,
+    fn make_event(event_type: u8, pid: u32, uid: u32, comm: &str, file: &str) -> ProcessEvent {
+        let mut comm_buf = [0u8; EVENT_COMM_LEN];
+        let cb = comm.as_bytes();
+        comm_buf[..cb.len()].copy_from_slice(cb);
+        let mut file_buf = [0u8; EVENT_FILENAME_LEN];
+        let fb = file.as_bytes();
+        file_buf[..fb.len()].copy_from_slice(fb);
+        ProcessEvent {
+            event_type,
             pid,
             uid,
-            comm: "probe".into(),
-            file: Some(file.into()),
-            extension: Some(extract_extension(file)),
-            argv: None,
-            bytes: None,
+            ktime_ns: 0,
+            comm: comm_buf,
+            filename: file_buf,
+            argv: [0u8; EVENT_ARGV_LEN],
         }
+    }
+
+    fn open(pid: u32, uid: u32, file: &str) -> ProcessEvent {
+        make_event(EVENT_OPENAT, pid, uid, "probe", file)
     }
 
     #[test]
@@ -1608,20 +1623,7 @@ mod tests {
     fn exec_events_update_stats_without_alerts() {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
-        monitor.handle_event(
-            RecordedEvent {
-                ts_ns: 0,
-                kind: Kind::Exec,
-                pid: 9,
-                uid: 0,
-                comm: "init".into(),
-                file: None,
-                extension: None,
-                argv: None,
-                bytes: None,
-            },
-            &mut outputs,
-        );
+        monitor.handle_event(&make_event(EVENT_EXECVE, 9, 0, "init", ""), &mut outputs);
         let stats = monitor.stats.get(&9).expect("stats recorded");
         assert_eq!(stats.total_execs, 1);
         assert_eq!(stats.total_opens, 0);
@@ -1636,7 +1638,7 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(open(42, 1000, "/tmp/x"), &mut outputs);
+            monitor.handle_event(&open(42, 1000, "/tmp/x"), &mut outputs);
         }
         monitor.drain_display_events(&mut outputs);
         let alerts: Vec<_> = outputs
@@ -1661,7 +1663,7 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..5 {
-            monitor.handle_event(open(42, 1000, "/tmp/x"), &mut outputs);
+            monitor.handle_event(&open(42, 1000, "/tmp/x"), &mut outputs);
         }
         let alerts = outputs
             .iter()
@@ -1677,10 +1679,10 @@ mod tests {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
         for _ in 0..2 {
-            monitor.handle_event(open(1, 0, "/a"), &mut outputs);
+            monitor.handle_event(&open(1, 0, "/a"), &mut outputs);
         }
         for _ in 0..4 {
-            monitor.handle_event(open(2, 0, "/b"), &mut outputs);
+            monitor.handle_event(&open(2, 0, "/b"), &mut outputs);
         }
         let sorted = monitor.stats_sorted();
         assert_eq!(sorted[0].pid, 2);
@@ -1712,10 +1714,10 @@ mod tests {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(open(1, 0, "/a.txt"), &mut outputs);
+            monitor.handle_event(&open(1, 0, "/a.txt"), &mut outputs);
         }
         for _ in 0..5 {
-            monitor.handle_event(open(1, 0, "/b.log"), &mut outputs);
+            monitor.handle_event(&open(1, 0, "/b.log"), &mut outputs);
         }
         let top = monitor.top_files(10);
         assert_eq!(top[0].path, "/b.log");
@@ -1729,9 +1731,9 @@ mod tests {
     fn extension_counts_aggregate() {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
-        monitor.handle_event(open(1, 0, "/a.pdf"), &mut outputs);
-        monitor.handle_event(open(1, 0, "/b.pdf"), &mut outputs);
-        monitor.handle_event(open(1, 0, "/c.rs"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/a.pdf"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/b.pdf"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/c.rs"), &mut outputs);
         let exts = monitor.extension_counts();
         assert_eq!(exts.get("pdf"), Some(&2));
         assert_eq!(exts.get("rs"), Some(&1));
@@ -1749,26 +1751,14 @@ mod tests {
         monitor.pid_to_ppid.insert(300, 200); // vim → bash
 
         for pid in &[1, 100, 200, 300] {
-            monitor.handle_event(
-                RecordedEvent {
-                    ts_ns: 0,
-                    kind: Kind::Exec,
-                    pid: *pid,
-                    uid: 0,
-                    comm: match pid {
-                        1 => "systemd".into(),
-                        100 => "sshd".into(),
-                        200 => "bash".into(),
-                        300 => "vim".into(),
-                        _ => unreachable!(),
-                    },
-                    file: None,
-                    extension: None,
-                    argv: None,
-                    bytes: None,
-                },
-                &mut outputs,
-            );
+            let comm = match pid {
+                1 => "systemd",
+                100 => "sshd",
+                200 => "bash",
+                300 => "vim",
+                _ => unreachable!(),
+            };
+            monitor.handle_event(&make_event(EVENT_EXECVE, *pid, 0, comm, ""), &mut outputs);
         }
 
         let tree = monitor.build_process_tree();
@@ -1794,20 +1784,7 @@ mod tests {
         monitor.pid_to_ppid.insert(3, 2);
 
         for pid in &[1, 2, 3] {
-            monitor.handle_event(
-                RecordedEvent {
-                    ts_ns: 0,
-                    kind: Kind::Exec,
-                    pid: *pid,
-                    uid: 0,
-                    comm: format!("proc{pid}"),
-                    file: None,
-                    extension: None,
-                    argv: None,
-                    bytes: None,
-                },
-                &mut outputs,
-            );
+            monitor.handle_event(&make_event(EVENT_EXECVE, *pid, 0, &format!("proc{pid}"), ""), &mut outputs);
         }
 
         let tree = monitor.build_process_tree();
@@ -1828,20 +1805,7 @@ mod tests {
         monitor.pid_to_ppid.insert(20, 0);
 
         for pid in &[10, 20] {
-            monitor.handle_event(
-                RecordedEvent {
-                    ts_ns: 0,
-                    kind: Kind::Exec,
-                    pid: *pid,
-                    uid: 0,
-                    comm: format!("root{pid}"),
-                    file: None,
-                    extension: None,
-                    argv: None,
-                    bytes: None,
-                },
-                &mut outputs,
-            );
+            monitor.handle_event(&make_event(EVENT_EXECVE, *pid, 0, &format!("root{pid}"), ""), &mut outputs);
         }
 
         let tree = monitor.build_process_tree();
@@ -1930,20 +1894,7 @@ mod tests {
     fn handle_event_connect_increments_execs() {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
-        monitor.handle_event(
-            RecordedEvent {
-                ts_ns: 0,
-                kind: Kind::Connect,
-                pid: 50,
-                uid: 1000,
-                comm: "curl".into(),
-                file: Some("93.184.216.34:443".into()),
-                extension: None,
-                argv: None,
-                bytes: None,
-            },
-            &mut outputs,
-        );
+        monitor.handle_event(&make_event(EVENT_CONNECT, 50, 1000, "curl", "93.184.216.34:443"), &mut outputs);
         let stats = monitor.stats.get(&50).unwrap();
         assert_eq!(stats.total_execs, 1, "network events count as execs");
         assert_eq!(stats.total_opens, 0);
@@ -1954,9 +1905,9 @@ mod tests {
     fn open_tracks_file_extension() {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
-        monitor.handle_event(open(1, 0, "/tmp/secret.enc"), &mut outputs);
-        monitor.handle_event(open(1, 0, "/tmp/data.pdf"), &mut outputs);
-        monitor.handle_event(open(1, 0, "/tmp/backup.tar.gz"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/tmp/secret.enc"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/tmp/data.pdf"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/tmp/backup.tar.gz"), &mut outputs);
 
         let stats = monitor.stats.get(&1).unwrap();
         assert_eq!(stats.extensions.get("enc"), Some(&1));
@@ -1970,8 +1921,8 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3, WINDOW_SECS = 1
         let mut outputs = Vec::new();
         // Add 2 opens
-        monitor.handle_event(open(1, 0, "/a"), &mut outputs);
-        monitor.handle_event(open(1, 0, "/b"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/a"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/b"), &mut outputs);
         assert_eq!(monitor.stats.get(&1).unwrap().window_opens, 2);
         // Simulate time passing by manipulating the window directly
         if let Some(window) = monitor.windows.get_mut(&1) {
@@ -1981,7 +1932,7 @@ mod tests {
             }
         }
         // Next open should evict old entries
-        monitor.handle_event(open(1, 0, "/c"), &mut outputs);
+        monitor.handle_event(&open(1, 0, "/c"), &mut outputs);
         // Only the new entry should remain
         assert_eq!(monitor.stats.get(&1).unwrap().window_opens, 1);
     }
@@ -1993,7 +1944,7 @@ mod tests {
         monitor.threshold = 0; // Disable alerts
         let mut outputs = Vec::new();
         for _ in 0..100 {
-            monitor.handle_event(open(1, 0, "/x"), &mut outputs);
+            monitor.handle_event(&open(1, 0, "/x"), &mut outputs);
         }
         let alerts = outputs
             .iter()
@@ -2009,7 +1960,7 @@ mod tests {
         monitor.auto_kill = true;
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(open(99, 1000, "/tmp/evil"), &mut outputs);
+            monitor.handle_event(&open(99, 1000, "/tmp/evil"), &mut outputs);
         }
         monitor.drain_display_events(&mut outputs);
         let actions: Vec<_> = outputs
@@ -2034,7 +1985,7 @@ mod tests {
         monitor.auto_kill = true;
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(open(4242, 1000, "/tmp/evil"), &mut outputs);
+            monitor.handle_event(&open(4242, 1000, "/tmp/evil"), &mut outputs);
         }
         match outputs.iter().find_map(|o| match o {
             Output::Action(a) => Some(a),
@@ -2075,7 +2026,7 @@ mod tests {
         monitor.auto_kill = true;
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(open(77, 1000, "/tmp/evil"), &mut outputs);
+            monitor.handle_event(&open(77, 1000, "/tmp/evil"), &mut outputs);
         }
         assert_eq!(hits.load(Ordering::SeqCst), 1, "responder called once");
         let action = outputs
@@ -2102,7 +2053,7 @@ mod tests {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
         for i in 0..20 {
-            monitor.handle_event(open(1, 0, &format!("/tmp/file{i}.txt")), &mut outputs);
+            monitor.handle_event(&open(1, 0, &format!("/tmp/file{i}.txt")), &mut outputs);
         }
         let top = monitor.top_files(5);
         assert_eq!(top.len(), 5);
@@ -2114,20 +2065,7 @@ mod tests {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
         // PID with unknown parent (not in pid_to_ppid)
-        monitor.handle_event(
-            RecordedEvent {
-                ts_ns: 0,
-                kind: Kind::Exec,
-                pid: 500,
-                uid: 0,
-                comm: "orphan".into(),
-                file: None,
-                extension: None,
-                argv: None,
-                bytes: None,
-            },
-            &mut outputs,
-        );
+        monitor.handle_event(&make_event(EVENT_EXECVE, 500, 0, "orphan", ""), &mut outputs);
         let tree = monitor.build_process_tree();
         assert_eq!(tree.len(), 1, "orphan becomes a root");
         assert_eq!(tree[0].pid, 500);
@@ -2214,7 +2152,7 @@ mod tests {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
         for _ in 0..5 {
-            monitor.handle_event(open(7, 0, "/a"), &mut outputs);
+            monitor.handle_event(&open(7, 0, "/a"), &mut outputs);
         }
         assert_eq!(monitor.stats.get(&7).unwrap().window_opens, 5);
         // Age every timestamp past the window, as if the process went quiet.
@@ -2231,8 +2169,8 @@ mod tests {
     fn idle_pids_are_evicted_and_active_ones_kept() {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
-        monitor.handle_event(open(10, 0, "/a"), &mut outputs);
-        monitor.handle_event(open(11, 0, "/b"), &mut outputs);
+        monitor.handle_event(&open(10, 0, "/a"), &mut outputs);
+        monitor.handle_event(&open(11, 0, "/b"), &mut outputs);
         *monitor.last_seen.get_mut(&10).unwrap() -=
             Duration::from_secs(IDLE_PID_TTL_SECS + 1);
         monitor.prune_idle();
@@ -2250,12 +2188,9 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..4 {
-            monitor.handle_event(open(20, 0, "/a.txt"), &mut outputs);
-            let mut exec = open(20, 0, "/bin/true");
-            exec.kind = Kind::Exec;
-            exec.file = None;
-            exec.extension = None;
-            monitor.handle_event(exec, &mut outputs);
+            monitor.handle_event(&open(20, 0, "/a.txt"), &mut outputs);
+            let exec = make_event(EVENT_EXECVE, 20, 0, "probe", "");
+            monitor.handle_event(&exec, &mut outputs);
         }
         assert!(
             outputs.iter().any(|o| matches!(o, Output::Alert(_))),
@@ -2271,7 +2206,7 @@ mod tests {
         let mut outputs = Vec::new();
         for pid in 1..=40u32 {
             for _ in 0..pid {
-                monitor.handle_event(open(pid, 0, "/f"), &mut outputs);
+                monitor.handle_event(&open(pid, 0, "/f"), &mut outputs);
             }
         }
         let top = monitor.stats_top(5);
@@ -2293,16 +2228,15 @@ mod tests {
         let mut monitor = Monitor::dummy().with_ignored_comms(["probe"]); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..10 {
-            monitor.handle_event(open(5, 0, "/tmp/x"), &mut outputs);
+            monitor.handle_event(&open(5, 0, "/tmp/x"), &mut outputs);
         }
         assert!(!outputs.iter().any(|o| matches!(o, Output::Alert(_))));
         assert_eq!(monitor.stats.get(&5).unwrap().total_opens, 10);
         assert_eq!(monitor.stats.get(&5).unwrap().alerts, 0);
         // A different process name is unaffected.
-        let mut other = open(6, 0, "/tmp/y");
-        other.comm = "evil".into();
+        let other = make_event(EVENT_OPENAT, 6, 0, "evil", "/tmp/y");
         for _ in 0..3 {
-            monitor.handle_event(other.clone(), &mut outputs);
+            monitor.handle_event(&other, &mut outputs);
         }
         assert!(outputs.iter().any(|o| matches!(o, Output::Alert(_))));
     }
