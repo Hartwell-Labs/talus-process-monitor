@@ -123,6 +123,35 @@ fn emit_event(ctx: &TracePointContext, event_type: u8, filename_arg: u32) -> u32
         }
     }
 
+    // ── Kernel-side noise filtering ──────────────────────────────────────
+    // Drop high-volume, low-signal openat events at the source. find/pacman/xargs
+    // scans generate hundreds of thousands of openat syscalls on virtual fs
+    // and system-library paths; none are relevant to ransomware detection
+    // (which targets user data, config and persistence paths).
+    //
+    // Filtered:  /proc  /sys  /dev  /run  /usr  /var  /etc/ld.so
+    // Kept:      /home  /root  /opt  /tmp  /mnt  /srv  /etc/* (config)  /etc/ld.so.preload
+    if event_type == EVENT_OPENAT {
+        let f = &event.filename;
+        if f[0] == b'/' {
+            let is_noise =
+                (f[1] == b'p' && f[2] == b'r' && f[3] == b'o')  // /proc*
+                || (f[1] == b's' && f[2] == b'y' && f[3] == b's') // /sys*
+                || (f[1] == b'd' && f[2] == b'e' && f[3] == b'v') // /dev*
+                || (f[1] == b'r' && f[2] == b'n' && f[3] == b'u') // /run*
+                || (f[1] == b'u' && f[2] == b's' && f[3] == b'r') // /usr/* (libs, locale, docs)
+                || (f[1] == b'v' && f[2] == b'a' && f[3] == b'r') // /var/* (caches, logs, dpkg)
+                // /etc/ld.so.cache — but keep /etc/ld.so.preload (persistence target)
+                || (f[1] == b'e' && f[2] == b't' && f[3] == b'c'
+                    && f[4] == b'/' && f[5] == b'l' && f[6] == b'd'
+                    && f[7] == b'.' && f[8] == b's' && f[9] == b'o'
+                    && f[10] == b'/' && f[11] != b'p'); // not /etc/ld.so.preload
+            if is_noise {
+                return 0;
+            }
+        }
+    }
+
     EVENTS.output(ctx, &event, 0);
     0
 }

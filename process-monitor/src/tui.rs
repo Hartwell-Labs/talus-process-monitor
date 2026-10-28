@@ -39,7 +39,9 @@ use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::{StatefulWidget, Widget};
 
 use crate::license::LicenseState;
-use crate::monitor::{FileRank, Monitor, Output, ProcStats, RateSample};
+use crate::monitor::{
+    FileRank, Monitor, Output, ProcStats, RateSample, TUI_SNAPSHOT_EVENT_CAP,
+};
 
 /// Processes that produce too many events to display (polling, IPC, etc.)
 const NOISY_COMMS: &[&str] = &[
@@ -166,7 +168,7 @@ struct Snapshot {
 }
 
 /// Minimum interval between full (heavy) snapshots built by the poll thread.
-const HEAVY_REFRESH: Duration = Duration::from_millis(200);
+const HEAVY_REFRESH: Duration = Duration::from_millis(1000);
 /// Max processes carried per heavy snapshot (busiest by window + heaviest by lifetime).
 const TUI_PROC_LIMIT: usize = 128;
 
@@ -1708,7 +1710,7 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
     let h = thread::Builder::new()
         .name("poll".into())
         .spawn(move || loop {
-            let evts: Vec<Evt> = monitor
+            let mut evts: Vec<Evt> = monitor
                 .poll()
                 .into_iter()
                 .filter_map(|o| match o {
@@ -1735,6 +1737,14 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                     Output::Action(_) => None,
                 })
                 .collect();
+            // Cap the number of events in each snapshot to prevent render
+            // stalls when the monitor has accumulated a backlog (e.g.
+            // 10K+ events per 33ms cycle during find/pacman scans).
+            // Only the most recent TUI_SNAPSHOT_EVENT_CAP events are kept.
+            if evts.len() > TUI_SNAPSHOT_EVENT_CAP {
+                let skip = evts.len() - TUI_SNAPSHOT_EVENT_CAP;
+                evts.drain(..skip);
+            }
             let refresh = last_heavy.is_none_or(|t| t.elapsed() >= HEAVY_REFRESH);
             if refresh || !evts.is_empty() {
                 let snap = if refresh {
@@ -1786,7 +1796,7 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                     break;
                 }
             }
-            thread::sleep(Duration::from_millis(16));
+            thread::sleep(Duration::from_millis(100)); // 10 FPS cap — monitoring, not gaming
         })?;
     let app = App_::new(rx, &license);
     // The default frame budget (16 ms, frame skipping allowed) makes the
