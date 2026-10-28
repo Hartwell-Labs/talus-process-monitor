@@ -1715,7 +1715,7 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                 .into_iter()
                 .filter_map(|o| match o {
                     Output::Event(ev) => Some(Evt {
-                        ts: ev.ts,
+                        ts: crate::monitor::format_ktime(ev.ts_ns),
                         kind: format!("{:?}", ev.kind),
                         pid: ev.pid,
                         comm: ev.comm,
