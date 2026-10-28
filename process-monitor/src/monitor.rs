@@ -45,9 +45,12 @@ const MEMLP_TRAIN_INTERVAL: u64 = 10;
 pub const TUI_SNAPSHOT_EVENT_CAP: usize = 50;
 /// Upper bound on the Monitor's internal event ring buffer. When full, oldest
 /// entries are evicted (FIFO) — only the tail survives to be drained into TUI
-/// snapshots. 256 entries is enough to cover a 100ms poll cycle at even 2.5K
+/// snapshots. 256 entries is enough to cover a 200ms poll cycle at even 1.3K
 /// events/sec while keeping memory bounded.
 const MONITOR_EVENT_RING_CAP: usize = 256;
+/// Maximum events processed per poll() call. Bounds frame time so the TUI
+/// thread never falls behind by more than one poll cycle.
+const POLL_MAX_EVENTS: usize = 2000;
 
 // ── eBPF event record (must match kernel-side #[repr(C)]) ────────────────
 
@@ -505,7 +508,7 @@ impl Monitor {
             .try_into()
             .context("'EVENTS' is not a PerfEventArray")?;
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(8);
         let reader = spawn_reader(perf_array, tx)?;
 
         let now = Instant::now();
@@ -568,22 +571,26 @@ impl Monitor {
 
     pub fn poll(&mut self) -> Vec<Output> {
         let mut outputs = Vec::new();
-        while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                Msg::Lost(n) => self.total_lost += n,
-                Msg::Events(batch) => {
-                    // Process a batch of raw events. Conversion to RecordedEvent
-                    // is deferred here so the reader thread just ships cheap
-                    // Copy structs across the channel.
-                    self.total_events += batch.len() as u64;
-                    for (raw, latency_ns) in batch {
+        // Cap total events processed per poll to bound frame time. Even with
+        // sync_channel backpressure, a burst can queue several batches; capping
+        // prevents the poll thread from falling further behind.
+        let mut remaining: usize = POLL_MAX_EVENTS;
+        while remaining > 0 {
+            match self.rx.try_recv() {
+                Ok(Msg::Lost(n)) => {
+                    self.total_lost += n;
+                }
+                Ok(Msg::Events(batch)) => {
+                    let take = batch.len().min(remaining);
+                    self.total_events += take as u64;
+                    for (raw, latency_ns) in batch.into_iter().take(take) {
                         self.record_latency(latency_ns);
                         let ev = to_recorded(&raw);
-                        // handle_event takes ownership: it processes alerts/actions
-                        // and moves ev into the ring buffer (no clone needed).
                         self.handle_event(ev, &mut outputs);
                     }
+                    remaining = remaining.saturating_sub(take);
                 }
+                Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
         // Accumulate rate samples every ~1 second.
@@ -1190,7 +1197,7 @@ fn shannon_entropy(s: &str) -> f64 {
 /// Returns an error if CPU enumeration fails or if the thread cannot be spawned.
 fn spawn_reader(
     mut perf_array: PerfEventArray<MapData>,
-    tx: mpsc::Sender<Msg>,
+    tx: mpsc::SyncSender<Msg>,
 ) -> Result<thread::JoinHandle<()>> {
     let cpus = online_cpus()
         .map_err(|(err, io)| anyhow::anyhow!("failed to enumerate CPUs: {err}: {io}"))?;
@@ -1483,7 +1490,7 @@ fn cstr_to_string(arr: &[u8]) -> String {
 #[cfg(test)]
 impl Monitor {
     pub(crate) fn dummy() -> Self {
-        let (_tx, rx) = mpsc::channel();
+        let (_tx, rx) = mpsc::sync_channel(8);
         let handle = thread::spawn(|| loop {
             thread::sleep(Duration::from_secs(60));
         });
