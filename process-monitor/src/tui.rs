@@ -20,6 +20,7 @@ use ftui_extras::charts::{
 };
 use ftui_extras::text_effects::{StyledText, TextEffect};
 use ftui_layout::{Constraint, Flex};
+use ftui_render::budget::FrameBudgetConfig;
 use ftui_render::cell::PackedRgba;
 use ftui_render::frame::Frame;
 use ftui_runtime::program::{App, Cmd, Model};
@@ -1788,9 +1789,16 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
             thread::sleep(Duration::from_millis(16));
         })?;
     let app = App_::new(rx, &license);
+    // The default frame budget (16 ms, frame skipping allowed) makes the
+    // runtime skip `present` whenever the dashboard takes longer than that to
+    // render (easy in debug builds or with a large log). `dirty` then stays
+    // set and the terminal keeps showing the first frame ("0 events"). A
+    // monitoring dashboard must always present, so use a generous budget and
+    // never skip frames.
     let res = App::new(app)
         .screen_mode(ScreenMode::AltScreen)
         .with_mouse()
+        .with_budget(FrameBudgetConfig::strict(Duration::from_millis(250)))
         .run();
     let _ = h.join();
     res.map_err(|e| anyhow::anyhow!("tui: {}", e))
