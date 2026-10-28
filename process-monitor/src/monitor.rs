@@ -1089,20 +1089,25 @@ const MAX_TRACKED_EXTS: usize = 4_096;
 
 /// Like [`bump_count`], but the map never holds more than `cap` keys.
 ///
-/// Behaviour is identical until the map is full. When a *new* key arrives at
-/// the cap, one-hit keys (the long tail) are pruned first; if the map is
-/// still full of repeat keys, the new key is not tracked. The hot keys that
-/// drive the rankings are never evicted, so `top_files` stays accurate.
+/// When the map is well under `cap`, behaviour is identical: increment if the
+/// key exists, insert if not.
+///
+/// Once the map exceeds `cap + cap/10` (10 % headroom), a lazy eviction pass
+/// prunes one-hit keys (the long tail). Between eviction passes, new keys at
+/// the cap are silently dropped — the hot keys that drive rankings are never
+/// evicted, and the O(n) retain cost is amortised over cap/10 insertions
+/// instead of running on every call.
 fn bump_count_capped(map: &mut HashMap<String, u64>, key: &str, cap: usize) {
     if let Some(c) = map.get_mut(key) {
         *c += 1;
         return;
     }
-    if map.len() >= cap {
+    // Only evict when 10 % over cap — avoids an O(cap) retain on every insert.
+    if map.len() >= cap + (cap / 10) {
         map.retain(|_, c| *c > 1);
-        if map.len() >= cap {
-            return;
-        }
+    }
+    if map.len() >= cap {
+        return;
     }
     map.insert(key.to_owned(), 1);
 }
