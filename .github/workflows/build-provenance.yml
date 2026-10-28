@@ -83,13 +83,13 @@ jobs:
       - name: Build TUI binary
         run: |
           cargo build --release
-          cp target/release/process-monitor talus-tui
+          cp target/release/talus-monitor talus-tui
 
       # ── Build Web variant ──────────────────────────────────────────────
       - name: Build Web binary
         run: |
           cargo build --release
-          cp target/release/process-monitor talus-web
+          cp target/release/talus-monitor talus-web
 
       # ── Build eBPF object ─────────────────────────────────────────────
       # The recipe from build.sh. Three details of it are load-bearing:
@@ -158,10 +158,11 @@ jobs:
 
       # ── SBOM for release ───────────────────────────────────────────────
       - name: Generate release SBOM
+        continue-on-error: true
         run: |
           cargo install cargo-cyclonedx
-          cargo cyclonedx --format json --output-dir sbom-release/
-          cp sbom-release/*.json talus-sbom-cyclonedx.json 2>/dev/null || true
+          cargo cyclonedx --format json
+          cp bom.json talus-sbom-cyclonedx.json 2>/dev/null || true
 
       # ── Upload artifacts ───────────────────────────────────────────────
       - name: Upload build artifacts

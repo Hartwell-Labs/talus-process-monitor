@@ -99,6 +99,29 @@ enum Commands {
     },
     /// Run the eBPF monitor (default command)
     Monitor(MonitorArgs),
+    /// Check GitHub for a newer release; install it only with --install.
+    /// Never runs automatically.
+    Update(UpdateArgs),
+}
+
+#[derive(Parser)]
+/// Options for the opt-in updater.
+pub struct UpdateArgs {
+    /// Download, verify (SHA-256) and install the latest release
+    #[arg(long)]
+    install: bool,
+
+    /// Skip the confirmation prompt when installing
+    #[arg(short, long)]
+    yes: bool,
+
+    /// GitHub repository to update from (owner/name)
+    #[arg(long, default_value = crate::update::DEFAULT_REPO, value_name = "OWNER/NAME")]
+    repo: String,
+
+    /// Release asset to install
+    #[arg(long, default_value = crate::update::DEFAULT_ASSET, value_name = "NAME")]
+    asset: String,
 }
 
 #[derive(Subcommand)]
@@ -202,6 +225,11 @@ pub struct MonitorArgs {
     /// MemGraph URL (e.g. http://localhost:7474) — enables process graph (requires Enterprise license)
     #[arg(long, value_name = "URL")]
     memgraph: Option<String>,
+
+    /// Suppress burst alerts for this process name (repeatable), e.g. --ignore-comm rsync.
+    /// Events are still counted and displayed; only the alert is skipped.
+    #[arg(long = "ignore-comm", value_name = "NAME")]
+    ignore_comm: Vec<String>,
 
     /// Enable the MeMLP neural detection engine (built-in, trains online from live events)
     #[arg(long)]
@@ -315,6 +343,10 @@ pub fn main_with(hooks: Hooks) -> Result<()> {
 
         // ── Monitor — default command (requires root) ─────────────────
         Some(Commands::Monitor(args)) => run_monitor(args, hooks),
+        // ── Opt-in updater — no root required, never automatic ─────────
+        Some(Commands::Update(args)) => {
+            crate::update::run(&args.repo, args.install, args.yes, &args.asset)
+        }
         None => run_monitor(MonitorArgs::default(), hooks),
     }
 }
@@ -340,6 +372,7 @@ impl Default for MonitorArgs {
             memgraph: None,
             memlp: false,
             memlp_checkpoint: None,
+            ignore_comm: Vec::new(),
         }
     }
 }
@@ -416,6 +449,9 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
     let mut monitor = monitor;
     if let Some(r) = hooks.responder {
         monitor = monitor.with_responder(r);
+    }
+    if !args.ignore_comm.is_empty() {
+        monitor = monitor.with_ignored_comms(&args.ignore_comm);
     }
 
     // ── MeMLP neural engine (load checkpoint when given) ──────────────
@@ -496,6 +532,12 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
                 "neural engine ON ({})",
                 monitor.memlp_stats().map(|(_, p)| p).unwrap_or(0)
             )
+        );
+    }
+    if !args.ignore_comm.is_empty() {
+        eprintln!(
+            "  \x1b[36m║\x1b[0m  Ignoring: {:<38} \x1b[36m║\x1b[0m",
+            format!("alerts for {} process name(s)", args.ignore_comm.len())
         );
     }
     if args.auto_kill {

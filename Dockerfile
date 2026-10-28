@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p process-monitor
+RUN cargo build --release -p talus-process-monitor
 
 # ── Stage 2: Runtime ──
 FROM debian:bookworm-slim
@@ -17,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r talus && useradd -r -g talus -m -s /bin/false talus
 RUN mkdir -p /etc/talus && chown talus:talus /etc/talus && chmod 700 /etc/talus
 
-COPY --from=builder /src/target/release/process-monitor /usr/local/bin/
-RUN chmod +x /usr/local/bin/process-monitor
+COPY --from=builder /src/target/release/talus-monitor /usr/local/bin/
+RUN chmod +x /usr/local/bin/talus-monitor
 
 # License file mount point (optional)
 # Mount your license.dat to /etc/talus/license.dat
@@ -26,7 +26,7 @@ RUN chmod +x /usr/local/bin/process-monitor
 
 # Health check: verify the binary runs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD process-monitor --version || exit 1
+    CMD talus-monitor --version || exit 1
 
 EXPOSE 0
-ENTRYPOINT ["process-monitor"]
+ENTRYPOINT ["talus-monitor"]

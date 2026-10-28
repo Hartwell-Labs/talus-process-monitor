@@ -23,7 +23,7 @@ Prefer building from source?
 ```bash
 git clone https://github.com/BartoszOsiej/talus-process-monitor.git
 cd talus-process-monitor && ./build.sh
-sudo ./target/release/process-monitor monitor
+sudo ./target/release/talus-monitor monitor
 ```
 
 - Free agent, MIT: https://github.com/BartoszOsiej/talus-process-monitor

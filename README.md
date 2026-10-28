@@ -48,7 +48,7 @@ pip install talus-process-monitor && talus-monitor install
 sudo talus-monitor run monitor --auto-kill
 
 # Or build from source (~2 min):
-./build.sh && sudo ./target/release/process-monitor monitor --auto-kill
+./build.sh && sudo ./target/release/talus-monitor monitor --auto-kill
 ```
 
 <div align="center">
@@ -114,10 +114,10 @@ cd talus-process-monitor
 ./build.sh                      # or: ./install.sh --system
 
 # 2. Run it — monitor-only mode
-sudo ./target/release/process-monitor monitor
+sudo ./target/release/talus-monitor monitor
 
 # 3. Or full EDR mode: detect + auto-kill
-sudo ./target/release/process-monitor monitor --auto-kill
+sudo ./target/release/talus-monitor monitor --auto-kill
 ```
 
 Pre-built binaries and container images: see [Releases](https://github.com/BartoszOsiej/talus-process-monitor/releases) (`process-monitor` static binary) and [Docker / Kubernetes](#docker--kubernetes).
@@ -137,7 +137,7 @@ Reproduce the demo above in two terminals:
 
 ```bash
 # Terminal 1 — Talus with a low threshold and auto-kill
-sudo ./target/release/process-monitor monitor --alert-threshold 50 --auto-kill
+sudo ./target/release/talus-monitor monitor --alert-threshold 50 --auto-kill
 
 # Terminal 2 — simulate ransomware-like mass file encryption
 for i in $(seq 1 500); do touch /tmp/victim$i.enc && cat /tmp/victim$i.enc >/dev/null; done
@@ -348,11 +348,33 @@ The threshold is configurable at runtime via the API or CLI:
 
 ```bash
 # Lower threshold for high-security environments
-sudo process-monitor monitor --alert-threshold 20
+sudo talus-monitor monitor --alert-threshold 20
 
 # Filter by extension (e.g. detect .enc/.pdf mass opens)
-sudo process-monitor monitor --filter-ext enc
+sudo talus-monitor monitor --filter-ext enc
 ```
+
+Cut false positives from known-busy, trusted programs (backups, compilers, indexers) with
+`--ignore-comm` (repeatable). Their events are still counted and shown; only the burst
+alert, and any response driven by it, is skipped. Names match the kernel `comm` (max 15 bytes):
+
+```bash
+sudo talus-monitor monitor --ignore-comm rsync --ignore-comm cc1plus
+```
+
+Only ignore programs you trust: an attacker who can rename their binary to an ignored name
+would not be alerted on.
+
+### Updating (opt-in)
+
+```bash
+talus-monitor update            # check only, changes nothing
+talus-monitor update --install  # download, verify SHA-256, replace the binary (asks y/N)
+```
+
+The monitor never contacts the network on its own; `update` runs only when you type it.
+The checksum comes from the same release as the binary, so it detects corruption, not a
+compromised release: verify the cosign signature from the release notes if that matters to you.
 
 ### Response: automated termination
 
@@ -360,7 +382,7 @@ With `--auto-kill`, Talus sends `SIGKILL` to the offending process immediately o
 
 ```bash
 # EDR mode: detect + respond
-sudo process-monitor monitor --alert-threshold 50 --auto-kill
+sudo talus-monitor monitor --alert-threshold 50 --auto-kill
 ```
 
 ```rust
@@ -400,10 +422,10 @@ The engine **trains online**: every alert performs a backpropagation step (cross
 
 ```bash
 # Enable the neural engine (checkpoint auto-saves every 30s)
-sudo process-monitor monitor --memlp
+sudo talus-monitor monitor --memlp
 
 # Explicit checkpoint location (loaded on start, saved on shutdown + autosave)
-sudo process-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
+sudo talus-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
 ```
 
 Alerts carry the neural verdict in every output channel:
@@ -435,33 +457,33 @@ Alerts carry the neural verdict in every output channel:
 
 ```bash
 # EDR mode — detect and auto-kill
-sudo process-monitor monitor --auto-kill
+sudo talus-monitor monitor --auto-kill
 
 # Lower threshold for stricter detection
-sudo process-monitor monitor --auto-kill --alert-threshold 20
+sudo talus-monitor monitor --auto-kill --alert-threshold 20
 
 # Monitor only (no kill)
-sudo process-monitor monitor
+sudo talus-monitor monitor
 
 # Filter by extension
-sudo process-monitor monitor --filter-ext pdf
+sudo talus-monitor monitor --filter-ext pdf
 
 # JSON output for external pipelines
-sudo process-monitor monitor --json | jq .
+sudo talus-monitor monitor --json | jq .
 
 # Plain text log
-sudo process-monitor monitor --plain
+sudo talus-monitor monitor --plain
 
 # The web dashboard is not in this build.
-sudo process-monitor monitor --web 0.0.0.0:8080
+sudo talus-monitor monitor --web 0.0.0.0:8080
 #   -> "--web is an Enterprise feature and is not in this build."
 
 # MeMLP neural detection engine (online training + JSON checkpoints)
-sudo process-monitor monitor --memlp
-sudo process-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
+sudo talus-monitor monitor --memlp
+sudo talus-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json
 
 # Self-diagnostic
-sudo process-monitor monitor --diagnose
+sudo talus-monitor monitor --diagnose
 ```
 
 ### CLI Reference
@@ -497,7 +519,7 @@ sudo process-monitor monitor --diagnose
 
 | Variant | Size | Dependencies |
 |---|---|---|
-| `process-monitor-tui` | 1.7MB | aya, frankentui (ftui), chrono, crossterm |
+| `talus-monitor` | 1.7MB | aya, frankentui (ftui), chrono, crossterm |
 | `process-monitor-web` | 2.5MB | +axum, tokio, tower-http, prometheus-client |
 
 ---
@@ -538,7 +560,7 @@ are built from a private crate and are not in this repository — see
 What this build does with `--web`:
 
 ```
-$ process-monitor monitor --web 0.0.0.0:8080
+$ talus-monitor monitor --web 0.0.0.0:8080
 --web is an Enterprise feature and is not in this build.
 This binary is MIT licensed and contains no dashboard code.
 ```
@@ -616,14 +638,14 @@ Talus has been **deployed and tested on real hardware** running Linux:
 ls /sys/kernel/tracing/events/syscalls/sys_enter_execve/id
 
 # Load and attach eBPF programs
-sudo process-monitor monitor --diagnose
+sudo talus-monitor monitor --diagnose
 
 # Watch live events in another terminal
 ls -la /tmp
 # → Talus shows: 14:09:16 OPEN [29645] bash → /tmp
 
 # Test auto-kill
-sudo process-monitor monitor --alert-threshold 3 --auto-kill
+sudo talus-monitor monitor --alert-threshold 3 --auto-kill
 # In another terminal: for i in $(seq 1 100); do touch /tmp/f$i; done
 # → Talus kills the process after 3 opens in 1s
 
@@ -709,8 +731,8 @@ Each entry = SHA-256(HMAC(machine_key, prev_hash + timestamp + event + license_i
 | `SANDBOX_DEGRADED` | seccomp filter could not be installed — the agent runs unhardened and says so in the audit trail |
 
 ```bash
-process-monitor license audit-log          # Show last 20 entries
-process-monitor license verify-audit       # Verify hash chain integrity
+talus-monitor license audit-log          # Show last 20 entries
+talus-monitor license verify-audit       # Verify hash chain integrity
 ```
 
 **Tamper-evidence & concurrency hardening:** appends take an exclusive file
@@ -811,15 +833,15 @@ contact@hartwell-labs.pl.
 ### License Management
 
 ```bash
-process-monitor license show              # View license status
-process-monitor license activate <KEY>    # Activate online
-process-monitor license deactivate        # Deactivate
-process-monitor license export-json       # Export as JSON
-process-monitor license backup license.json       # Backup
-process-monitor license restore license.json      # Restore
-process-monitor license transfer          # Transfer to another machine
-process-monitor license audit-log         # View audit trail
-process-monitor license verify            # Verify validity
+talus-monitor license show              # View license status
+talus-monitor license activate <KEY>    # Activate online
+talus-monitor license deactivate        # Deactivate
+talus-monitor license export-json       # Export as JSON
+talus-monitor license backup license.json       # Backup
+talus-monitor license restore license.json      # Restore
+talus-monitor license transfer          # Transfer to another machine
+talus-monitor license audit-log         # View audit trail
+talus-monitor license verify            # Verify validity
 ```
 
 ### 30-Day Enterprise Trial
@@ -898,7 +920,7 @@ neither a key nor a checkout.
 ```
 talus-keygen issue ──► signed key (Ed25519) ──► customer
                                                   │
-                                        process-monitor license activate <KEY>
+                                        talus-monitor license activate <KEY>
                                                   ▼
               Cloudflare Worker + D1 (primary, free tier) ── signature
               check, expiry, revocation, seat limits ──► activation token
@@ -907,7 +929,7 @@ talus-keygen issue ──► signed key (Ed25519) ──► customer
 ```
 
 Checkout runs on Stripe. A successful payment issues the key by email, and
-`process-monitor license activate <KEY>` binds it to one machine. Keys are
+`talus-monitor license activate <KEY>` binds it to one machine. Keys are
 signed offline and stored only as hashes, so a stolen database does not yield
 a usable licence.
 

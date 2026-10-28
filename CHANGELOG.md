@@ -6,6 +6,42 @@ All notable changes to talus-process-monitor will be documented in this file.
 
 ### Changed
 - Version 0.8.2 unified across Cargo.toml, CHANGELOG.md, and the v0.8.2 tag.
+- TUI: 70/30 split (event stream | telemetry + detail panel), first-run gateway
+  frame, live events/s and CPU%. `TALUS_TUI_DEMO=1` pins demo numbers and labels them DEMO.
+- Performance: no per-event `String` allocation in the hot path; `top_files` selects the
+  top-n before computing extension/entropy; the TUI poll thread builds full snapshots at
+  most every 200 ms (line charts now advance ~5x/s, so 120 points span ~24 s).
+- MeMLP: new `memlp.rs` (allocation-free inference/training, replay + anchor training,
+  fixed backprop ordering, He init, structural checkpoint validation, atomic
+  skip-if-unchanged saves, case-insensitive ransomware extensions). Checkpoint format
+  is unchanged (version 1), so existing checkpoints still load.
+
+### Added
+- `talus-monitor update` — opt-in release check; `--install` downloads, verifies the
+  SHA-256 from `checksums-sha256.txt` and replaces the binary (keeps `<exe>.prev`).
+  Never runs automatically; the monitor itself makes no network calls.
+
+- `--ignore-comm NAME` (repeatable): suppress burst alerts for trusted, busy programs
+  without hiding their events. Off by default.
+- `Monitor::stats_top(n)`: bounded top-N process stats; the TUI poll thread no longer
+  clones every tracked process (and its extension map) five times a second.
+- Fuzzing: real targets `fuzz_memlp_checkpoint` and `fuzz_event_decode` (via the new
+  `MeMLP::from_json_bytes` and `monitor::decode_event_bytes`), plus unit tests for
+  truncated / hostile checkpoints.
+
+### Fixed
+- Per-PID state (`stats`, windows, parent links, MeMLP features) was never freed; idle PIDs
+  are now evicted (10 min TTL, 30 s while >65k PIDs are tracked).
+- `window_opens` stayed at its peak after a process went quiet, so the TUI showed stale
+  "hot" processes; it now decays every second.
+- The fuzz workflow ran on stable and ignored failures (`|| true`), so it never fuzzed;
+  it now uses the pinned nightly, runs both targets and fails on a crash.
+- Build/packaging referenced a binary named `process-monitor`, but the bin target is
+  `talus-monitor`: Dockerfile (also wrong `-p` package), release workflow, `build.sh`,
+  `install.sh`, `install-gui.sh`, k8s DaemonSet and the READMEs now agree.
+- `Cargo.toml` repository URL now matches the repo the README and updater point to.
+- Global file/extension counters are bounded (50k paths / 4k extensions); hot keys are
+  never evicted, so rankings stay accurate on long-running hosts.
 
 
 ### Security: cross-process audit locking (concurrency fix, 2026-09-28)

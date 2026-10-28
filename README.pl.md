@@ -6,7 +6,7 @@
 
 ```bash
 # Wykryj + zareaguj w jednej linii (build ~2 min)
-./build.sh && sudo ./target/release/process-monitor monitor --auto-kill
+./build.sh && sudo ./target/release/talus-monitor monitor --auto-kill
 ```
 
 <div align="center">
@@ -27,10 +27,10 @@ cd talus-process-monitor
 ./build.sh                      # lub: ./install.sh --system
 
 # tryb monitorowania (bez auto-kill)
-sudo ./target/release/process-monitor monitor
+sudo ./target/release/talus-monitor monitor
 
 # pełny tryb EDR: detekcja + automatyczna odpowiedź
-sudo ./target/release/process-monitor monitor --auto-kill
+sudo ./target/release/talus-monitor monitor --auto-kill
 ```
 
 **Docker (jedna linia):**
@@ -51,7 +51,7 @@ Powtórz demo z góry w dwóch terminalach:
 
 ```bash
 # Terminal 1 — Talus z niskim progiem i auto-kill
-sudo ./target/release/process-monitor monitor --alert-threshold 50 --auto-kill
+sudo ./target/release/talus-monitor monitor --alert-threshold 50 --auto-kill
 
 # Terminal 2 — symulacja masowego "szyfrowania" plików
 for i in $(seq 1 500); do touch /tmp/victim$i.enc && cat /tmp/victim$i.enc >/dev/null; done
@@ -100,7 +100,7 @@ Oczekiwany wynik: w ciągu **~1 sekundy** Talus odpala alert i wysyła `SIGKILL`
 
 ```bash
 ./build.sh --web
-sudo ./target/release/process-monitor monitor --web 0.0.0.0:8080
+sudo ./target/release/talus-monitor monitor --web 0.0.0.0:8080
 ```
 
 REST API + WebSocket (strumień na żywo) + `/metrics` dla Prometheusa.
@@ -108,7 +108,7 @@ REST API + WebSocket (strumień na żywo) + `/metrics` dla Prometheusa.
 ## Rozwiązywanie problemów
 
 ```bash
-sudo ./target/release/process-monitor monitor --diagnose   # 5-sekundowa autodiagnostyka
+sudo ./target/release/talus-monitor monitor --diagnose   # 5-sekundowa autodiagnostyka
 ```
 
 - **Brak zdarzeń** → sprawdź `/sys/kernel/tracing/events/syscalls/`
@@ -131,8 +131,8 @@ Dwie edycje — **Community** (darmowa, MIT) i **Enterprise** (jednorazowa płat
 Przy pierwszym uruchomieniu włącza się **30-dniowy trial Enterprise** — bez karty i rejestracji.
 
 ```bash
-process-monitor license activate <KLUCZ>
-sudo process-monitor monitor --auto-kill --web 0.0.0.0:8443
+talus-monitor license activate <KLUCZ>
+sudo talus-monitor monitor --auto-kill --web 0.0.0.0:8443
 ```
 
 Szczegóły (EN): [README.md](README.md) · przewodnik kupującego: [docs/customer-activation-guide.md](docs/customer-activation-guide.md) · warunki: [docs/EULA.txt](docs/EULA.txt)
