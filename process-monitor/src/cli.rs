@@ -1025,7 +1025,7 @@ pub fn run_json(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> R
                         Kind::Unknown => "unknown",
                     };
                     let value = json!({
-                        "ts": ev.ts,
+                        "ts": crate::monitor::format_ktime(ev.ts_ns),
                         "type": kind,
                         "pid": ev.pid,
                         "uid": ev.uid,
@@ -1103,7 +1103,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                         Kind::Exec => {
                             println!(
                                 "{} {} [{}] {} by uid {}",
-                                ev.ts,
+                                crate::monitor::format_ktime(ev.ts_ns),
                                 "EXEC".green().bold(),
                                 ev.pid,
                                 ev.comm.bold(),
@@ -1114,7 +1114,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                             if let Some(file) = ev.file {
                                 println!(
                                     "{} {} [{}] {} -> {}",
-                                    ev.ts,
+                                    crate::monitor::format_ktime(ev.ts_ns),
                                     "OPEN".blue().bold(),
                                     ev.pid,
                                     ev.comm.dimmed(),
@@ -1127,7 +1127,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                             let addr = ev.file.as_deref().unwrap_or("?");
                             println!(
                                 "{} {} [{}] {} -> {}",
-                                ev.ts,
+                                crate::monitor::format_ktime(ev.ts_ns),
                                 kind_str.magenta().bold(),
                                 ev.pid,
                                 ev.comm.dimmed(),
@@ -1139,7 +1139,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                             let path = ev.file.as_deref().unwrap_or("?");
                             println!(
                                 "{} {} [{}] {} -> {}",
-                                ev.ts,
+                                crate::monitor::format_ktime(ev.ts_ns),
                                 kind_str.yellow().bold(),
                                 ev.pid,
                                 ev.comm.dimmed(),
@@ -1150,7 +1150,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                             let details = ev.argv.as_deref().unwrap_or("?");
                             println!(
                                 "{} {} [{}] {} -> {}",
-                                ev.ts,
+                                crate::monitor::format_ktime(ev.ts_ns),
                                 "KILL".red().bold(),
                                 ev.pid,
                                 ev.comm.bold(),

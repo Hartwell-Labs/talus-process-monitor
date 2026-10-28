@@ -30,7 +30,7 @@ pub struct StorageEvent {
 impl From<&RecordedEvent> for StorageEvent {
     fn from(ev: &RecordedEvent) -> Self {
         Self {
-            ts: ev.ts.clone(),
+            ts: crate::monitor::format_ktime(ev.ts_ns),
             kind: format!("{:?}", ev.kind),
             pid: ev.pid,
             uid: ev.uid,

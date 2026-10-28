@@ -10,7 +10,6 @@ use aya::maps::{MapData, PerfEventArray};
 use aya::programs::TracePoint;
 use aya::util::online_cpus;
 use aya::Ebpf;
-use chrono::Local;
 
 pub const EVENT_EXECVE: u8 = 0;
 pub const EVENT_OPENAT: u8 = 1;
@@ -98,7 +97,11 @@ pub enum Kind {
 
 #[derive(Debug, Clone)]
 pub struct RecordedEvent {
-    pub ts: String,
+    /// Kernel monotonic timestamp (ns) from the eBPF tracepoint. Formatted
+    /// to a display string only when surfacing to the TUI (50×/poll) or creating
+    /// an Alert — NOT per event in to_recorded(). This alone eliminates the
+    /// single biggest allocation hot path at 30K evts/s.
+    pub ts_ns: u64,
     pub kind: Kind,
     pub pid: u32,
     pub uid: u32,
@@ -646,13 +649,19 @@ impl Monitor {
     }
 
     /// Move events from the internal ring buffer into `outputs`, capped at
-    /// [`TUI_SNAPSHOT_EVENT_CAP`].  Excess events in the ring are discarded.
+    /// [`TUI_SNAPSHOT_EVENT_CAP`].  The **most recent** events are kept; older
+    /// ones are dropped so the TUI always shows the tail, not the head.
     pub fn drain_display_events(&mut self, outputs: &mut Vec<Output>) {
-        let drain = self.event_ring.len().min(TUI_SNAPSHOT_EVENT_CAP);
-        for _ in 0..drain {
-            outputs.push(Output::Event(self.event_ring.pop_front().unwrap()));
+        let len = self.event_ring.len();
+        let skip = len.saturating_sub(TUI_SNAPSHOT_EVENT_CAP);
+        // Drop oldest from front.
+        for _ in 0..skip {
+            self.event_ring.pop_front();
         }
-        self.event_ring.clear();
+        // Drain the remaining (newest) events in order.
+        for ev in self.event_ring.drain(..) {
+            outputs.push(Output::Event(ev));
+        }
     }
 
     #[inline]
@@ -782,7 +791,7 @@ impl Monitor {
                         None
                     };
                     outputs.push(Output::Alert(Alert {
-                        ts: ev.ts.clone(),
+                        ts: format_ktime(ev.ts_ns),
                         pid: ev.pid,
                         uid: ev.uid,
                         comm: ev.comm.clone(),
@@ -802,7 +811,7 @@ impl Monitor {
                             format!("no response sent to PID {} ({})", ev.pid, ev.comm)
                         };
                         outputs.push(Output::Action(ResponseAction {
-                            ts: ev.ts.clone(),
+                            ts: format_ktime(ev.ts_ns),
                             pid: ev.pid,
                             comm: ev.comm.clone(),
                             action,
@@ -1114,6 +1123,40 @@ fn read_ppid_from_proc(pid: u32) -> Option<u32> {
     None
 }
 
+/// Boot time (wall-clock epoch) in nanoseconds, read once from /proc/stat.
+/// ktime_ns (kernel monotonic) + this offset = wall-clock nanosecond timestamp.
+static BOOT_TIME_NS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Convert a kernel monotonic ktime_ns to a "%H:%M:%S.%.3f" wall-clock string.
+/// The boot-time offset is cached on first call (reads /proc/stat once); all
+/// subsequent calls are pure arithmetic — no syscall, no allocation beyond the
+/// returned String. Called only for the 50 displayed events per poll and for
+/// alerts/actions, never per-event in the hot path.
+pub fn format_ktime(ktime_ns: u64) -> String {
+    let boot_ns = *BOOT_TIME_NS.get_or_init(|| {
+        std::fs::read_to_string("/proc/stat")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("btime"))
+                    .and_then(|l| l.strip_prefix("btime "))
+                    .and_then(|s| s.parse::<u64>().ok())
+            })
+            .unwrap_or(0)
+            * 1_000_000_000
+    });
+    let total_ns = boot_ns + ktime_ns;
+    let secs = total_ns / 1_000_000_000;
+    let ms = (total_ns % 1_000_000_000) / 1_000_000;
+    format!(
+        "{:02}:{:02}:{:02}.{:03}",
+        (secs / 3600) % 24,
+        (secs / 60) % 60,
+        secs % 60,
+        ms
+    )
+}
+
 /// Compute normalised Shannon entropy of a byte string (0.0 = uniform, 1.0 = max).
 fn shannon_entropy(s: &str) -> f64 {
     let bytes = s.as_bytes();
@@ -1265,12 +1308,11 @@ pub fn decode_event_bytes(data: &[u8]) -> Option<RecordedEvent> {
 }
 
 fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
-    let ts = Local::now().format("%H:%M:%S%.3f").to_string();
     let argv = raw.argv_str();
     let argv_opt = if argv.is_empty() { None } else { Some(argv) };
     match raw.event_type {
         EVENT_EXECVE => RecordedEvent {
-            ts,
+            ts_ns: raw.ktime_ns,
             kind: Kind::Exec,
             pid: raw.pid,
             uid: raw.uid,
@@ -1284,7 +1326,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
             let filename = raw.filename_str();
             let ext = extract_extension(&filename);
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Open,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1298,7 +1340,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         EVENT_CONNECT => {
             let addr = raw.filename_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Connect,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1312,7 +1354,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         EVENT_ACCEPT => {
             let addr = raw.filename_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Accept,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1327,7 +1369,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
             let addr = raw.filename_str();
             let bytes_str = raw.argv_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::SendTo,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1346,7 +1388,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
             let addr = raw.filename_str();
             let bytes_str = raw.argv_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::RecvFrom,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1364,7 +1406,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         EVENT_MKDIR => {
             let path = raw.filename_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Mkdir,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1378,7 +1420,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         EVENT_UNLINK => {
             let path = raw.filename_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Unlink,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1392,7 +1434,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         EVENT_KILL => {
             let details = raw.argv_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Kill,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1406,7 +1448,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
         EVENT_CHMOD => {
             let path = raw.filename_str();
             RecordedEvent {
-                ts,
+                ts_ns: raw.ktime_ns,
                 kind: Kind::Chmod,
                 pid: raw.pid,
                 uid: raw.uid,
@@ -1418,7 +1460,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
             }
         }
         _ => RecordedEvent {
-            ts,
+            ts_ns: raw.ktime_ns,
             kind: Kind::Unknown,
             pid: raw.pid,
             uid: raw.uid,
@@ -1485,7 +1527,7 @@ mod tests {
 
     fn open(pid: u32, uid: u32, file: &str) -> RecordedEvent {
         RecordedEvent {
-            ts: "00:00:00.000".into(),
+            ts_ns: 0,
             kind: Kind::Open,
             pid,
             uid,
@@ -1556,7 +1598,7 @@ mod tests {
         let mut outputs = Vec::new();
         monitor.handle_event(
             RecordedEvent {
-                ts: "00:00:00.000".into(),
+                ts_ns: 0,
                 kind: Kind::Exec,
                 pid: 9,
                 uid: 0,
@@ -1697,7 +1739,7 @@ mod tests {
         for pid in &[1, 100, 200, 300] {
             monitor.handle_event(
                 RecordedEvent {
-                    ts: "00:00:00.000".into(),
+                    ts_ns: 0,
                     kind: Kind::Exec,
                     pid: *pid,
                     uid: 0,
@@ -1742,7 +1784,7 @@ mod tests {
         for pid in &[1, 2, 3] {
             monitor.handle_event(
                 RecordedEvent {
-                    ts: "00:00:00.000".into(),
+                    ts_ns: 0,
                     kind: Kind::Exec,
                     pid: *pid,
                     uid: 0,
@@ -1776,7 +1818,7 @@ mod tests {
         for pid in &[10, 20] {
             monitor.handle_event(
                 RecordedEvent {
-                    ts: "00:00:00.000".into(),
+                    ts_ns: 0,
                     kind: Kind::Exec,
                     pid: *pid,
                     uid: 0,
@@ -1878,7 +1920,7 @@ mod tests {
         let mut outputs = Vec::new();
         monitor.handle_event(
             RecordedEvent {
-                ts: "00:00:00.000".into(),
+                ts_ns: 0,
                 kind: Kind::Connect,
                 pid: 50,
                 uid: 1000,
@@ -2062,7 +2104,7 @@ mod tests {
         // PID with unknown parent (not in pid_to_ppid)
         monitor.handle_event(
             RecordedEvent {
-                ts: "00:00:00.000".into(),
+                ts_ns: 0,
                 kind: Kind::Exec,
                 pid: 500,
                 uid: 0,
