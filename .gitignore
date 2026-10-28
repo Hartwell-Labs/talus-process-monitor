@@ -41,3 +41,15 @@ pypi/dist/
 
 # embedded eBPF object MUST be tracked (include_bytes!)
 !process-monitor/src/bpf/process_monitor_ebpf.o
+
+# ── Artykuł Linux Magazine — nic nie wchodzi do GitHuba (mail do Lori) ──────
+# Cały tekst + figury są szlifowane lokalnie i wysyłane mailem do redakcji
+# (lwhite@linuxnewmedia.com). Nie commitować ani nie pushować.
+docs/ARTICLE.md
+docs/ARTICLE.pdf
+docs/ARTICLE.docx
+docs/ARTICLE.html
+docs/print.css
+docs/article-images/
+docs/*.png
+
