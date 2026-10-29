@@ -227,9 +227,16 @@ pub struct MonitorArgs {
     memgraph: Option<String>,
 
     /// Suppress burst alerts for this process name (repeatable), e.g. --ignore-comm rsync.
-    /// Events are still counted and displayed; only the alert is skipped.
+    /// Events are still counted and shown in the event log; only the alert is skipped.
+    /// Processes with a suppressed comm are also hidden from the process-tree panel
+    /// unless `--show-ignored` is passed.
     #[arg(long = "ignore-comm", value_name = "NAME")]
     ignore_comm: Vec<String>,
+
+    /// Show processes whose comm was suppressed via --ignore-comm in the process
+    /// tree (hidden by default).
+    #[arg(long)]
+    show_ignored: bool,
 
     /// Enable the MeMLP neural detection engine (built-in, trains online from live events)
     #[arg(long)]
@@ -373,6 +380,7 @@ impl Default for MonitorArgs {
             memlp: false,
             memlp_checkpoint: None,
             ignore_comm: Vec::new(),
+            show_ignored: false,
         }
     }
 }
@@ -453,6 +461,7 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
     if !args.ignore_comm.is_empty() {
         monitor = monitor.with_ignored_comms(&args.ignore_comm);
     }
+    monitor = monitor.with_show_ignored(args.show_ignored);
 
     // ── MeMLP neural engine (load checkpoint when given) ──────────────
     if args.memlp {
@@ -538,6 +547,14 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
         eprintln!(
             "  \x1b[36m║\x1b[0m  Ignoring: {:<38} \x1b[36m║\x1b[0m",
             format!("alerts for {} process name(s)", args.ignore_comm.len())
+        );
+        eprintln!(
+            "  \x1b[36m║\x1b[0m  {:<38} \x1b[36m║\x1b[0m",
+            if args.show_ignored {
+                "Tree: showing ignored comms"
+            } else {
+                "Tree: hidden (--show-ignored)"
+            }
         );
     }
     if args.auto_kill {

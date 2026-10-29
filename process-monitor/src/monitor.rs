@@ -33,6 +33,12 @@ const IDLE_PID_TTL_SECS: u64 = 600;
 /// (fork storms), so memory stays bounded without evicting busy processes.
 const PRESSURE_PID_TTL_SECS: u64 = 30;
 const MAX_TRACKED_PIDS: usize = 65_536;
+/// When a PID's parent lookup fails at `/proc/<pid>/status` (process already
+/// exited), we know it is dead and can forget it after this short grace period.
+/// This is what keeps `build_process_tree` cheap under `hyprctl` fork storms:
+/// without it, dead short-lived PIDs linger up to `IDLE_PID_TTL_SECS` (600 s)
+/// and each one becomes an orphan root node, ballooning tree size and sort cost.
+const DEAD_PID_GRACE_SECS: u64 = 5;
 
 /// Learning rate for MeMLP online training (conservative — one step per alert).
 const MEMLP_LEARNING_RATE: f32 = 0.03;
@@ -41,13 +47,16 @@ const MEMLP_LEARNING_RATE: f32 = 0.03;
 const MEMLP_TRAIN_INTERVAL: u64 = 10;
 /// Maximum events included in a single TUI snapshot. Beyond this, only the
 /// most recent events are shown (log tail), preventing render stalls at
-/// 10K+ events per 100ms poll cycle.
-pub const TUI_SNAPSHOT_EVENT_CAP: usize = 50;
+/// 30K+ events per 200ms poll cycle. 1000 captures ~40ms of activity at
+/// 25K evts/s — enough to reliably catch brief bursts like 30x touch/exec
+/// that would otherwise fall outside the tail.
+pub const TUI_SNAPSHOT_EVENT_CAP: usize = 1000;
 /// Upper bound on the Monitor's internal event ring buffer. When full, oldest
 /// entries are evicted (FIFO) — only the tail survives to be drained into TUI
-/// snapshots. 256 entries is enough to cover a 200ms poll cycle at even 1.3K
-/// events/sec while keeping memory bounded.
-const MONITOR_EVENT_RING_CAP: usize = 256;
+/// snapshots. At 30K evts/s with a 200ms poll cycle, ~6K events arrive per
+/// batch; 12K cap holds two full cycles so burst events (touch/exec at t=2s)
+/// aren't evicted before the next poll drains them. 12K × 120 bytes = ~1.4MB.
+const MONITOR_EVENT_RING_CAP: usize = 12_000;
 
 // ── eBPF event record (must match kernel-side #[repr(C)]) ────────────────
 
@@ -70,6 +79,10 @@ impl ProcessEvent {
     fn comm_bytes(&self) -> &[u8] {
         let end = self.comm.iter().position(|&c| c == 0).unwrap_or(self.comm.len());
         &self.comm[..end]
+    }
+    fn filename_bytes(&self) -> &[u8] {
+        let end = self.filename.iter().position(|&c| c == 0).unwrap_or(self.filename.len());
+        &self.filename[..end]
     }
     fn comm_str(&self) -> String {
         cstr_to_string(&self.comm)
@@ -218,6 +231,22 @@ enum Msg {
 
 /// Max events to batch before flushing to the monitor channel.
 const READER_BATCH_SIZE: usize = 512;
+/// Minimum events drained in one perf-buffer sweep before the reader thread
+/// considers itself busy and skips its idle nap. Below this the sweep is
+/// treated as low-rate: the thread sleeps [`READER_LOW_RATE_SLEEP`] so it does
+/// not spin at 100% CPU just to drain a trickle of events.
+const READER_MIN_SWEEP: usize = 32;
+/// Idle nap for low-rate sweeps (see [`READER_MIN_SWEEP`]).
+const READER_LOW_RATE_SLEEP: Duration = Duration::from_millis(1);
+/// Ceiling on the reader's poll-loop at sustained high event rates. Each sweep
+/// drains *all* available events out of the 256-page perf buffers via
+/// `for_each`, so a 100µs nap caps the loop at ~10K sweeps/sec — still 3× the
+/// headroom needed for a 7.4k evt/s burst and far below the 300K evt/s target —
+/// while stopping the thread from busy-looping the core. Without it the reader
+/// pegs a core (`drained >= 32` → `else` branch, no sleep), starving the poll
+/// thread, backing up the sync_channel(1024), and dropping events (the
+/// "390% CPU then talus dies" runaway).
+const READER_HIGH_RATE_SLEEP: Duration = Duration::from_micros(100);
 
 // ── Monitor core ──────────────────────────────────────────────────────────
 
@@ -316,10 +345,19 @@ pub struct Monitor {
     event_ring: std::collections::VecDeque<ProcessEvent>,
     /// Last time each PID produced an event; drives idle eviction.
     last_seen: HashMap<u32, Instant>,
+    /// PIDs whose parent could not be resolved (process already dead) and the
+    /// time we first detected it. Drives [`DEAD_PID_GRACE_SECS`] eviction so
+    /// killed short-lived processes (e.g. `hyprctl` IPC forks) drop out
+    /// quickly instead of lingering up to `IDLE_PID_TTL_SECS`.
+    dead_since: HashMap<u32, Instant>,
     /// Process names (`comm`, max 15 bytes) whose burst alerts are suppressed.
     /// Their events are still counted and shown; only the alert (and any
     /// response driven by it) is skipped. Empty by default.
     ignore_comms: Vec<String>,
+    /// When false (default) a comm living in `ignore_comms` is hidden from the
+    /// process-tree panel in the TUI; its events are still counted and it never
+    /// raises an alert. `--show-ignored` flips this to render them anyway.
+    show_ignored: bool,
     /// Per-path open count for the "Top Files" panel.
     file_counts: HashMap<String, u64>,
     /// Extension → open count for extension-frequency tracking.
@@ -403,6 +441,15 @@ impl Monitor {
             .map(|c| c.as_ref().chars().take(EVENT_COMM_LEN - 1).collect::<String>())
             .filter(|c| !c.is_empty())
             .collect();
+        self
+    }
+
+    /// Render processes whose `comm` is in `ignore_comms` in the process-tree
+    /// panel. Off by default — suppressed comms vanish from the tree (their
+    /// events are still counted and never alert), `--show-ignored` re-enables
+    /// them so the operator can audit exactly what is being hidden.
+    pub fn with_show_ignored(mut self, show: bool) -> Self {
+        self.show_ignored = show;
         self
     }
 
@@ -527,7 +574,7 @@ impl Monitor {
             .try_into()
             .context("'EVENTS' is not a PerfEventArray")?;
 
-        let (tx, rx) = mpsc::sync_channel(64);  // 64×512 = 32K-event buffer — absorbs bursts
+        let (tx, rx) = mpsc::sync_channel(1024);  // 1024×512 = 512K-event buffer — absorbs bursts
         let reader = spawn_reader(perf_array, tx)?;
 
         let now = Instant::now();
@@ -542,7 +589,9 @@ impl Monitor {
             pending_ppids: std::collections::HashSet::new(),
             event_ring: std::collections::VecDeque::new(),
             last_seen: HashMap::new(),
+            dead_since: HashMap::new(),
             ignore_comms: Vec::new(),
+            show_ignored: false,
             file_counts: HashMap::new(),
             ext_counts: HashMap::new(),
             rate_history: VecDeque::new(),
@@ -632,8 +681,19 @@ impl Monitor {
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     self.pid_to_ppid.entry(pid)
                 {
-                    if let Some(ppid) = read_ppid_from_proc(pid) {
-                        e.insert(ppid);
+                    match read_ppid_from_proc(pid) {
+                        Some(ppid) => {
+                            // Process still alive — parent resolved.
+                            e.insert(ppid);
+                            self.dead_since.remove(&pid);
+                        }
+                        None => {
+                            // Already dead (hyprctl fork bomb / IPC). Record
+                            // the time so `prune_idle` can evict it within
+                            // `DEAD_PID_GRACE_SECS` instead of waiting up to
+                            // `IDLE_PID_TTL_SECS`.
+                            self.dead_since.entry(pid).or_insert_with(Instant::now);
+                        }
                     }
                 }
             }
@@ -708,6 +768,8 @@ impl Monitor {
             stats.comm = raw.comm_str();
         }
         self.last_seen.insert(pid, Instant::now());
+        // A live event revives any previously-marked-dead PID.
+        self.dead_since.remove(&pid);
 
         // NOTE: deliberately no state reset on Exec. The execve tracepoint fires
         // on entry even when the exec fails, so resetting the burst window here
@@ -760,15 +822,19 @@ impl Monitor {
             }
             Kind::Open => {
                 // Track file extensions and per-file open count.
-                // filename_str() allocates — unavoidable for stats tracking, but
-                // file_counts/ext_counts are bounded maps (lazy eviction).
-                let filename = raw.filename_str();
-                let ext = extract_extension(&filename);
+                // Use from_utf8 + filename_bytes() to avoid a per-event String
+                // allocation — from_utf8 returns a &str into the raw buffer at
+                // zero cost. bump_count_capped still allocates key.to_owned()
+                // only for NEW keys (hot keys: zero alloc).
+                let filename = std::str::from_utf8(raw.filename_bytes()).unwrap_or("");
+                let ext = extract_extension(filename);
                 if !ext.is_empty() {
                     bump_count_capped(&mut stats.extensions, &ext, MAX_TRACKED_EXTS);
                     bump_count_capped(&mut self.ext_counts, &ext, MAX_TRACKED_EXTS);
                 }
-                bump_count_capped(&mut self.file_counts, &filename, MAX_TRACKED_FILES);
+                if !filename.is_empty() {
+                    bump_count_capped(&mut self.file_counts, filename, MAX_TRACKED_FILES);
+                }
 
                 let now = Instant::now();
                 let window = self.windows.entry(pid).or_default();
@@ -833,9 +899,9 @@ impl Monitor {
             }
             Kind::Mkdir | Kind::Unlink | Kind::Chmod => {
                 // FS events — track in file counts for the Top Files panel.
-                let path = raw.filename_str();
+                let path = std::str::from_utf8(raw.filename_bytes()).unwrap_or("");
                 if !path.is_empty() {
-                    bump_count_capped(&mut self.file_counts, &path, MAX_TRACKED_FILES);
+                    bump_count_capped(&mut self.file_counts, path, MAX_TRACKED_FILES);
                 }
                 self.tick_opens += 1;
             }
@@ -872,11 +938,28 @@ impl Monitor {
         } else {
             IDLE_PID_TTL_SECS
         });
+        let dead_ttl = Duration::from_secs(DEAD_PID_GRACE_SECS);
         let stale: Vec<u32> = self
             .last_seen
             .iter()
-            .filter(|(_, t)| now.duration_since(**t) > ttl)
-            .map(|(pid, _)| *pid)
+            .filter_map(|(pid, t)| {
+                let age = now.duration_since(*t);
+                if let Some(death) = self.dead_since.get(pid) {
+                    // Process already dead: short grace window, then evict.
+                    if now.duration_since(*death) > dead_ttl {
+                        Some(*pid)
+                    } else {
+                        None
+                    }
+                } else {
+                    // Still resolving or alive: classic idle TTL.
+                    if age > ttl {
+                        Some(*pid)
+                    } else {
+                        None
+                    }
+                }
+            })
             .collect();
         for pid in stale {
             self.last_seen.remove(&pid);
@@ -884,6 +967,7 @@ impl Monitor {
             self.windows.remove(&pid);
             self.pid_to_ppid.remove(&pid);
             self.pid_features.remove(&pid);
+            self.dead_since.remove(&pid);
         }
     }
 
@@ -1006,15 +1090,31 @@ impl Monitor {
 
     /// Build a hierarchical process tree from the flat PID→PPID stats.
     pub fn build_process_tree(&self) -> Vec<ProcessNode> {
-        // Collect all known PIDs and their children.
+        // A comm that lives in `ignore_comms` is hidden from the tree unless
+        // `--show-ignored` was passed. Its events are still counted and it never
+        // alerts (that gate lives in `handle_event`); this only changes what the
+        // TUI draws. Children of a hidden process re-root to the top level so
+        // they are not silently lost — only the suppressed comm line vanishes.
+        let is_ignored = |comm: &str| {
+            !self.show_ignored
+                && self.ignore_comms
+                    .iter()
+                    .any(|ic| ic.as_bytes() == comm.as_bytes())
+        };
+
+        // Collect all known PIDs and their children, skipping ignored comms.
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
         let mut all_pids: Vec<u32> = Vec::new();
 
-        for &pid in self.stats.keys() {
+        for (&pid, stats) in &self.stats {
+            if is_ignored(&stats.comm) {
+                continue;
+            }
             all_pids.push(pid);
             let ppid = self.pid_to_ppid.get(&pid).copied().unwrap_or(0);
             children_map.entry(ppid).or_default().push(pid);
         }
+        let tracked: std::collections::HashSet<u32> = all_pids.iter().copied().collect();
 
         // Sort children by name for stable display.
         for children in children_map.values_mut() {
@@ -1025,12 +1125,13 @@ impl Monitor {
             });
         }
 
-        // Find roots: PIDs whose parent is not in our stats (or is 0).
+        // Find roots: PIDs whose parent is not tracked (or is 0). Children of a
+        // hidden process land here instead of under their suppressed parent.
         let mut roots: Vec<u32> = all_pids
             .iter()
             .filter(|&&pid| {
                 let ppid = self.pid_to_ppid.get(&pid).copied().unwrap_or(0);
-                ppid == 0 || !self.stats.contains_key(&ppid)
+                ppid == 0 || !tracked.contains(&ppid)
             })
             .copied()
             .collect();
@@ -1040,34 +1141,75 @@ impl Monitor {
             ca.cmp(cb)
         });
 
-        // Build recursively.
-        fn build(
-            pid: u32,
-            stats: &HashMap<u32, ProcStats>,
-            children_map: &HashMap<u32, Vec<u32>>,
-        ) -> ProcessNode {
-            let s = stats.get(&pid);
-            let children_ids = children_map.get(&pid).cloned().unwrap_or_default();
-            let children: Vec<ProcessNode> = children_ids
-                .into_iter()
-                .map(|child_pid| build(child_pid, stats, children_map))
-                .collect();
-            ProcessNode {
-                pid,
-                ppid: s.map(|s| s.ppid).unwrap_or(0),
-                comm: s
-                    .map(|s| s.comm.clone())
-                    .unwrap_or_else(|| "<unknown>".into()),
-                alerts: s.map(|s| s.alerts).unwrap_or(0),
-                total_opens: s.map(|s| s.total_opens).unwrap_or(0),
-                children,
-            }
-        }
-
-        roots
+        // Partition roots by whether they have tracked children. A root with
+        // children (e.g. `systemd`, `bash`) is a real tree anchor built
+        // recursively so descendants render. Childless roots are dead short-
+        // lived forks (e.g. `hyprctl` IPC) — orphans collapsed below by comm name
+        // into a single "comm ×N" node instead of being built one-by-one, which
+        // is what made the PROCESSES panel "stack" under fork storms.
+        let (roots_with_children, orphan_roots): (Vec<u32>, Vec<u32>) = roots
             .into_iter()
-            .map(|pid| build(pid, &self.stats, &children_map))
-            .collect()
+            .partition(|pid| children_map.contains_key(pid));
+
+        let mut out: Vec<ProcessNode> = if roots_with_children.is_empty() && orphan_roots.is_empty() {
+            Vec::new()
+        } else {
+            // Recursively build the connected tree part.
+            fn build(
+                pid: u32,
+                stats: &HashMap<u32, ProcStats>,
+                children_map: &HashMap<u32, Vec<u32>>,
+            ) -> ProcessNode {
+                let s = stats.get(&pid);
+                let children_ids = children_map.get(&pid).cloned().unwrap_or_default();
+                let children: Vec<ProcessNode> = children_ids
+                    .into_iter()
+                    .map(|child_pid| build(child_pid, stats, children_map))
+                    .collect();
+                ProcessNode {
+                    pid,
+                    ppid: s.map(|s| s.ppid).unwrap_or(0),
+                    comm: s
+                        .map(|s| s.comm.clone())
+                        .unwrap_or_else(|| "<unknown>".into()),
+                    alerts: s.map(|s| s.alerts).unwrap_or(0),
+                    total_opens: s.map(|s| s.total_opens).unwrap_or(0),
+                    children,
+                }
+            }
+            roots_with_children
+                .into_iter()
+                .map(|pid| build(pid, &self.stats, &children_map))
+                .collect()
+        };
+
+        let mut groups: HashMap<&str, (ProcessNode, usize)> = HashMap::new();
+        for pid in orphan_roots {
+            let Some(s) = self.stats.get(&pid) else { continue };
+            let comm: &str = s.comm.as_str();
+            let entry = groups.entry(comm).or_insert_with(|| (
+                ProcessNode {
+                    pid,
+                    ppid: 0,
+                    comm: s.comm.clone(),
+                    alerts: 0,
+                    total_opens: 0,
+                    children: Vec::new(),
+                },
+                0,
+            ));
+            entry.0.alerts += s.alerts;
+            entry.0.total_opens += s.total_opens;
+            entry.1 += 1;
+        }
+        for (_, (mut node, n)) in groups {
+            if n > 1 {
+                node.comm = format!("{} \u{00d7}{}", node.comm, n);
+            }
+            out.push(node);
+        }
+        out.sort_by(|a, b| a.comm.cmp(&b.comm));
+        out
     }
 
     /// Flatten a process tree into a Vec of (depth, node) for display.
@@ -1216,7 +1358,7 @@ fn spawn_reader(
     let mut buffers: Vec<PerfEventArrayBuffer<MapData>> = Vec::with_capacity(cpus.len());
     for cpu in cpus {
         let buf = perf_array
-            .open(cpu, Some(128))
+            .open(cpu, Some(256))
             .context("failed to open perf buffer")?;
         buffers.push(buf);
     }
@@ -1233,6 +1375,7 @@ fn spawn_reader(
             let mut batch: Vec<(ProcessEvent, u64)> = Vec::with_capacity(READER_BATCH_SIZE);
             loop {
                 let mut idle = true;
+                let mut drained: usize = 0;
                 for buf in buffers.iter_mut() {
                     buf.for_each(|event| {
                         idle = false;
@@ -1264,6 +1407,7 @@ fn spawn_reader(
                                     // Defer to_recorded() to poll(); just ship the
                                     // raw event + latency here.
                                     batch.push((evt, now_ns().saturating_sub(evt.ktime_ns)));
+                                    drained += 1;
                                     if batch.len() >= READER_BATCH_SIZE {
                                         let _ = tx.send(Msg::Events(std::mem::take(&mut batch)));
                                     }
@@ -1284,11 +1428,23 @@ fn spawn_reader(
                 if !batch.is_empty() {
                     let _ = tx.send(Msg::Events(std::mem::take(&mut batch)));
                 }
-                if idle {
-                    thread::sleep(Duration::from_millis(1));
+                // Flush accumulated channel-overflow drops so the monitor
+                // counts them alongside kernel-side perf-buffer losses.
+                if idle || drained < READER_MIN_SWEEP {
+                    // Low-rate sweep: yield the CPU. Without this the reader
+                    // is a 100% busy-loop at any non-zero event rate (each
+                    // perf-buffer sweep is a handful of syscalls). One 1 ms
+                    // nap per low-rate sweep still drains ~32K evts/s while
+                    // keeping the thread near-idle.
+                    thread::sleep(READER_LOW_RATE_SLEEP);
                 } else {
-                    // Signal watchdog that eBPF pipeline is alive
+                    // High-rate sweep: still yield briefly. The sweep already
+                    // drained the full buffer, so this 100µs nap costs <0.1%
+                    // of a second at 300K evt/s but prevents the reader from
+                    // spinning the core and starving poll/render. See
+                    // `READER_HIGH_RATE_SLEEP` for why this is mandatory.
                     crate::watchdog::heartbeat();
+                    thread::sleep(READER_HIGH_RATE_SLEEP);
                 }
             }
         })
@@ -1518,7 +1674,9 @@ impl Monitor {
             pending_ppids: std::collections::HashSet::new(),
             event_ring: std::collections::VecDeque::new(),
             last_seen: HashMap::new(),
+            dead_since: HashMap::new(),
             ignore_comms: Vec::new(),
+            show_ignored: false,
             file_counts: HashMap::new(),
             ext_counts: HashMap::new(),
             rate_history: VecDeque::new(),
@@ -2069,6 +2227,29 @@ mod tests {
         let tree = monitor.build_process_tree();
         assert_eq!(tree.len(), 1, "orphan becomes a root");
         assert_eq!(tree[0].pid, 500);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn build_process_tree_hides_ignored_comm() {
+        let mut monitor = Monitor::dummy().with_ignored_comms(["hyprctl"]);
+        let mut outputs = Vec::new();
+        // An ignored comm is still captured (events counted), just never alerts...
+        monitor.handle_event(&make_event(EVENT_EXECVE, 4242, 0, "hyprctl", ""), &mut outputs);
+        let _ = outputs;
+
+        // ...and is hidden from the process tree by default.
+        assert!(
+            monitor.build_process_tree().is_empty(),
+            "ignored comm must not render in the tree"
+        );
+
+        // --show-ignored brings it back as a single root node.
+        let monitor = monitor.with_show_ignored(true);
+        let shown = monitor.build_process_tree();
+        assert_eq!(shown.len(), 1, "ignored comm returns with --show-ignored");
+        assert_eq!(shown[0].pid, 4242);
+        assert_eq!(shown[0].comm, "hyprctl");
     }
 
     #[test]
