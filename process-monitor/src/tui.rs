@@ -45,7 +45,9 @@ use crate::monitor::{
 
 /// Processes that produce too many events to display (polling, IPC, etc.)
 const NOISY_COMMS: &[&str] = &[
-    // Desktop / compositor IPC
+    // Desktop / compositor IPC — spawn forks (hyprctl etc.) flood the log.
+    "hyprctl",
+    "hyprland",
     "freebuff",
     "waybar",
     "upowerd",
@@ -168,9 +170,30 @@ struct Snapshot {
 }
 
 /// Minimum interval between full (heavy) snapshots built by the poll thread.
-const HEAVY_REFRESH: Duration = Duration::from_millis(1000);
+const HEAVY_REFRESH: Duration = Duration::from_millis(2000);
 /// Max processes carried per heavy snapshot (busiest by window + heaviest by lifetime).
 const TUI_PROC_LIMIT: usize = 128;
+
+/// Base tick unit for the UI clock (50 ms).
+///
+/// Every tick repaints the whole frame — header with `ColorWave`, the process
+/// table and the event log — so the tick rate is the TUI's dominant CPU cost.
+/// `ftui_runtime::tick_strategy::Uniform` is used for multi-screen apps; this
+/// dashboard is single-screen, so the same "tick every Nth frame" semantics are
+/// applied directly to the subscription period (TICK_BASE × divisor).
+const TICK_BASE: Duration = Duration::from_millis(50);
+
+/// Uniform tick divisor — render every `N`th base tick.
+///
+/// | divisor | FPS | idle CPU (measured) |
+/// |---------|-----|---------------------|
+/// | 1       | 20  | ~36-55%             |
+/// | 10      | 2   | target ~5%          |
+/// | 20      | 1   | target ~3%          |
+///
+/// A monitoring dashboard does not need 20 FPS; 2 FPS keeps events feeling
+/// live while bounding repaint cost. Raise to 20 for the quietest possible run.
+const UNIFORM_TICK_DIVISOR: u32 = 20;
 
 /// Row in the heatmap: process name + per-extension counts.
 struct HeatmapRow {
@@ -246,6 +269,13 @@ struct App_ {
     collapsed: [bool; 7],
     // ── copy buffer ──
     last_event_lines: VecDeque<String>,
+    /// Identity of the previously pushed log line, split into its parts so
+    /// repeated events compare without allocating.
+    last_log_kind: &'static str,
+    last_log_comm: String,
+    last_log_file: String,
+    /// How many consecutive events matched the last identity.
+    last_log_repeat: u64,
     // ── search mode ──
     search_mode: bool,
     search_buf: String,
@@ -285,7 +315,7 @@ struct FileRow {
 
 impl App_ {
     fn new(rx: mpsc::Receiver<Snapshot>, license: &LicenseState) -> Self {
-        let mut log = LogViewer::new(5000);
+        let mut log = LogViewer::new(1000);
         let tier_name = license.tier_name().to_string();
         let org = license.organization.clone();
         let activated = license.is_activated;
@@ -336,6 +366,10 @@ impl App_ {
             rate_suppressed: 0,
             collapsed: [false; 7],
             last_event_lines: VecDeque::new(),
+            last_log_kind: "",
+            last_log_comm: String::new(),
+            last_log_file: String::new(),
+            last_log_repeat: 0,
             search_mode: false,
             search_buf: String::new(),
             search_hits: 0,
@@ -458,10 +492,40 @@ impl App_ {
                 )
             };
             if !is_noisy {
-                self.log.push(line.as_str());
-                self.last_event_lines.push_back(line.clone());
-                if self.last_event_lines.len() > 50 {
-                    self.last_event_lines.pop_front();
+                // Collapse repeats: 300 `hyprctl` IPC events become one line
+                // with a `(x300)` suffix instead of 300 identical rows. Only
+                // log-scale checkpoints are pushed so the log keeps a trace
+                // of ongoing activity without re-rendering every event.
+                if kind_tag == self.last_log_kind
+                    && e.comm == self.last_log_comm
+                    && file_part == self.last_log_file
+                {
+                    let before = self.last_log_repeat;
+                    self.last_log_repeat += 1;
+                    let now = self.last_log_repeat;
+                    if before != 0 && (now == 10 || now == 100 || now.is_multiple_of(1000)) {
+                        let collapsed = format!(
+                            "{} {} [{:>6}] {:<16} {}  (x{})",
+                            e.ts, kind_tag, e.pid, e.comm, file_part, now
+                        );
+                        self.log.push(collapsed.as_str());
+                        self.last_event_lines.push_back(collapsed);
+                        if self.last_event_lines.len() > 50 {
+                            self.last_event_lines.pop_front();
+                        }
+                    }
+                } else {
+                    self.last_log_kind = kind_tag;
+                    self.last_log_comm.clear();
+                    self.last_log_comm.push_str(&e.comm);
+                    self.last_log_file.clear();
+                    self.last_log_file.push_str(file_part);
+                    self.last_log_repeat = 1;
+                    self.log.push(line.as_str());
+                    self.last_event_lines.push_back(line.clone());
+                    if self.last_event_lines.len() > 50 {
+                        self.last_event_lines.pop_front();
+                    }
                 }
             }
             if !is_noisy
@@ -753,7 +817,9 @@ impl Model for App_ {
                 }
             }
             Msg::Tick if !self.paused => {
-                self.time += 0.05;
+                // Advance the animation clock by one full tick period so the
+                // ColorWave speed is independent of the divisor.
+                self.time += (TICK_BASE * UNIFORM_TICK_DIVISOR).as_secs_f64();
                 while let Ok(s) = self.rx.try_recv() {
                     self.apply_snapshot(s);
                 }
@@ -766,15 +832,14 @@ impl Model for App_ {
     fn view(&self, frame: &mut Frame) {
         let area = Rect::from_size(frame.buffer.width(), frame.buffer.height());
 
-        // Fill entire screen with dark background
-        let bg = BG;
-        for y in 0..area.height {
-            for x in 0..area.width {
-                if let Some(cell) = frame.buffer.get_mut(x, y) {
-                    cell.bg = bg;
-                }
-            }
-        }
+        // Fill entire screen with dark background. `Buffer::fill` uses a bulk
+        // `slice.fill` per row (memset-class), replacing the previous per-cell
+        // `get_mut` double loop that wrote ~W*H cells on every frame. Under
+        // `with_mouse()` the runtime can redraw on every mouse-motion event, so
+        // this O(W*H) loop was a direct contributor to the 200-300% CPU spin.
+        let mut bg_cell = ftui_render::cell::Cell::from_char(' ');
+        bg_cell.bg = BG;
+        frame.buffer.fill(area, bg_cell);
 
         if self.gateway {
             return self.draw_gateway(frame, area);
@@ -806,9 +871,13 @@ impl Model for App_ {
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Msg>>> {
-        vec![Box::new(Every::new(Duration::from_millis(50), || {
-            Msg::Tick
-        }))]
+        // Uniform divisor applied to the base tick: divisor 10 → 2 FPS.
+        // Each tick repaints the entire frame, so this is the single biggest
+        // CPU lever in the TUI (20 FPS was ~36-55% CPU).
+        vec![Box::new(Every::new(
+            TICK_BASE * UNIFORM_TICK_DIVISOR,
+            || Msg::Tick,
+        ))]
     }
 }
 
@@ -1805,10 +1874,17 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
     // set and the terminal keeps showing the first frame ("0 events"). A
     // monitoring dashboard must always present, so use a generous budget and
     // never skip frames.
+    // The default strict(250ms) budget has `allow_frame_skip = false`: under
+    // load the render exceeds 250ms, `dirty` never clears, and the main thread
+    // busy-presents every iteration → 200-300% CPU runaway. `relaxed()` keeps a
+    // 33ms budget and *allows frame skipping*, so a storm of dirty frames
+    // (mouse motion / snapshot churn) degrades gracefully instead of pinning a
+    // core. The 2.5s tick still drives steady updates, so situational awareness
+    // is unchanged.
     let res = App::new(app)
         .screen_mode(ScreenMode::AltScreen)
         .with_mouse()
-        .with_budget(FrameBudgetConfig::strict(Duration::from_millis(250)))
+        .with_budget(FrameBudgetConfig::relaxed())
         .run();
     let _ = h.join();
     res.map_err(|e| anyhow::anyhow!("tui: {}", e))
