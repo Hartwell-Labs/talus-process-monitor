@@ -834,24 +834,21 @@ async function handle_download_grant(request, env) {
     });
   }
 
-  // Enterprise: private repo — use GitHub App token
+  // Enterprise: private repo — use GitHub PAT for private repo access
   if (tier === 'enterprise') {
-    if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY) {
-      return env_error('GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY');
-    }
-    if (!env.GITHUB_INSTALLATION_ID) {
-      return env_error('GITHUB_INSTALLATION_ID');
+    if (!env.GITHUB_TOKEN) {
+      return env_error('GITHUB_TOKEN');
     }
 
     const repo = 'Hartwell-Labs/talus-enterprise';
-    const gh_token_info = await get_github_app_token(env);
-    const release_tag = version || await latest_release_tag(env, repo, gh_token_info.token);
+    const gh_token = env.GITHUB_TOKEN;
+    const release_tag = version || await latest_release_tag(env, repo, gh_token);
     const asset_name = target.includes('aarch64')
       ? 'talus-monitor-enterprise-aarch64'
       : 'talus-monitor-enterprise';
 
     const download = await get_github_asset_presigned(
-      repo, release_tag, asset_name, gh_token_info,
+      repo, release_tag, asset_name, gh_token,
     );
 
     return json_response({
@@ -872,76 +869,9 @@ async function handle_download_grant(request, env) {
   );
 }
 
-// ── GitHub App helpers ────────────────────────────────────────────────────
-
-// Generate a JWT for the GitHub App (RS256 signed with app private key).
-// The private key (PKCS#8 PEM) is stored as a Worker secret.
-async function github_app_jwt(env) {
-  if (!env.GITHUB_APP_PRIVATE_KEY) {
-    throw new Error('GITHUB_APP_PRIVATE_KEY not configured');
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const payload = btoa(
-    JSON.stringify({
-      iat: now,
-      exp: now + 600, // 10 minutes max
-      iss: Number(env.GITHUB_APP_ID),
-    })
-  );
-
-  // Sign with the RS256 private key using WebCrypto
-  const pem = env.GITHUB_APP_PRIVATE_KEY;
-  // Strip PEM headers and convert to ArrayBuffer
-  const b64 = pem.replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '');
-  const der_bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-
-  const key = await crypto.subtle.importKey(
-    'pkcs8',
-    der_bytes,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-
-  const signature = await crypto.subtle.sign(
-    { name: 'RSASSA-PKCS1-v1_5' },
-    key,
-    new TextEncoder().encode(`${header}.${payload}`),
-  );
-
-  const sig_b64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
-  return `${header}.${payload}.${sig_b64}`;
-}
-
-// Exchange the app JWT for an installation access token.
-async function get_github_app_token(env) {
-  const jwt = await github_app_jwt(env);
-  const resp = await fetch(
-    `https://api.github.com/app/installations/${env.GITHUB_INSTALLATION_ID}/access_tokens`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'talus-license-server',
-      },
-    },
-  );
-
-  if (!resp.ok) {
-    throw new Error(`GitHub App token exchange failed: ${resp.status}`);
-  }
-
-  const data = await resp.json();
-  // Installation tokens expire in ~1 hour; cap to 5 minutes for safety.
-  return {
-    token: data.token,
-    expires_at: data.expires_at,
-  };
-}
+// ── GitHub helper ──────────────────────────────────────────────────────────
+// Uses a PAT (GITHUB_TOKEN) with `repo` scope for enterprise private repo access.
+// The token is stored as a Worker secret and never reaches the client.
 
 // Get the latest release tag for a repo.
 async function latest_release_tag(env, repo, gh_token) {
@@ -1014,9 +944,9 @@ async function fetch_public_release_asset(env, repo, tag, asset_name) {
 }
 
 // For enterprise: get a presigned URL from GitHub's asset download endpoint.
-// Uses the GitHub App token internally; the client never sees it.
-async function get_github_asset_presigned(repo, tag, asset_name, gh_token_info) {
-  const gh_token = gh_token_info.token;
+// Uses the GitHub PAT internally (with repo scope for private repos); the client
+// never sees the token.
+async function get_github_asset_presigned(repo, tag, asset_name, gh_token) {
   const resp = await fetch(
     `https://api.github.com/repos/${repo}/releases/latest`,
     {
