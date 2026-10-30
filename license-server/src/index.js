@@ -1003,33 +1003,38 @@ async function get_github_asset_presigned(repo, tag, asset_name, gh_token) {
     presigned_url = asset.browser_download_url;
   }
 
-  // Fetch checksum and signature
-  const cs_resp = await fetch(
-    `https://github.com/${repo}/releases/download/${tag}/checksums-sha256.txt`,
-    {
+  // Fetch checksum file (checksums-sha256.txt) via API — works for private repos.
+  const cs_asset = release.assets.find((a) => a.name === 'checksums-sha256.txt');
+  let sha256 = '';
+  if (cs_asset) {
+    const cs_dl = await fetch(cs_asset.url, {
       headers: {
         Authorization: `token ${gh_token}`,
-        Accept: 'application/vnd.github+json',
+        Accept: 'application/octet-stream',
+        'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'talus-license-server',
       },
-    },
-  );
-
-  let sha256 = '';
-  if (cs_resp.ok) {
-    const cs_text = await cs_resp.text();
-    for (const line of cs_text.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed.includes(asset_name)) {
-        sha256 = trimmed.split(/\s+/)[0];
-        break;
+      redirect: 'manual',
+    });
+    // GitHub returns 302 → presigned URL; follow it to get the checksum file.
+    if (cs_dl.status === 302 && cs_dl.headers.has('Location')) {
+      const cs_follow = await fetch(cs_dl.headers.get('Location'));
+      if (cs_follow.ok) {
+        const cs_text = await cs_follow.text();
+        for (const line of cs_text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.includes(asset_name)) {
+            sha256 = trimmed.split(/\s+/)[0];
+            break;
+          }
+        }
       }
     }
   }
 
-  // Fetch the signature file (.sig)
+  // Fetch the signature file (.sig) via API — works for private repos.
   let sig_url = null;
-  const sig_asset = asset.sig_url || release.assets.find((a) => a.name === 'talus-monitor-enterprise.sig');
+  const sig_asset = release.assets.find((a) => a.name === asset_name + '.sig');
   if (sig_asset) {
     const sig_dl = await fetch(sig_asset.url, {
       headers: {
