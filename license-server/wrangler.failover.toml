@@ -34,5 +34,6 @@ rules = [
 enabled = false
 
 [vars]
-LICENSE_PUBLIC_KEY_HEX = "850e6bbdc5b5d66ae24973cef9e6e5baf887b2c775a2e17cd1b6cd2d8ae76845"
+# Multi-key support — see primary wrangler.toml for details.
+LICENSE_PUBLIC_KEYS = "v1:850e6bbdc5b5d66ae24973cef9e6e5baf887b2c775a2e17cd1b6cd2d8ae76845,v2:e1e98f159d34f54b4c51f23e53a49c658c87deecf5ac5218e04ed644f6901306"
 TURSO_DATABASE_URL = "https://talus-licenses-bartoszosiej.aws-eu-west-1.turso.io"
