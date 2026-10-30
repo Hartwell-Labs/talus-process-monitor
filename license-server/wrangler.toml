@@ -45,8 +45,21 @@ enabled = false
 # database_id = "77c07193-9bc8-44e5-a31f-616a25ad9fb9"
 
 [vars]
-LICENSE_PUBLIC_KEY_HEX = "850e6bbdc5b5d66ae24973cef9e6e5baf887b2c775a2e17cd1b6cd2d8ae76845"
+# ── License verification keys (public keys, safe to commit) ───────────────
+# MULTI-KEY ROTATION SUPPORT:
+# Keys are stored as a comma-separated list of kid:hexkey pairs. The server
+# reads \`kid\` from the license payload (default "v1" for backward compat)
+# to select the right key.
+#
+#   v1 — original key, verification-only (backward compat)
+#   v2 — active since 2026-10-30, used for all new licenses
+LICENSE_PUBLIC_KEYS = "v1:850e6bbdc5b5d66ae24973cef9e6e5baf887b2c775a2e17cd1b6cd2d8ae76845,v2:e1e98f159d34f54b4c51f23e53a49c658c87deecf5ac5218e04ed644f6901306"
 TURSO_DATABASE_URL = "https://talus-licenses-bartoszosiej.aws-eu-west-1.turso.io"
+
+# GitHub App secrets (set via \`wrangler secret put\`, NEVER committed):
+#   GITHUB_APP_ID          — GitHub App ID (integer, as string)
+#   GITHUB_APP_PRIVATE_KEY — PKCS#8 PEM private key for JWT signing
+#   GITHUB_INSTALLATION_ID — Installation ID for Hartwell-Labs org
 
 # ── Stripe Managed Payments ───────────────────────────────────────────────
 # Public configuration, safe to commit. The price and the redirect targets are

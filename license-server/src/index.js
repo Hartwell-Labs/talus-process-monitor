@@ -5,6 +5,8 @@
 //   POST /api/v1/activate    { license_key, machine_id, hostname, version }
 //                            → { success, token, expires_at, tier, message }
 //   POST /api/v1/deactivate  { license_id, token } → releases the machine seat
+//   POST /api/v1/download-grant { license_key, machine_id, nonce, target, version }
+//                            → { url, expires_in, sha256, size, version, artifact_sig }
 //   GET  /api/v1/health      → service status
 //
 // Security properties:
@@ -302,6 +304,9 @@ export default {
       if (pathname === '/api/v1/resolve' && request.method === 'POST') {
         return handle_resolve(request, env);
       }
+      if (pathname === '/api/v1/download-grant' && request.method === 'POST') {
+        return handle_download_grant(request, env);
+      }
 
       // ── Admin panel (web UI, TOTP session) ──────────────────────────────
       if (pathname === '/admin' || pathname === '/admin/') {
@@ -348,9 +353,27 @@ async function handle_health(env) {
   });
 }
 
+// Parse LICENSE_PUBLIC_KEYS env var into a {kid: hex_key} map.
+// Format: "v1:abc...,v2:def..."
+// Returns null if malformed.
+function parse_public_keys(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const map = {};
+  for (const pair of raw.split(',')) {
+    const [kid, hex] = pair.split(':');
+    if (kid && hex) {
+      map[kid.trim()] = hex.trim();
+    }
+  }
+  return Object.keys(map).length > 0 ? map : null;
+}
+
 async function handle_activate(request, env) {
   if (!env.DB) return env_error('DB binding');
-  if (!env.LICENSE_PUBLIC_KEY_HEX) return env_error('LICENSE_PUBLIC_KEY_HEX');
+  if (!env.LICENSE_PUBLIC_KEYS) return env_error('LICENSE_PUBLIC_KEYS');
+
+  const pub_keys = parse_public_keys(env.LICENSE_PUBLIC_KEYS);
+  if (!pub_keys) return env_error('LICENSE_PUBLIC_KEYS (malformed)');
 
   const body = await read_json(request);
   if (!body.ok) {
@@ -435,24 +458,36 @@ async function handle_activate(request, env) {
   if (sig_bytes.length !== 64) {
     return json_response({ success: false, message: 'invalid signature length' }, 400);
   }
-  let pub_bytes;
-  try {
-    pub_bytes = hex_decode(env.LICENSE_PUBLIC_KEY_HEX);
-  } catch {
-    return env_error('LICENSE_PUBLIC_KEY_HEX');
-  }
-  if (!(await verify_ed25519(pub_bytes, sig_bytes, payload_bytes))) {
-    return json_response(
-      { success: false, message: 'license signature verification failed' },
-      401,
-    );
-  }
 
+  // Parse payload FIRST to extract kid (for multi-key support)
   let payload;
   try {
     payload = JSON.parse(new TextDecoder().decode(payload_bytes));
   } catch {
     return json_response({ success: false, message: 'invalid license payload' }, 400);
+  }
+
+  const kid = payload.kid || 'v1'; // default to v1 for backward compat
+  const pub_key_hex = pub_keys[kid];
+  if (!pub_key_hex) {
+    return json_response(
+      { success: false, message: `unknown key ID: ${kid}` },
+      401,
+    );
+  }
+
+  let pub_bytes;
+  try {
+    pub_bytes = hex_decode(pub_key_hex);
+  } catch {
+    return env_error('LICENSE_PUBLIC_KEYS (malformed key)');
+  }
+
+  if (!(await verify_ed25519(pub_bytes, sig_bytes, payload_bytes))) {
+    return json_response(
+      { success: false, message: 'license signature verification failed' },
+      401,
+    );
   }
 
   const license_id = str_field(payload.license_id);
@@ -595,6 +630,505 @@ async function handle_activate(request, env) {
     license_key_display: await to_pretty(key, sha256_hex_bytes),
   });
 }
+
+// ── Download grant endpoint ────────────────────────────────────────────────
+// POST /api/v1/download-grant
+//   { license_key, machine_id, nonce, target?, version? }
+//   → { url, expires_in, sha256, size, version, artifact_sig }
+//
+// Returns a short-lived presigned URL for the release artifact matching the
+// license tier (community → public repo; enterprise → private repo).
+//
+// Security:
+//   • License signature is verified server-side (same as /activate).
+//   • Revocation and seat limits are enforced.
+//   • The returned URL expires in ≤ 300 s and is single-use.
+//   • For enterprise: a GitHub App installation token is used internally;
+//     it never reaches the client. The presigned URL from GitHub's redirect
+//     is returned instead.
+//
+
+const DOWNLOAD_URL_TTL_S = 300; // 5 minutes — links are short-lived
+
+async function handle_download_grant(request, env) {
+  if (!env.DB) return env_error('DB binding');
+  if (!env.LICENSE_PUBLIC_KEYS) return env_error('LICENSE_PUBLIC_KEYS');
+
+  const pub_keys = parse_public_keys(env.LICENSE_PUBLIC_KEYS);
+  if (!pub_keys) return env_error('LICENSE_PUBLIC_KEYS (malformed)');
+
+  const body = await read_json(request);
+  if (!body.ok) {
+    return json_response({ success: false, message: body.error }, 400);
+  }
+
+  const license_key = str_field(body.value.license_key);
+  const machine_id = str_field(body.value.machine_id);
+  const nonce = str_field(body.value.nonce);
+  const version = str_field(body.value.version);
+  if (!license_key || !machine_id || !nonce) {
+    return json_response(
+      { success: false, message: 'missing license_key, machine_id, or nonce' },
+      400,
+    );
+  }
+  if (license_key.length > 8192 || machine_id.length > 64 || nonce.length > 128) {
+    return json_response({ success: false, message: 'field too long' }, 400);
+  }
+
+  // ── Resolve the license key to its canonical signed form ──────────────
+  let effective_key = license_key;
+  const resolved = await resolve_key(env, license_key);
+  if (resolved.kind === 'store') {
+    effective_key = resolved.license_key;
+  } else if (resolved.kind === 'short') {
+    effective_key = resolved.license_key;
+  } else if (resolved.kind === 'unknown') {
+    return json_response(
+      { success: false, message: 'license key not recognized' },
+      404,
+    );
+  }
+
+  // ── Decode and verify the signature ────────────────────────────────────
+  let effective_canonical = effective_key;
+  if (is_pretty(effective_canonical)) {
+    try {
+      effective_canonical = decode_pretty(effective_canonical, sha256_hex_bytes);
+    } catch (err) {
+      return json_response(
+        { success: false, message: `invalid license key: ${String(err.message ?? err)}` },
+        400,
+      );
+    }
+  }
+
+  const parts = effective_canonical.split('.');
+  if (parts.length !== 2) {
+    return json_response(
+      { success: false, message: 'invalid license key format' },
+      400,
+    );
+  }
+
+  let payload_bytes;
+  let sig_bytes;
+  try {
+    payload_bytes = base64_decode(parts[0]);
+    sig_bytes = base64_decode(parts[1]);
+  } catch {
+    return json_response({ success: false, message: 'invalid base64 encoding' }, 400);
+  }
+
+  if (sig_bytes.length !== 64) {
+    return json_response({ success: false, message: 'invalid signature length' }, 400);
+  }
+
+  // Parse payload to extract kid (for multi-key support)
+  let payload;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(payload_bytes));
+  } catch {
+    return json_response({ success: false, message: 'invalid license payload' }, 400);
+  }
+
+  const kid = payload.kid || 'v1';
+  const pub_key_hex = pub_keys[kid];
+  if (!pub_key_hex) {
+    return json_response(
+      { success: false, message: `unknown key ID: ${kid}` },
+      401,
+    );
+  }
+
+  let pub_bytes;
+  try {
+    pub_bytes = hex_decode(pub_key_hex);
+  } catch {
+    return env_error('LICENSE_PUBLIC_KEYS (malformed key)');
+  }
+
+  if (!(await verify_ed25519(pub_bytes, sig_bytes, payload_bytes))) {
+    return json_response(
+      { success: false, message: 'license signature verification failed' },
+      401,
+    );
+  }
+
+  const license_id = str_field(payload.license_id);
+  const tier = str_field(payload.tier);
+  if (!license_id || !tier) {
+    return json_response(
+      { success: false, message: 'license payload missing fields' },
+      400,
+    );
+  }
+
+  // ── Expiry check ───────────────────────────────────────────────────────
+  const expires_at = str_field(payload.expires_at);
+  if (expires_at) {
+    if (!ISO_RE.test(expires_at)) {
+      return json_response(
+        { success: false, message: 'license payload has invalid expiry' },
+        400,
+      );
+    }
+    if (new Date(expires_at).getTime() <= Date.now()) {
+      return json_response(
+        { success: false, message: `license ${license_id} has expired` },
+        403,
+      );
+    }
+  }
+
+  // ── Revocation check ───────────────────────────────────────────────────
+  const existing = await env.DB.prepare(
+    'SELECT license_id, tier, max_seats, revoked FROM licenses WHERE license_id = ?1',
+  )
+    .bind(license_id)
+    .first();
+
+  if (existing?.revoked) {
+    return json_response(
+      { success: false, message: `license ${license_id} has been revoked` },
+      403,
+    );
+  }
+
+  // Verify this machine has an active seat (must have been activated first)
+  const activation = await env.DB.prepare(
+    'SELECT token FROM activations WHERE license_id = ?1 AND machine_id = ?2',
+  )
+    .bind(license_id, machine_id)
+    .first();
+
+  if (!activation) {
+    return json_response(
+      { success: false, message: 'machine not activated — activate first' },
+      403,
+    );
+  }
+
+  // ── Determine artifact based on tier ───────────────────────────────────
+  const target = str_field(body.value.target) || 'x86_64-unknown-linux-gnu';
+
+  if (tier === 'community') {
+    const repo = 'Hartwell-Labs/talus-process-monitor';
+    const asset_name = target.includes('aarch64')
+      ? 'talus-monitor-linux-aarch64'
+      : 'process-monitor';
+    const release_tag = version || await latest_release_tag(env, repo, null);
+    const { sha256, size } = await fetch_public_release_asset(
+      env, repo, release_tag, asset_name,
+    );
+
+    return json_response({
+      success: true,
+      url: `https://github.com/${repo}/releases/download/${release_tag}/${asset_name}`,
+      expires_in: DOWNLOAD_URL_TTL_S,
+      sha256,
+      size,
+      version: release_tag,
+      artifact_sig: null,
+      tier: 'community',
+    });
+  }
+
+  // Enterprise: private repo — use GitHub App token
+  if (tier === 'enterprise') {
+    if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY) {
+      return env_error('GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY');
+    }
+    if (!env.GITHUB_INSTALLATION_ID) {
+      return env_error('GITHUB_INSTALLATION_ID');
+    }
+
+    const repo = 'Hartwell-Labs/talus-enterprise';
+    const gh_token_info = await get_github_app_token(env);
+    const release_tag = version || await latest_release_tag(env, repo, gh_token_info.token);
+    const asset_name = target.includes('aarch64')
+      ? 'talus-monitor-enterprise-aarch64'
+      : 'talus-monitor-enterprise';
+
+    const download = await get_github_asset_presigned(
+      repo, release_tag, asset_name, gh_token_info,
+    );
+
+    return json_response({
+      success: true,
+      url: download.presigned_url,
+      expires_in: download.expires_in || DOWNLOAD_URL_TTL_S,
+      sha256: download.sha256,
+      size: download.size,
+      version: release_tag,
+      artifact_sig: download.artifact_sig,
+      tier: 'enterprise',
+    });
+  }
+
+  return json_response(
+    { success: false, message: `unsupported license tier: ${tier}` },
+    400,
+  );
+}
+
+// ── GitHub App helpers ────────────────────────────────────────────────────
+
+// Generate a JWT for the GitHub App (RS256 signed with app private key).
+// The private key (PKCS#8 PEM) is stored as a Worker secret.
+async function github_app_jwt(env) {
+  if (!env.GITHUB_APP_PRIVATE_KEY) {
+    throw new Error('GITHUB_APP_PRIVATE_KEY not configured');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const payload = btoa(
+    JSON.stringify({
+      iat: now,
+      exp: now + 600, // 10 minutes max
+      iss: Number(env.GITHUB_APP_ID),
+    })
+  );
+
+  // Sign with the RS256 private key using WebCrypto
+  const pem = env.GITHUB_APP_PRIVATE_KEY;
+  // Strip PEM headers and convert to ArrayBuffer
+  const b64 = pem.replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '');
+  const der_bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    der_bytes,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+
+  const signature = await crypto.subtle.sign(
+    { name: 'RSASSA-PKCS1-v1_5' },
+    key,
+    new TextEncoder().encode(`${header}.${payload}`),
+  );
+
+  const sig_b64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
+  return `${header}.${payload}.${sig_b64}`;
+}
+
+// Exchange the app JWT for an installation access token.
+async function get_github_app_token(env) {
+  const jwt = await github_app_jwt(env);
+  const resp = await fetch(
+    `https://api.github.com/app/installations/${env.GITHUB_INSTALLATION_ID}/access_tokens`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'talus-license-server',
+      },
+    },
+  );
+
+  if (!resp.ok) {
+    throw new Error(`GitHub App token exchange failed: ${resp.status}`);
+  }
+
+  const data = await resp.json();
+  // Installation tokens expire in ~1 hour; cap to 5 minutes for safety.
+  return {
+    token: data.token,
+    expires_at: data.expires_at,
+  };
+}
+
+// Get the latest release tag for a repo.
+async function latest_release_tag(env, repo, gh_token) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'talus-license-server',
+  };
+  if (gh_token) {
+    headers.Authorization = `token ${gh_token}`;
+  }
+
+  const resp = await fetch(
+    `https://api.github.com/repos/${repo}/releases/latest`,
+    { headers }
+  );
+
+  if (!resp.ok) {
+    throw new Error(`failed to fetch releases for ${repo}: ${resp.status}`);
+  }
+
+  const data = await resp.json();
+  return data.tag_name;
+}
+
+// Fetch checksum + size from a public release asset (no token needed).
+async function fetch_public_release_asset(env, repo, tag, asset_name) {
+  // Verify checksums from checksums-sha256.txt
+  const checksum_url = `https://github.com/${repo}/releases/download/${tag}/checksums-sha256.txt`;
+  const cs_resp = await fetch(checksum_url);
+  if (!cs_resp.ok) {
+    throw new Error(`failed to fetch checksums: ${cs_resp.status}`);
+  }
+  const cs_text = await cs_resp.text();
+  // Format: "<sha256>  <filename>"
+  let sha256 = null;
+  for (const line of cs_text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.includes(asset_name)) {
+      sha256 = trimmed.split(/\s+/)[0];
+      break;
+    }
+  }
+
+  // Get asset metadata from the API
+  const resp = await fetch(
+    `https://api.github.com/repos/${repo}/releases/latest`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'talus-license-server',
+      },
+    }
+  );
+
+  const data = await resp.json();
+  let size = 0;
+  let asset_sig = null;
+  for (const asset of data.assets) {
+    if (asset.name === asset_name) {
+      size = asset.size;
+    }
+    if (asset.name === 'talus-monitor-enterprise.sig' || asset.name === 'talus-monitor.sig') {
+      asset_sig = asset.browser_download_url;
+    }
+  }
+
+  return { sha256: sha256 || '', size, artifact_sig: asset_sig };
+}
+
+// For enterprise: get a presigned URL from GitHub's asset download endpoint.
+// Uses the GitHub App token internally; the client never sees it.
+async function get_github_asset_presigned(repo, tag, asset_name, gh_token_info) {
+  const gh_token = gh_token_info.token;
+  const resp = await fetch(
+    `https://api.github.com/repos/${repo}/releases/latest`,
+    {
+      headers: {
+        Authorization: `token ${gh_token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'talus-license-server',
+      },
+    },
+  );
+
+  if (!resp.ok) {
+    throw new Error(`GitHub API error: ${resp.status}`);
+  }
+
+  const release = await resp.json();
+  let asset = null;
+  for (const a of release.assets) {
+    if (a.name === asset_name) {
+      asset = a;
+      break;
+    }
+  }
+
+  if (!asset) {
+    throw new Error(`asset not found: ${asset_name}`);
+  }
+
+  // Request the asset download — GitHub returns a 302 redirect to a presigned S3 URL.
+  // We capture the Location header instead of following the redirect.
+  const dl_resp = await fetch(
+    asset.url,
+    {
+      headers: {
+        Authorization: `token ${gh_token}`,
+        Accept: 'application/octet-stream',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'talus-license-server',
+      },
+      redirect: 'manual', // Don't follow — capture the presigned URL
+    },
+  );
+
+  // GitHub returns 302 with Location header pointing to the presigned URL
+  let presigned_url = null;
+  if (dl_resp.status === 302 && dl_resp.headers.has('Location')) {
+    presigned_url = dl_resp.headers.get('Location');
+  }
+
+  // If no presigned URL (e.g., different GitHub behavior), fall back to
+  // using the browser_download_url directly — the client can use the token.
+  if (!presigned_url) {
+    presigned_url = asset.browser_download_url;
+  }
+
+  // Fetch checksum and signature
+  const cs_resp = await fetch(
+    `https://github.com/${repo}/releases/download/${tag}/checksums-sha256.txt`,
+    {
+      headers: {
+        Authorization: `token ${gh_token}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'talus-license-server',
+      },
+    },
+  );
+
+  let sha256 = '';
+  if (cs_resp.ok) {
+    const cs_text = await cs_resp.text();
+    for (const line of cs_text.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed.includes(asset_name)) {
+        sha256 = trimmed.split(/\s+/)[0];
+        break;
+      }
+    }
+  }
+
+  // Fetch the signature file (.sig)
+  let sig_url = null;
+  const sig_asset = asset.sig_url || release.assets.find((a) => a.name === 'talus-monitor-enterprise.sig');
+  if (sig_asset) {
+    const sig_dl = await fetch(sig_asset.url, {
+      headers: {
+        Authorization: `token ${gh_token}`,
+        Accept: 'application/octet-stream',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'talus-license-server',
+      },
+      redirect: 'manual',
+    });
+    if (sig_dl.status === 302) {
+      sig_url = sig_dl.headers.get('Location') || sig_asset.browser_download_url;
+    } else {
+      sig_url = sig_asset.browser_download_url;
+    }
+  }
+
+  // Presigned URL expires in ~1 hour from GitHub, but we cap our TTL.
+  return {
+    presigned_url,
+    expires_in: DOWNLOAD_URL_TTL_S,
+    sha256,
+    size: asset.size,
+    artifact_sig: sig_url,
+  };
+}
+
+// ── License key resolution (re-exported from store-bridge.js) ──────────────
+// (resolve_key and is_pretty/decode_pretty already imported from store-bridge.js)
 
 async function handle_deactivate(request, env) {
   if (!env.DB) return env_error('DB binding');
