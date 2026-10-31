@@ -1,0 +1,110 @@
+Commercial License — Talus automatic response path
+==================================================
+
+Copyright (c) 2026 Bartosz Osiej. All rights reserved.
+
+This licence covers only what `LICENSE` excludes: the automatic response path,
+namely the `kill_process` function and the response-enforcement logic around it
+in `process-monitor/src/monitor.rs`, together with the entitlement check that
+gates it in `process-monitor/src/ffi.rs`.
+
+No other part of this project is licensed under these terms. The detection
+engine, the eBPF probes, the audit chain, the dashboard, the REST and WebSocket
+APIs, the exporters, the CLI and the TUI are MIT licensed under `LICENSE` and
+may be used, modified and redistributed under those terms without restriction
+and without a commercial licence.
+
+1. Definitions
+--------------
+
+"Licensor"   — Bartosz Osiej, trading as Hartwell Labs.
+"Software"   — this repository.
+"Response Path" — the parts described above and excluded from the MIT grant.
+"Entitlement" — a licence key issued by the Licensor, together with the
+                subscription it is issued under.
+"Production Use" — running the Response Path on any machine where it may
+                terminate or suspend a running process, other than a personal
+                evaluation, internal testing, or research.
+
+2. Evaluation and non-commercial use
+-----------------------------------
+
+The Response Path may be used, modified and studied free of charge for
+personal evaluation, internal testing within an organisation that does not
+deploy it in Production Use, security research, and academic work. Any such use
+does not require an Entitlement.
+
+3. Commercial use
+-----------------
+
+Production Use of the Response Path requires an Entitlement. The Licensor grants
+you a non-exclusive, non-transferable licence to use the Response Path for
+Production Use for the term of your subscription, on the number of machines
+covered by that subscription.
+
+You may not use the Response Path in Production Use beyond that term or that
+number of machines, and you may not sublicense, resell, or distribute the
+Response Path, whether modified or unmodified, except as expressly agreed with
+the Licensor in writing.
+
+4. Restrictions
+---------------
+
+Except as granted in clause 3, and except for the evaluation permitted in
+clause 2, you may not:
+
+  a. remove or obscure any copyright, licence or attribution notice;
+  b. distribute the Response Path, modified or unmodified, to any third party;
+  c. sublicense, rent, lease, lend or sell the Response Path;
+  d. use the Response Path in Production Use without a valid Entitlement.
+
+Removing the entitlement check from the Software, in order to obtain the
+functionality of the Response Path without an Entitlement, is a use for which
+this licence is required and is not permitted by clause 2.
+
+5. Ownership
+------------
+
+The Software is owned by the Licensor. This licence grants no ownership. All
+rights not expressly granted are reserved.
+
+6. No warranty
+--------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. THE RESPONSE PATH CAN TERMINATE OR
+SUSPEND RUNNING PROCESSES. YOU ARE RESPONSIBLE FOR CONFIGURING IT, FOR THE
+ALLOW-LISTS AND GUARDRAILS YOU SET, AND FOR THE CONSEQUENCES OF ITS ACTIONS ON
+YOUR SYSTEMS AND ON ANY THIRD PARTY. IN NO EVENT SHALL THE LICENSOR BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+7. Termination
+--------------
+
+This licence terminates automatically if you breach clause 4. On termination
+you must stop all use of the Response Path and delete every copy of it in your
+possession or control.
+
+8. Liability
+------------
+
+To the maximum extent permitted by law, neither party is liable for indirect,
+incidental, special, consequential or punitive damages, or for lost profits,
+revenue or data, arising out of this licence or the Software. The Licensor's
+total liability under this licence is limited to the amount you paid for the
+Entitlement in the twelve months preceding the claim.
+
+9. Governing law
+----------------
+
+This licence is governed by the laws of Poland, excluding its conflict-of-law
+rules. The parties submit to the exclusive jurisdiction of the courts with
+jurisdiction over the Licensor's registered seat.
+
+10. Commercial terms
+--------------------
+
+Entitlements are sold at hartwell-labs.pl. Nothing in this file modifies the
+terms on which the Licensor offers the Software; those terms are separate from,
+and are not limited by, this licence.
