@@ -1,0 +1,18 @@
+# ── cargo-audit configuration ─────────────────────────────────────────────
+# Real vulnerabilities are ALWAYS fatal. The entries below are informational
+# advisories (unmaintained/unsound) for TRANSITIVE dependencies with no fixed
+# version available upstream. None of them is reachable from the production
+# license/activation paths. Revisit when the parent crates are updated.
+[advisories]
+ignore = [
+    # `im` 15 (dev-dep of ftui-runtime) pulls in bitmaps + sized-chunks.
+    # Unmaintained upstream; no drop-in replacement released.
+    "RUSTSEC-2026-0247", # bitmaps unmaintained (via im)
+    "RUSTSEC-2026-0248", # im unmaintained
+    "RUSTSEC-2026-0251", # sized-chunks unmaintained (via im)
+    "RUSTSEC-2023-0126", # im unsound: unwraps on client requests
+    "RUSTSEC-2026-0255", # sized-chunks unsound (via im)
+    # Text-shaping crates used only by the TUI renderer's font backend.
+    "RUSTSEC-2026-0206", # rustybuzz unmaintained
+    "RUSTSEC-2026-0192", # ttf-parser unmaintained
+]

@@ -1,0 +1,63 @@
+# NOTICE
+
+## Licensing split
+
+This repository is MIT licensed. Three things are not in it.
+
+**Here, MIT, permanently, with no key and no limits:**
+
+- the eBPF probes and the bpf object
+- scoring, sweep detectors, the MeMLP engine
+- the signed audit chain, the self-sandbox, the watchdog
+- the TUI, the JSON and plain-text output
+- the storage pipeline, the CLI, and every `license` subcommand
+
+**Not here — built from the private `talus-enterprise` crate:**
+
+- the automatic response path: terminating or suspending a process
+- the web dashboard, its REST API, WebSocket stream and Prometheus metrics
+- the Kafka, ClickHouse and MemGraph exporters
+- the C FFI library for embedding Talus in another product
+
+The split is a boundary of distribution. A MIT build contains no `kill(2)`
+call, no dashboard and no exporter — not gated, absent. The detector decides;
+`monitor::Responder` is what acts, and its default observes. Likewise
+`storage::EventSink` feeds the exporters, and the default list is empty.
+
+The reason for the split is that the judgement stays auditable. Thresholds,
+scoring, the neural engine and the audit chain are what someone has to be able
+to read and verify before trusting an agent that can end a process. Everything
+that decides is open; only the part that acts is not.
+
+## What this cannot do retroactively
+
+This split takes effect from the commit that added it. It does not and cannot
+withdraw the MIT grant that earlier versions of this repository carried.
+
+MIT is a grant, not a condition. Anyone who obtained a copy of the code before
+this change holds a perpetual licence to the automatic response path, and no
+notice added afterwards can take it away. Copies made from a fork, a mirror or
+a package registry mirror obtained before this commit are unaffected.
+
+Practically: this makes the commercial tier enforceable against future copies,
+and stops nothing that already happened. It is the earliest honest point at
+which it could be done, and it is now.
+
+## Practical effect for users
+
+  * Building and running the detector: no licence needed, no key, no limits.
+  * Building and running it without the automatic response: no licence needed.
+  * Running the automatic response on a machine where it can end a process:
+    needs a subscription at hartwell-labs.pl.
+
+The entitlement check is enforced in `process-monitor/src/ffi.rs` against the
+server at lic.hartwell-labs.pl. Removing it is explicitly outside the
+evaluation allowance in clause 2 of `LICENSE.commercial`.
+
+## A caveat that is not ours to fix
+
+The response path is a small amount of code inside a mostly-MIT file. A carve-out
+at the level of "one function in `monitor.rs`" is legally meaningful and
+technically leaky at the same time: the enforcement is a runtime gate, not a
+build-time boundary. The licence is the actual boundary. Anyone relying on the
+technical one as if it were the legal one is relying on the wrong thing.
