@@ -58,13 +58,22 @@ pub fn run(repo: &str, install: bool, assume_yes: bool, asset: &str) -> Result<(
     let latest = release.tag_name.trim_start_matches('v');
 
     let (Some(cur_v), Some(new_v)) = (parse_version(current), parse_version(latest)) else {
-        bail!("could not compare versions ('{current}' vs '{}')", release.tag_name);
+        bail!(
+            "could not compare versions ('{current}' vs '{}')",
+            release.tag_name
+        );
     };
     if new_v <= cur_v {
-        eprintln!("[talus] ✓ up to date (latest release: {})", release.tag_name);
+        eprintln!(
+            "[talus] ✓ up to date (latest release: {})",
+            release.tag_name
+        );
         return Ok(());
     }
-    eprintln!("[talus] update available: {current} -> {}", release.tag_name);
+    eprintln!(
+        "[talus] update available: {current} -> {}",
+        release.tag_name
+    );
     eprintln!("[talus] release notes: {}", release.html_url);
 
     if !install {
@@ -90,15 +99,23 @@ pub fn run(repo: &str, install: bool, assume_yes: bool, asset: &str) -> Result<(
         .with_context(|| format!("no checksum for '{}' in {CHECKSUMS_ASSET}", bin.name))?;
     let actual = hex::encode(Sha256::digest(&data));
     if !actual.eq_ignore_ascii_case(&expected) {
-        bail!("checksum mismatch for {} (expected {expected}, got {actual}); nothing installed", bin.name);
+        bail!(
+            "checksum mismatch for {} (expected {expected}, got {actual}); nothing installed",
+            bin.name
+        );
     }
     eprintln!("[talus] ✓ sha256 verified: {actual}");
 
     verify_with_cosign(&client, &release, &data, repo, asset)?;
 
     replace_running_binary(&data)?;
-    eprintln!("[talus] ✓ updated to {}. Restart talus to use it.", release.tag_name);
-    eprintln!("[talus]   cosign signature verification attempted above (install `cosign` to enable it).");
+    eprintln!(
+        "[talus] ✓ updated to {}. Restart talus to use it.",
+        release.tag_name
+    );
+    eprintln!(
+        "[talus]   cosign signature verification attempted above (install `cosign` to enable it)."
+    );
     Ok(())
 }
 
@@ -132,7 +149,10 @@ fn find_asset<'a>(release: &'a Release, repo: &str, name: &str) -> Result<&'a As
         .find(|a| a.name == name)
         .with_context(|| format!("release {} has no asset named '{name}'", release.tag_name))?;
     if !asset.browser_download_url.starts_with(&prefix) {
-        bail!("asset URL {} is outside {prefix}; refusing", asset.browser_download_url);
+        bail!(
+            "asset URL {} is outside {prefix}; refusing",
+            asset.browser_download_url
+        );
     }
     Ok(asset)
 }
@@ -155,14 +175,12 @@ fn verify_with_cosign(
     let prefix = format!("https://github.com/{repo}/releases/download/");
 
     let (Some(sig), Some(bundle)) = (
-        release
-            .assets
-            .iter()
-            .find(|a| a.name == format!("{asset}.sig") && a.browser_download_url.starts_with(&prefix)),
-        release
-            .assets
-            .iter()
-            .find(|a| a.name == format!("{asset}.bundle") && a.browser_download_url.starts_with(&prefix)),
+        release.assets.iter().find(|a| {
+            a.name == format!("{asset}.sig") && a.browser_download_url.starts_with(&prefix)
+        }),
+        release.assets.iter().find(|a| {
+            a.name == format!("{asset}.bundle") && a.browser_download_url.starts_with(&prefix)
+        }),
     ) else {
         eprintln!(
             "[talus] ⚠ cosign artifacts ({asset}.sig/.bundle) not in release {}; verified via SHA-256 only. Run: cosign verify-blob {asset} --signature {asset}.sig --bundle {asset}.bundle",
@@ -216,12 +234,21 @@ fn verify_with_cosign(
 
 fn download(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
     let resp = client.get(url).send()?.error_for_status()?;
-    if resp.content_length().is_some_and(|n| n > MAX_DOWNLOAD_BYTES) {
-        bail!("download is larger than {} MiB; refusing", MAX_DOWNLOAD_BYTES / 1024 / 1024);
+    if resp
+        .content_length()
+        .is_some_and(|n| n > MAX_DOWNLOAD_BYTES)
+    {
+        bail!(
+            "download is larger than {} MiB; refusing",
+            MAX_DOWNLOAD_BYTES / 1024 / 1024
+        );
     }
     let bytes = resp.bytes()?;
     if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
-        bail!("download is larger than {} MiB; refusing", MAX_DOWNLOAD_BYTES / 1024 / 1024);
+        bail!(
+            "download is larger than {} MiB; refusing",
+            MAX_DOWNLOAD_BYTES / 1024 / 1024
+        );
     }
     Ok(bytes.to_vec())
 }
@@ -230,7 +257,9 @@ fn download(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
 /// rename over it (atomic on the same filesystem; safe while running on Linux).
 fn replace_running_binary(data: &[u8]) -> Result<()> {
     let exe = std::env::current_exe().context("cannot locate the running binary")?;
-    let dir = exe.parent().context("running binary has no parent directory")?;
+    let dir = exe
+        .parent()
+        .context("running binary has no parent directory")?;
     let tmp = dir.join(".talus-update.tmp");
 
     let write = || -> io::Result<()> {
@@ -261,7 +290,10 @@ fn confirm(question: &str) -> Result<bool> {
     io::stderr().flush()?;
     let mut line = String::new();
     io::stdin().read_line(&mut line)?;
-    Ok(matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 // ── Pure helpers (unit-tested) ────────────────────────────────────────────
@@ -273,7 +305,8 @@ fn validate_repo(repo: &str) -> Result<()> {
             !p.is_empty()
                 && p != "."
                 && p != ".."
-                && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         });
     if !ok {
         bail!("invalid repository '{repo}' (expected owner/name)");
@@ -333,7 +366,10 @@ mod tests {
         let h = "a".repeat(64);
         let text = format!("{h}  talus-tui\n{}  talus-web\n", "b".repeat(64));
         assert_eq!(expected_checksum(&text, "talus-tui"), Some(h.clone()));
-        assert_eq!(expected_checksum(&format!("{h} *talus-tui"), "talus-tui"), Some(h));
+        assert_eq!(
+            expected_checksum(&format!("{h} *talus-tui"), "talus-tui"),
+            Some(h)
+        );
         assert_eq!(expected_checksum(&text, "missing"), None);
         assert_eq!(expected_checksum("short  talus-tui", "talus-tui"), None);
     }
@@ -344,9 +380,17 @@ mod tests {
         let mk = |url: &str| Release {
             tag_name: "v1.0.0".into(),
             html_url: String::new(),
-            assets: vec![Asset { name: "talus-tui".into(), browser_download_url: url.into() }],
+            assets: vec![Asset {
+                name: "talus-tui".into(),
+                browser_download_url: url.into(),
+            }],
         };
-        assert!(find_asset(&mk("https://github.com/o/r/releases/download/v1/talus-tui"), repo, "talus-tui").is_ok());
+        assert!(find_asset(
+            &mk("https://github.com/o/r/releases/download/v1/talus-tui"),
+            repo,
+            "talus-tui"
+        )
+        .is_ok());
         assert!(find_asset(&mk("https://evil.example/talus-tui"), repo, "talus-tui").is_err());
     }
 }
