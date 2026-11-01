@@ -1,55 +1,5 @@
-# platform
-.DS_Store
-*.log
-*.pdf
-
 target/
-.idea/
-*.swp
-*.swo
-*.o
-
-# Build outputs — compiled binaries and libraries are never committed
-# (rebuild with: ./build.sh; releases attach them via CI)
-build/
-talus-web
-talus-tui
-process-monitor-tui
-process-monitor-web
-talus
-
-# aurora-os is its own repo (BartoszOsiej/AURORA-OS)
-aurora-os/
-
-# ── Licensing secrets — NEVER commit these ────────────────────────────────
-# Signing keys live outside the repo: ~/.secrets/talus/license-keys/
-license-keys/
-signing_key*
-*.pem
-.dev.vars
+*.dat
+*.hmac
 .env
-.env.*
-!.env.example
-wrangler.local.toml
-
-# license-server
-node_modules/
-
-# Wrangler local dev state
-.wrangler/
-pypi/dist/
-
-# embedded eBPF object MUST be tracked (include_bytes!)
-!process-monitor/src/bpf/process_monitor_ebpf.o
-
-# ── Artykuł Linux Magazine — nic nie wchodzi do GitHuba (mail do Lori) ──────
-# Cały tekst + figury są szlifowane lokalnie i wysyłane mailem do redakcji
-# (lwhite@linuxnewmedia.com). Nie commitować ani nie pushować.
-docs/ARTICLE.md
-docs/ARTICLE.pdf
-docs/ARTICLE.docx
-docs/ARTICLE.html
-docs/print.css
-docs/article-images/
-docs/*.png
-
+/secrets
