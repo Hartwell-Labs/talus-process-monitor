@@ -99,10 +99,8 @@ pub struct PublicKeyEntry {
 /// at test time and injected via environment or mock binary.
 #[cfg(feature = "test-license")]
 pub const PUBKEY_TEST: [u8; 32] = [
-    0xba, 0x13, 0x4d, 0xe9, 0xc6, 0xfc, 0x6d, 0xbc,
-    0x4d, 0xd5, 0xe5, 0x31, 0x22, 0x11, 0xc2, 0xe8,
-    0x77, 0xc8, 0x92, 0x7b, 0xd0, 0x88, 0x62, 0x27,
-    0x7e, 0x33, 0xc4, 0x94, 0x17, 0x75, 0x11, 0x1e,
+    0xba, 0x13, 0x4d, 0xe9, 0xc6, 0xfc, 0x6d, 0xbc, 0x4d, 0xd5, 0xe5, 0x31, 0x22, 0x11, 0xc2, 0xe8,
+    0x77, 0xc8, 0x92, 0x7b, 0xd0, 0x88, 0x62, 0x27, 0x7e, 0x33, 0xc4, 0x94, 0x17, 0x75, 0x11, 0x1e,
 ];
 
 /// Keys trusted for license signature verification.
@@ -114,10 +112,22 @@ pub const PUBKEY_TEST: [u8; 32] = [
 /// Backward compatibility: licenses without an explicit `kid` field default
 /// to "v1", so they continue to verify against the old key.
 pub const PUBLIC_KEYS: &[PublicKeyEntry] = &[
-    PublicKeyEntry { kid: "v1", key: PUBKEY_V1, active: false },
-    PublicKeyEntry { kid: "v2", key: PUBKEY_V2, active: true },
+    PublicKeyEntry {
+        kid: "v1",
+        key: PUBKEY_V1,
+        active: false,
+    },
+    PublicKeyEntry {
+        kid: "v2",
+        key: PUBKEY_V2,
+        active: true,
+    },
     #[cfg(feature = "test-license")]
-    PublicKeyEntry { kid: "test", key: PUBKEY_TEST, active: false },
+    PublicKeyEntry {
+        kid: "test",
+        key: PUBKEY_TEST,
+        active: false,
+    },
 ];
 
 /// Default key ID for licenses without an explicit `kid` field (backward compat).
@@ -544,9 +554,7 @@ fn activation_server_urls() -> Vec<String> {
             // Logs a warning in release builds if the primary is overridden.
             #[cfg(not(debug_assertions))]
             if std::env::var("TALUS_LICENSE_SERVER").is_ok() {
-                eprintln!(
-                    "[talus] WARNING: using custom license server via TALUS_LICENSE_SERVER"
-                );
+                eprintln!("[talus] WARNING: using custom license server via TALUS_LICENSE_SERVER");
             }
             urls.push("https://lic-failover.hartwell-labs.pl".to_string());
         }
@@ -646,8 +654,7 @@ fn post_activation_api<T: serde::de::DeserializeOwned>(
             }
             Err(err) => {
                 // Last server — return the error
-                return Err(anyhow::anyhow!(err))
-                    .context("failed to connect to activation server");
+                return Err(anyhow::anyhow!(err)).context("failed to connect to activation server");
             }
         }
     }
@@ -697,7 +704,10 @@ fn resolve_short_key(short_key: &str) -> Result<String> {
     audit_log(
         "RESOLVE_OK",
         body.license_id.as_deref().unwrap_or("short-key"),
-        &format!("short key resolved to {} license", body.tier.as_deref().unwrap_or("unknown")),
+        &format!(
+            "short key resolved to {} license",
+            body.tier.as_deref().unwrap_or("unknown")
+        ),
     );
     Ok(jwt)
 }
@@ -776,7 +786,10 @@ fn redeem_store_key(store_key: &str) -> Result<String> {
     audit_log(
         "REDEEM_OK",
         "store-key",
-        &format!("store key translated to {} license", body.tier.as_deref().unwrap_or("unknown")),
+        &format!(
+            "store key translated to {} license",
+            body.tier.as_deref().unwrap_or("unknown")
+        ),
     );
     Ok(talus_key)
 }
@@ -926,10 +939,11 @@ pub fn download_artifact(
     current_version: Option<&str>,
     allow_downgrade: bool,
 ) -> Result<(PathBuf, String)> {
-    let cache = LicenseCache::load()?
-        .context("no license found — cannot download artifact")?;
+    let cache = LicenseCache::load()?.context("no license found — cannot download artifact")?;
     let license_id = cache.payload.license_id.clone();
-    let machine_id = cache.payload.machine_id
+    let machine_id = cache
+        .payload
+        .machine_id
         .as_ref()
         .context("license not activated — activate first")?;
 
@@ -980,8 +994,15 @@ pub fn download_artifact(
 
     // Extract filename from URL query params (GitHub presigned URLs put filename in response-content-disposition)
     let filename = if let Some(fname) = grant.url.split("filename=").nth(1) {
-        fname.split(['&', '%', ';'].as_ref()).next().unwrap_or("talus-monitor-enterprise").to_string()
-    } else if let Some(fname) = std::path::Path::new(&grant.url).file_name().and_then(|n| n.to_str()) {
+        fname
+            .split(['&', '%', ';'].as_ref())
+            .next()
+            .unwrap_or("talus-monitor-enterprise")
+            .to_string()
+    } else if let Some(fname) = std::path::Path::new(&grant.url)
+        .file_name()
+        .and_then(|n| n.to_str())
+    {
         if fname.len() > 200 || fname.contains('?') || fname.contains('=') {
             format!("talus-monitor-{}", std::process::id())
         } else {
@@ -1034,9 +1055,7 @@ pub fn download_artifact(
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         {
-            let bytes = response
-                .bytes()
-                .context("failed to read artifact body")?;
+            let bytes = response.bytes().context("failed to read artifact body")?;
 
             if bytes.len() > grant.size as usize {
                 bail!(
@@ -1069,7 +1088,10 @@ pub fn download_artifact(
 
         // Verify ELF magic
         {
-            let magic = std::fs::read(&download_path)?.into_iter().take(5).collect::<Vec<_>>();
+            let magic = std::fs::read(&download_path)?
+                .into_iter()
+                .take(5)
+                .collect::<Vec<_>>();
             if magic != vec![0x7f, b'E', b'L', b'F', 2] {
                 let _ = std::fs::remove_file(&download_path);
                 bail!("downloaded file is not a valid ELF64 binary");
@@ -1209,9 +1231,18 @@ fn version_compare(a: &str, b: &str) -> i32 {
     };
     let va = parse(a);
     let vb = parse(b);
-    for (i, (x, y)) in va.iter().chain(std::iter::repeat(&0)).zip(vb.iter().chain(std::iter::repeat(&0))).enumerate() {
-        if i >= 32 { break; }
-        if x != y { return if x > y { 1 } else { -1 }; }
+    for (i, (x, y)) in va
+        .iter()
+        .chain(std::iter::repeat(&0))
+        .zip(vb.iter().chain(std::iter::repeat(&0)))
+        .enumerate()
+    {
+        if i >= 32 {
+            break;
+        }
+        if x != y {
+            return if x > y { 1 } else { -1 };
+        }
     }
     0
 }
@@ -1223,10 +1254,9 @@ fn version_compare(a: &str, b: &str) -> i32 {
 const ARTIFACT_PUBLIC_KEY: [u8; 32] = {
     // TEST artifact key — only compiled with --features test-license
     [
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
     ]
 };
 
@@ -1235,10 +1265,9 @@ const ARTIFACT_PUBLIC_KEY: [u8; 32] = {
     // Production artifact verification key.
     // kid: talus-artifact-v1
     [
-        0x52, 0x1c, 0xa7, 0x95, 0xa9, 0x3b, 0x0c, 0x3e,
-        0xa7, 0x80, 0xb2, 0xeb, 0x44, 0xd3, 0x7f, 0x81,
-        0x82, 0x1c, 0x84, 0x3a, 0xae, 0xae, 0x7e, 0xef,
-        0x62, 0xc9, 0x4e, 0x71, 0x91, 0xd5, 0x9a, 0x47,
+        0x52, 0x1c, 0xa7, 0x95, 0xa9, 0x3b, 0x0c, 0x3e, 0xa7, 0x80, 0xb2, 0xeb, 0x44, 0xd3, 0x7f,
+        0x81, 0x82, 0x1c, 0x84, 0x3a, 0xae, 0xae, 0x7e, 0xef, 0x62, 0xc9, 0x4e, 0x71, 0x91, 0xd5,
+        0x9a, 0x47,
     ]
 };
 
@@ -2547,10 +2576,9 @@ mod tests {
     fn test_license_sign_and_verify_roundtrip() {
         use ed25519_dalek::{Signer, SigningKey};
 
-        let priv_bytes = hex::decode(
-            "919b95fdabe4b4a9f1b604a5cf47e35bc1a3bd8cb70898d8a2162e033b963e2f",
-        )
-        .unwrap();
+        let priv_bytes =
+            hex::decode("919b95fdabe4b4a9f1b604a5cf47e35bc1a3bd8cb70898d8a2162e033b963e2f")
+                .unwrap();
         let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().unwrap();
         let sk = SigningKey::from_bytes(&priv_arr);
 

@@ -1,15 +1,17 @@
 //! Integration test for the artifact download-verification pipeline.
-use talus_process_monitor::license::{LicenseCache, activate_license, download_artifact};
+use talus_process_monitor::license::{activate_license, download_artifact, LicenseCache};
 
 #[test]
 #[ignore]
 fn test_download_artifact_full() {
     // Load cache
-    let cache = LicenseCache::load().unwrap()
+    let cache = LicenseCache::load()
+        .unwrap()
         .expect("no license cache — run `talus license activate` first");
-    eprintln!("License: {} tier: {} machine: {:?}",
-        cache.payload.license_id, cache.payload.tier,
-        cache.payload.machine_id);
+    eprintln!(
+        "License: {} tier: {} machine: {:?}",
+        cache.payload.license_id, cache.payload.tier, cache.payload.machine_id
+    );
 
     // Ensure activated on server
     if cache.activation_token.is_none() {
@@ -22,7 +24,11 @@ fn test_download_artifact_full() {
     // Test download grant + artifact download
     match download_artifact("enterprise", None, false) {
         Ok((path, version)) => {
-            eprintln!("SUCCESS: Downloaded to: {} version: {}", path.display(), version);
+            eprintln!(
+                "SUCCESS: Downloaded to: {} version: {}",
+                path.display(),
+                version
+            );
             // Clean up
             std::fs::remove_file(&path).ok();
         }

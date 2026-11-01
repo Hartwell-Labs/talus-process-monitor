@@ -584,9 +584,9 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
     } else if args.diagnose {
         run_diagnose(&mut monitor)?;
     } else if let Some(addr) = &args.web {
-        let addr: SocketAddr = addr
-            .parse()
-            .with_context(|| format!("invalid --web address '{addr}', expected HOST:PORT (e.g. 127.0.0.1:8080)"))?;
+        let addr: SocketAddr = addr.parse().with_context(|| {
+            format!("invalid --web address '{addr}', expected HOST:PORT (e.g. 127.0.0.1:8080)")
+        })?;
         match hooks.web {
             Some(spawn_web) => {
                 eprintln!("[talus] starting web dashboard on https://{addr}");
@@ -794,7 +794,8 @@ pub fn run_diagnose(monitor: &mut Monitor) -> Result<()> {
                     | Kind::Mkdir
                     | Kind::Unlink
                     | Kind::Kill
-                    | Kind::Chmod | Kind::Unknown => {}
+                    | Kind::Chmod
+                    | Kind::Unknown => {}
                 },
                 Output::Alert(_) => alerts += 1,
                 Output::Action(_) => {}
@@ -909,7 +910,9 @@ pub fn run_benchmark(monitor: &mut Monitor, secs: u64) -> Result<()> {
                         Kind::Connect | Kind::Accept | Kind::SendTo | Kind::RecvFrom => {
                             total_net += 1
                         }
-                        Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => total_other += 1,
+                        Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => {
+                            total_other += 1
+                        }
                     }
                 }
                 Output::Alert(_) => {}
