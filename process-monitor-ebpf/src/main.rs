@@ -149,7 +149,7 @@ fn emit_event(ctx: &TracePointContext, event_type: u8, filename_arg: u32) -> u32
                 || (f[1] == b'e' && f[2] == b't' && f[3] == b'c'   // /etc/ld.so.cache
                     && f[4] == b'/' && f[5] == b'l' && f[6] == b'd'
                     && f[7] == b'.' && f[8] == b's' && f[9] == b'o'
-                    && f[10] == b'/' && f[11] != b'p')             // keep /etc/ld.so.preload
+                    && f[10] == b'/' && f[11] != b'p') // keep /etc/ld.so.preload
         } else {
             // Relative basenames opened via a /proc/<pid> dir fd.
             // Compare byte-by-zero so we don't read past the NUL terminator.
