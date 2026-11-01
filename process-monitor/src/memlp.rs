@@ -629,8 +629,7 @@ impl Mlp {
     pub fn train(&mut self, input: &[f32], target: &[f32], learning_rate: f32) -> f32 {
         // Guard against poisoned inputs (NaN/Inf features or labels) — skip
         // the update entirely instead of propagating the poison.
-        if !learning_rate.is_finite() || !input.iter().chain(target.iter()).all(|v| v.is_finite())
-        {
+        if !learning_rate.is_finite() || !input.iter().chain(target.iter()).all(|v| v.is_finite()) {
             return f32::INFINITY;
         }
 
@@ -805,7 +804,13 @@ impl Assessment {
 /// Clamp a feature vector into the documented `[0, 1]` range; non-finite
 /// values become `0.0`. Keeps one bad embedding from distorting training.
 fn clean_features(f: &[f32; N_FEATURES]) -> [f32; N_FEATURES] {
-    f.map(|v| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 })
+    f.map(|v| {
+        if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    })
 }
 
 /// A pseudo-random behavioural embedding spanning the feature space: half
@@ -976,9 +981,8 @@ impl MeMLP {
             .with_context(|| format!("failed to write MeMLP checkpoint {}", tmp.display()))?;
         if let Err(e) = std::fs::rename(&tmp, path) {
             let _ = std::fs::remove_file(&tmp);
-            return Err(e).with_context(|| {
-                format!("failed to replace MeMLP checkpoint {}", path.display())
-            });
+            return Err(e)
+                .with_context(|| format!("failed to replace MeMLP checkpoint {}", path.display()));
         }
         self.saved.0.store(mark, Ordering::Relaxed);
         Ok(())
@@ -1497,7 +1501,10 @@ mod tests {
         for _ in 0..8 {
             pf.decay();
         }
-        assert!(!pf.has_activity(), "a lone event must age out within ~8 ticks");
+        assert!(
+            !pf.has_activity(),
+            "a lone event must age out within ~8 ticks"
+        );
     }
 
     #[test]
@@ -1619,12 +1626,19 @@ mod tests {
     #[test]
     fn fresh_model_is_useful_out_of_the_box() {
         let model = MeMLP::new();
-        assert_eq!(model.training_samples, 0, "pre-fit must not count as live training");
+        assert_eq!(
+            model.training_samples, 0,
+            "pre-fit must not count as live training"
+        );
         for a in &ANCHORS {
             let v = model.assess(a);
             assert_eq!(v.ransomware.class, ransomware_heuristic_target(a), "{a:?}");
             assert_eq!(v.lateral.class, lateral_heuristic_target(a), "{a:?}");
-            assert_eq!(v.persistence.class, persistence_heuristic_target(a), "{a:?}");
+            assert_eq!(
+                v.persistence.class,
+                persistence_heuristic_target(a),
+                "{a:?}"
+            );
         }
     }
 
@@ -1643,7 +1657,12 @@ mod tests {
             p += usize::from(a.persistence.class == persistence_heuristic_target(&f));
         }
         let rate = |x: usize| x as f32 / n as f32;
-        println!("agreement: R {:.3} L {:.3} P {:.3}", rate(r), rate(l), rate(p));
+        println!(
+            "agreement: R {:.3} L {:.3} P {:.3}",
+            rate(r),
+            rate(l),
+            rate(p)
+        );
         assert!(rate(r) > 0.85, "ransomware agreement only {:.3}", rate(r));
         assert!(rate(l) > 0.9, "lateral agreement only {:.3}", rate(l));
         assert!(rate(p) > 0.9, "persistence agreement only {:.3}", rate(p));
@@ -1682,8 +1701,9 @@ mod tests {
             r.push([i as f32; N_FEATURES]);
         }
         assert_eq!(r.len, REPLAY_LEN);
-        let seen: std::collections::HashSet<u32> =
-            (0..REPLAY_LEN).map(|_| r.next().unwrap()[0] as u32).collect();
+        let seen: std::collections::HashSet<u32> = (0..REPLAY_LEN)
+            .map(|_| r.next().unwrap()[0] as u32)
+            .collect();
         assert_eq!(seen.len(), REPLAY_LEN);
     }
 
@@ -1703,7 +1723,14 @@ mod tests {
         for cut in (0..good.len()).step_by(997) {
             assert!(MeMLP::from_json_bytes(&good[..cut], "trunc").is_err());
         }
-        let bad_inputs: [&[u8]; 6] = [b"", b"null", b"[]", b"{}", b"\xff\xfe\x00", b"{\"version\":1}"];
+        let bad_inputs: [&[u8]; 6] = [
+            b"",
+            b"null",
+            b"[]",
+            b"{}",
+            b"\xff\xfe\x00",
+            b"{\"version\":1}",
+        ];
         for bad in bad_inputs {
             assert!(MeMLP::from_json_bytes(bad, "bad").is_err());
         }
@@ -1717,9 +1744,13 @@ mod tests {
         assert!(MeMLP::from_json_bytes(&raw, "ver").is_err());
 
         let mut v: serde_json::Value = serde_json::to_value(MeMLP::new()).unwrap();
-        v["ransomware"]["arch"] = serde_json::json!([N_FEATURES, 1_000_000_000u64, RANSOMWARE_CLASSES]);
+        v["ransomware"]["arch"] =
+            serde_json::json!([N_FEATURES, 1_000_000_000u64, RANSOMWARE_CLASSES]);
         let raw = serde_json::to_vec(&v).unwrap();
-        assert!(MeMLP::from_json_bytes(&raw, "huge").is_err(), "absurd widths must not allocate or pass");
+        assert!(
+            MeMLP::from_json_bytes(&raw, "huge").is_err(),
+            "absurd widths must not allocate or pass"
+        );
 
         let mut v: serde_json::Value = serde_json::to_value(MeMLP::new()).unwrap();
         v["lateral"]["weights"] = serde_json::json!([[0.0]]);

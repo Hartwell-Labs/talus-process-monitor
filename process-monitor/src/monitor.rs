@@ -77,11 +77,19 @@ unsafe impl aya::Pod for ProcessEvent {}
 
 impl ProcessEvent {
     fn comm_bytes(&self) -> &[u8] {
-        let end = self.comm.iter().position(|&c| c == 0).unwrap_or(self.comm.len());
+        let end = self
+            .comm
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(self.comm.len());
         &self.comm[..end]
     }
     fn filename_bytes(&self) -> &[u8] {
-        let end = self.filename.iter().position(|&c| c == 0).unwrap_or(self.filename.len());
+        let end = self
+            .filename
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(self.filename.len());
         &self.filename[..end]
     }
     fn comm_str(&self) -> String {
@@ -438,7 +446,12 @@ impl Monitor {
     {
         self.ignore_comms = comms
             .into_iter()
-            .map(|c| c.as_ref().chars().take(EVENT_COMM_LEN - 1).collect::<String>())
+            .map(|c| {
+                c.as_ref()
+                    .chars()
+                    .take(EVENT_COMM_LEN - 1)
+                    .collect::<String>()
+            })
             .filter(|c| !c.is_empty())
             .collect();
         self
@@ -574,7 +587,7 @@ impl Monitor {
             .try_into()
             .context("'EVENTS' is not a PerfEventArray")?;
 
-        let (tx, rx) = mpsc::sync_channel(1024);  // 1024×512 = 512K-event buffer — absorbs bursts
+        let (tx, rx) = mpsc::sync_channel(1024); // 1024×512 = 512K-event buffer — absorbs bursts
         let reader = spawn_reader(perf_array, tx)?;
 
         let now = Instant::now();
@@ -678,9 +691,7 @@ impl Monitor {
             // Avoid per-event /proc/{pid}/status I/O in handle_event by
             // collecting PIDs here and resolving them once per second.
             for pid in self.pending_ppids.drain() {
-                if let std::collections::hash_map::Entry::Vacant(e) =
-                    self.pid_to_ppid.entry(pid)
-                {
+                if let std::collections::hash_map::Entry::Vacant(e) = self.pid_to_ppid.entry(pid) {
                     match read_ppid_from_proc(pid) {
                         Some(ppid) => {
                             // Process still alive — parent resolved.
@@ -786,7 +797,10 @@ impl Monitor {
         if self.memlp.is_some() {
             match kind {
                 Kind::Exec => {
-                    self.pid_features.entry(pid).or_default().observe_exec(false);
+                    self.pid_features
+                        .entry(pid)
+                        .or_default()
+                        .observe_exec(false);
                 }
                 Kind::Connect | Kind::Accept | Kind::SendTo | Kind::RecvFrom => {
                     self.pid_features.entry(pid).or_default().observe_exec(true);
@@ -796,7 +810,9 @@ impl Monitor {
                     let ext = extract_extension(&filename);
                     let entropy = shannon_entropy(&filename);
                     self.pid_features.entry(pid).or_default().observe_open(
-                        &filename, Some(&ext), entropy,
+                        &filename,
+                        Some(&ext),
+                        entropy,
                     );
                 }
                 Kind::Mkdir => {
@@ -850,7 +866,10 @@ impl Monitor {
 
                 if self.threshold > 0
                     && stats.window_opens == self.threshold
-                    && !self.ignore_comms.iter().any(|ic| ic.as_bytes() == raw.comm_bytes())
+                    && !self
+                        .ignore_comms
+                        .iter()
+                        .any(|ic| ic.as_bytes() == raw.comm_bytes())
                 {
                     stats.alerts += 1;
                     self.tick_alerts += 1;
@@ -1097,7 +1116,8 @@ impl Monitor {
         // they are not silently lost — only the suppressed comm line vanishes.
         let is_ignored = |comm: &str| {
             !self.show_ignored
-                && self.ignore_comms
+                && self
+                    .ignore_comms
                     .iter()
                     .any(|ic| ic.as_bytes() == comm.as_bytes())
         };
@@ -1151,7 +1171,8 @@ impl Monitor {
             .into_iter()
             .partition(|pid| children_map.contains_key(pid));
 
-        let mut out: Vec<ProcessNode> = if roots_with_children.is_empty() && orphan_roots.is_empty() {
+        let mut out: Vec<ProcessNode> = if roots_with_children.is_empty() && orphan_roots.is_empty()
+        {
             Vec::new()
         } else {
             // Recursively build the connected tree part.
@@ -1185,19 +1206,23 @@ impl Monitor {
 
         let mut groups: HashMap<&str, (ProcessNode, usize)> = HashMap::new();
         for pid in orphan_roots {
-            let Some(s) = self.stats.get(&pid) else { continue };
+            let Some(s) = self.stats.get(&pid) else {
+                continue;
+            };
             let comm: &str = s.comm.as_str();
-            let entry = groups.entry(comm).or_insert_with(|| (
-                ProcessNode {
-                    pid,
-                    ppid: 0,
-                    comm: s.comm.clone(),
-                    alerts: 0,
-                    total_opens: 0,
-                    children: Vec::new(),
-                },
-                0,
-            ));
+            let entry = groups.entry(comm).or_insert_with(|| {
+                (
+                    ProcessNode {
+                        pid,
+                        ppid: 0,
+                        comm: s.comm.clone(),
+                        alerts: 0,
+                        total_opens: 0,
+                        children: Vec::new(),
+                    },
+                    0,
+                )
+            });
             entry.0.alerts += s.alerts;
             entry.0.total_opens += s.total_opens;
             entry.1 += 1;
@@ -1942,7 +1967,10 @@ mod tests {
         monitor.pid_to_ppid.insert(3, 2);
 
         for pid in &[1, 2, 3] {
-            monitor.handle_event(&make_event(EVENT_EXECVE, *pid, 0, &format!("proc{pid}"), ""), &mut outputs);
+            monitor.handle_event(
+                &make_event(EVENT_EXECVE, *pid, 0, &format!("proc{pid}"), ""),
+                &mut outputs,
+            );
         }
 
         let tree = monitor.build_process_tree();
@@ -1963,7 +1991,10 @@ mod tests {
         monitor.pid_to_ppid.insert(20, 0);
 
         for pid in &[10, 20] {
-            monitor.handle_event(&make_event(EVENT_EXECVE, *pid, 0, &format!("root{pid}"), ""), &mut outputs);
+            monitor.handle_event(
+                &make_event(EVENT_EXECVE, *pid, 0, &format!("root{pid}"), ""),
+                &mut outputs,
+            );
         }
 
         let tree = monitor.build_process_tree();
@@ -2052,7 +2083,10 @@ mod tests {
     fn handle_event_connect_increments_execs() {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
-        monitor.handle_event(&make_event(EVENT_CONNECT, 50, 1000, "curl", "93.184.216.34:443"), &mut outputs);
+        monitor.handle_event(
+            &make_event(EVENT_CONNECT, 50, 1000, "curl", "93.184.216.34:443"),
+            &mut outputs,
+        );
         let stats = monitor.stats.get(&50).unwrap();
         assert_eq!(stats.total_execs, 1, "network events count as execs");
         assert_eq!(stats.total_opens, 0);
@@ -2223,7 +2257,10 @@ mod tests {
         let mut monitor = Monitor::dummy();
         let mut outputs = Vec::new();
         // PID with unknown parent (not in pid_to_ppid)
-        monitor.handle_event(&make_event(EVENT_EXECVE, 500, 0, "orphan", ""), &mut outputs);
+        monitor.handle_event(
+            &make_event(EVENT_EXECVE, 500, 0, "orphan", ""),
+            &mut outputs,
+        );
         let tree = monitor.build_process_tree();
         assert_eq!(tree.len(), 1, "orphan becomes a root");
         assert_eq!(tree[0].pid, 500);
@@ -2235,7 +2272,10 @@ mod tests {
         let mut monitor = Monitor::dummy().with_ignored_comms(["hyprctl"]);
         let mut outputs = Vec::new();
         // An ignored comm is still captured (events counted), just never alerts...
-        monitor.handle_event(&make_event(EVENT_EXECVE, 4242, 0, "hyprctl", ""), &mut outputs);
+        monitor.handle_event(
+            &make_event(EVENT_EXECVE, 4242, 0, "hyprctl", ""),
+            &mut outputs,
+        );
         let _ = outputs;
 
         // ...and is hidden from the process tree by default.
@@ -2352,8 +2392,7 @@ mod tests {
         let mut outputs = Vec::new();
         monitor.handle_event(&open(10, 0, "/a"), &mut outputs);
         monitor.handle_event(&open(11, 0, "/b"), &mut outputs);
-        *monitor.last_seen.get_mut(&10).unwrap() -=
-            Duration::from_secs(IDLE_PID_TTL_SECS + 1);
+        *monitor.last_seen.get_mut(&10).unwrap() -= Duration::from_secs(IDLE_PID_TTL_SECS + 1);
         monitor.prune_idle();
         assert!(!monitor.stats.contains_key(&10));
         assert!(!monitor.last_seen.contains_key(&10));
@@ -2398,7 +2437,9 @@ mod tests {
         assert_eq!(before, pids.len(), "no duplicates");
         assert!(top.len() < 40, "bounded, not all PIDs");
         assert_eq!(top[0].pid, 40, "busiest first");
-        assert!(top.windows(2).all(|w| w[0].window_opens >= w[1].window_opens));
+        assert!(top
+            .windows(2)
+            .all(|w| w[0].window_opens >= w[1].window_opens));
         let all = monitor.stats_top(1000);
         assert_eq!(all.len(), 40, "n above PID count returns everything");
     }
