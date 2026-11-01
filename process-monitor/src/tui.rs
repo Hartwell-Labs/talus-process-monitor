@@ -39,9 +39,7 @@ use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::{StatefulWidget, Widget};
 
 use crate::license::LicenseState;
-use crate::monitor::{
-    FileRank, Monitor, Output, ProcStats, RateSample, TUI_SNAPSHOT_EVENT_CAP,
-};
+use crate::monitor::{FileRank, Monitor, Output, ProcStats, RateSample, TUI_SNAPSHOT_EVENT_CAP};
 
 /// Processes that produce too many events to display (polling, IPC, etc.)
 const NOISY_COMMS: &[&str] = &[
@@ -381,7 +379,9 @@ impl App_ {
             gateway_note: String::new(),
             gateway_link_area: Cell::new(Rect::default()),
             gateway_cont_area: Cell::new(Rect::default()),
-            demo: std::env::var("TALUS_TUI_DEMO").map(|v| v == "1").unwrap_or(false),
+            demo: std::env::var("TALUS_TUI_DEMO")
+                .map(|v| v == "1")
+                .unwrap_or(false),
             eps: 0.0,
             eps_mark: (Instant::now(), 0),
             cpu_pct: 0.0,
@@ -1020,7 +1020,11 @@ impl App_ {
             row("events/s", fmt_rate(eps), BRIGHT),
             row("cpu", format!("{cpu:.1}%"), BRIGHT),
             row("total", self.total.to_string(), FG),
-            row("lost", self.lost.to_string(), if self.lost > 0 { AMBER } else { FG }),
+            row(
+                "lost",
+                self.lost.to_string(),
+                if self.lost > 0 { AMBER } else { FG },
+            ),
             row(
                 "alerts",
                 self.alert_count.to_string(),
@@ -1067,7 +1071,9 @@ impl App_ {
         }
         if inner.height > 4 {
             let link_style = if sel == 0 {
-                Style::new().fg(CYAN).attrs(StyleFlags::BOLD | StyleFlags::UNDERLINE)
+                Style::new()
+                    .fg(CYAN)
+                    .attrs(StyleFlags::BOLD | StyleFlags::UNDERLINE)
             } else {
                 Style::new().fg(BLUE).attrs(StyleFlags::UNDERLINE)
             };

@@ -775,7 +775,8 @@ pub fn run_diagnose(monitor: &mut Monitor) -> Result<()> {
                     | Kind::Mkdir
                     | Kind::Unlink
                     | Kind::Kill
-                    | Kind::Chmod | Kind::Unknown => {}
+                    | Kind::Chmod
+                    | Kind::Unknown => {}
                 },
                 Output::Alert(_) => alerts += 1,
                 Output::Action(_) => {}
@@ -890,7 +891,9 @@ pub fn run_benchmark(monitor: &mut Monitor, secs: u64) -> Result<()> {
                         Kind::Connect | Kind::Accept | Kind::SendTo | Kind::RecvFrom => {
                             total_net += 1
                         }
-                        Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => total_other += 1,
+                        Kind::Mkdir | Kind::Unlink | Kind::Kill | Kind::Chmod | Kind::Unknown => {
+                            total_other += 1
+                        }
                     }
                 }
                 Output::Alert(_) => {}
