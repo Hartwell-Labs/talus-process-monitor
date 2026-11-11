@@ -74,7 +74,10 @@ function fake_env(license = null, pub_hex = '00') {
               {
                 version: '0.8.4',
                 published_at: '2026-11-11T00:00:00Z',
-                files: [{ name: 'talus-monitor-enterprise', size: 24912840 }],
+                files: [
+                  { name: 'talus-monitor-enterprise', size: 24912840 },
+                  { name: 'talus-monitor-enterprise.sig', size: 96 },
+                ],
               },
             ],
           });
@@ -239,6 +242,9 @@ test('landing page lists both lines with the latest versions', async () => {
   // A dropdown selects the release; only the newest is visible initially.
   assert.match(html, /<select id="release-enterprise"[^>]*>/);
   assert.match(html, /data-release-version="0\.8\.3" hidden/);
+  // Small verification files get a real unit instead of a rounded-down 0.0 MB.
+  assert.match(html, /talus-monitor-enterprise\.sig<\/span><span class="size">96 B</);
+  assert.doesNotMatch(html, />0\.0 MB</);
 
   // The inline downloader must at least parse: a broken script would leave
   // the Enterprise buttons doing nothing in the browser.

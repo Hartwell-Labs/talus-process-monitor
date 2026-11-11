@@ -85,20 +85,27 @@ function latest_version(manifest) {
   return versions.length ? versions[versions.length - 1] : null;
 }
 
+function format_size(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function file_rows(line, entry) {
   if (!entry?.files?.length) return '<p class="empty">No artifacts published yet.</p>';
   return `<ul class="files">${entry.files
     .map((file) => {
       const name = escape_html(file.name);
-      const mb = (file.size / 1024 / 1024).toFixed(1);
+      const size = format_size(file.size);
       if (line === 'mit') {
         return `<li><a href="/mit/${encodeURIComponent(entry.version)}/${encodeURIComponent(
           file.name,
-        )}">${name}</a><span class="size">${mb} MB</span></li>`;
+        )}">${name}</a><span class="size">${size}</span></li>`;
       }
       // The licensed binary needs a header, so a plain link cannot work. The
       // page fetches it with the key and hands the browser a blob instead.
-      return `<li><span class="file">${name}</span><span class="size">${mb} MB</span><button class="dl" type="button" data-version="${escape_html(
+      return `<li><span class="file">${name}</span><span class="size">${size}</span><button class="dl" type="button" data-version="${escape_html(
         entry.version,
       )}" data-file="${name}">Download</button></li>`;
     })
@@ -175,7 +182,7 @@ async function landing_page(env, ctx) {
 <style>
   :root {
     --bg:#ffffff; --bg-subtle:#f8fafc; --border:#e2e8f0; --border-strong:#cbd5e1;
-    --txt:#0f172a; --txt-2:#475569; --txt-3:#94a3b8;
+    --txt:#0f172a; --txt-2:#475569; --txt-3:#64748b;
     --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eef2ff;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
