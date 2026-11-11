@@ -83,16 +83,16 @@ function latest_version(manifest) {
 
 function file_rows(line, entry) {
   if (!entry?.files?.length) return '<p class="empty">No artifacts published yet.</p>';
-  return `<ul>${entry.files
+  return `<ul class="files">${entry.files
     .map((file) => {
       const name = escape_html(file.name);
       const mb = (file.size / 1024 / 1024).toFixed(1);
       if (line === 'mit') {
         return `<li><a href="/mit/${encodeURIComponent(entry.version)}/${encodeURIComponent(
           file.name,
-        )}">${name}</a> <span>${mb} MB</span></li>`;
+        )}">${name}</a><span class="size">${mb} MB</span></li>`;
       }
-      return `<li><span class="file">${name}</span> <span>${mb} MB</span></li>`;
+      return `<li><span class="file">${name}</span><span class="size">${mb} MB</span></li>`;
     })
     .join('')}</ul>`;
 }
@@ -111,57 +111,181 @@ async function landing_page(env, ctx) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Talus downloads — MIT and Enterprise</title>
+<meta name="theme-color" content="#4f46e5">
+<title>Talus downloads — Hartwell Labs</title>
+<meta name="description" content="Download talus-process-monitor: the MIT community build and the licensed Enterprise build.">
+<link rel="icon" type="image/svg+xml" href="https://hartwell-labs.pl/assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light dark; --bg:#0b1120; --card:#111c33; --text:#e6edf7; --dim:#94a3b8; --line:#1e2d4a; --accent:#7dd3fc; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; }
-  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 72px; }
-  h1 { font-size: 30px; letter-spacing:-.02em; margin:0 0 6px; }
-  p.lead { color:var(--dim); margin:0 0 32px; }
-  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 22px 18px; margin:0 0 18px; }
-  h2 { font-size:19px; margin:0 0 4px; }
-  .tag { display:inline-block; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); margin-bottom:8px; }
-  ul { margin:12px 0 0; padding-left:18px; }
-  li { margin:6px 0; }
-  li span { color:var(--dim); font-size:13px; margin-left:8px; }
-  a { color:var(--accent); text-decoration:none; }
-  a:hover { text-decoration:underline; }
-  code, pre { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; }
-  pre { background:#08101f; border:1px solid var(--line); border-radius:10px; padding:12px 14px; overflow:auto; }
-  .empty { color:var(--dim); }
-  footer { color:var(--dim); font-size:13px; margin-top:28px; }
+  :root {
+    --bg:#ffffff; --bg-subtle:#f8fafc; --border:#e2e8f0; --border-strong:#cbd5e1;
+    --txt:#0f172a; --txt-2:#475569; --txt-3:#94a3b8;
+    --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eef2ff;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  body { background:var(--bg); color:var(--txt); font-family:"Inter",-apple-system,"Segoe UI",sans-serif; font-size:16px; line-height:1.65; }
+  a { color:inherit; }
+  code, pre { font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .container { max-width:1100px; margin:0 auto; padding:0 24px; }
+
+  header { position:sticky; top:0; z-index:50; background:rgba(255,255,255,.88); backdrop-filter:blur(10px); border-bottom:1px solid var(--border); }
+  .header-in { display:flex; align-items:center; justify-content:space-between; height:64px; }
+  .logo { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; letter-spacing:-.01em; text-decoration:none; }
+  nav.main { display:flex; gap:26px; }
+  nav.main a { font-size:14px; color:var(--txt-2); text-decoration:none; font-weight:500; }
+  nav.main a:hover, nav.main a[aria-current="page"] { color:var(--txt); }
+  nav.main a[aria-current="page"] { font-weight:600; }
+  .header-cta { display:inline-flex; align-items:center; height:36px; padding:0 16px; border-radius:8px; background:var(--txt); color:#fff; font-size:13.5px; font-weight:600; text-decoration:none; }
+  .header-cta:hover { background:#1e293b; }
+  @media (max-width:720px) { nav.main { display:none; } }
+
+  .btn { display:inline-flex; align-items:center; height:44px; padding:0 22px; border-radius:10px; font-size:15px; font-weight:600; text-decoration:none; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:hover { background:var(--accent-hover); }
+  .btn-secondary { border:1px solid var(--border); color:var(--txt); }
+  .btn-secondary:hover { background:var(--bg-subtle); }
+
+  .hero { padding:72px 0 34px; max-width:760px; }
+  .eyebrow { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--accent); background:var(--accent-soft); border-radius:999px; padding:5px 14px; margin-bottom:22px; }
+  .eyebrow::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  h1 { font-size:clamp(32px,5vw,50px); line-height:1.1; letter-spacing:-.03em; font-weight:700; }
+  h1 .dim { color:var(--txt-3); }
+  .lede { margin-top:20px; font-size:18px; line-height:1.65; color:var(--txt-2); max-width:620px; }
+  .hero-actions { margin-top:30px; display:flex; gap:12px; flex-wrap:wrap; }
+
+  .downloads { padding:12px 0 72px; }
+  .prod-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr)); gap:16px; align-items:start; }
+  .prod { border:1px solid var(--border); border-radius:12px; padding:22px 24px; background:var(--bg); }
+  .prod .row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .prod .kicker { font-size:12px; font-weight:600; color:var(--txt-3); text-transform:uppercase; letter-spacing:.08em; }
+  .prod h2 { font-size:20px; letter-spacing:-.02em; line-height:1.2; margin-top:4px; }
+  .prod .lang { font-size:11.5px; font-weight:600; color:var(--txt-3); border:1px solid var(--border); border-radius:5px; padding:2px 8px; white-space:nowrap; }
+  .prod p { margin-top:10px; font-size:14px; line-height:1.6; color:var(--txt-2); }
+  .files { list-style:none; margin-top:14px; border-top:1px solid var(--border); }
+  .files li { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); font-size:14px; }
+  .files li:last-child { border-bottom:0; }
+  .files a { color:var(--accent); font-weight:600; text-decoration:none; }
+  .files a:hover { text-decoration:underline; }
+  .files .file { font-weight:600; }
+  .files .size { color:var(--txt-3); font-size:12.5px; white-space:nowrap; }
+  .files .empty { color:var(--txt-3); padding:12px 0; }
+  .prod .note { margin-top:14px; font-size:13px; color:var(--txt-3); }
+  .prod .note code { background:var(--bg-subtle); border:1px solid var(--border); border-radius:5px; padding:1px 5px; font-size:12px; color:var(--txt); }
+  .prod .btn { margin-top:16px; height:38px; padding:0 16px; font-size:13.5px; }
+
+  pre.block { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:15px 17px; font-size:12.5px; line-height:1.75; overflow-x:auto; margin-top:14px; }
+
+  footer { border-top:1px solid var(--border); padding:40px 0 46px; background:var(--bg-subtle); }
+  .footer-grid { display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:32px; }
+  .footer-grid h5 { font-size:12.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--txt-3); margin-bottom:12px; }
+  .footer-grid a { display:block; font-size:14px; color:var(--txt-2); text-decoration:none; padding:3px 0; }
+  .footer-grid a:hover { color:var(--txt); }
+  .footer-grid .about { font-size:14px; color:var(--txt-2); max-width:300px; }
+  .f-fine { margin-top:34px; padding-top:18px; border-top:1px solid var(--border); font-size:12.5px; color:var(--txt-3); display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  @media (max-width:820px) { .footer-grid { grid-template-columns:1fr 1fr; } }
 </style>
 </head>
 <body>
-<main>
-  <h1>Talus downloads</h1>
-  <p class="lead">Two lines, one private bucket. MIT is public; Enterprise requires a live license.</p>
+<header>
+  <div class="container header-in">
+    <a class="logo" href="https://hartwell-labs.pl/">
+      <svg width="22" height="22" viewBox="0 0 46 46" aria-hidden="true">
+        <path d="M23,2 L42,13 L42,33 L23,44 L4,33 L4,13 Z" fill="none" stroke="#4f46e5" stroke-width="3.4" stroke-linejoin="round"/>
+        <polyline points="13,26 19,26 22,17 26,29 29,24 33,24" fill="none" stroke="#4f46e5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Hartwell Labs
+    </a>
+    <nav class="main">
+      <a href="https://hartwell-labs.pl/products">Products</a>
+      <a href="https://hartwell-labs.pl/catalog">Catalog</a>
+      <a href="https://hartwell-labs.pl/docs">Docs</a>
+      <a href="https://hartwell-labs.pl/security">Security</a>
+      <a href="https://hartwell-labs.pl/company">Company</a>
+    </nav>
+    <a class="header-cta" href="https://github.com/Hartwell-Labs">GitHub ↗</a>
+  </div>
+</header>
 
-  <section>
-    <span class="tag">Line 1 — MIT</span>
-    <h2>Community edition${mit_latest ? ` · v${escape_html(mit_latest.version)}` : ''}</h2>
-    <p class="empty">Public, immutable artifacts. Cached at the edge, so repeat downloads do not hit storage.</p>
-    ${file_rows('mit', mit_latest)}
-  </section>
+<div class="container hero">
+  <div class="eyebrow">Talus downloads</div>
+  <h1>Two lines. <span class="dim">One verified build at a time.</span></h1>
+  <p class="lede">The community build is MIT and public. The licensed build is signed, gated by a live license, and never cached on a shared edge.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#mit">Downloads</a>
+    <a class="btn btn-secondary" href="https://hartwell-labs.pl/talus-process-monitor/">About talus</a>
+  </div>
+</div>
 
-  <section>
-    <span class="tag">Line 2 — Enterprise</span>
-    <h2>Licensed edition${enterprise_latest ? ` · v${escape_html(enterprise_latest.version)}` : ''}</h2>
-    <p class="empty">Send your license in the <code>X-Talus-License</code> header. The key must exist in the license database, be unrevoked, unexpired and <code>tier = enterprise</code>.</p>
-    ${file_rows('enterprise', enterprise_latest)}
-    <pre>curl -fLO -H "X-Talus-License: $TALUS_LICENSE" \\
+<div class="container downloads">
+  <div class="prod-grid">
+    <div class="prod" id="mit">
+      <div class="row">
+        <div class="kicker">Line 1 — MIT</div>
+        <span class="lang">Public</span>
+      </div>
+      <h2>Community edition${mit_latest ? ` · v${escape_html(mit_latest.version)}` : ''}</h2>
+      <p>Immutable artifacts, served from Cloudflare's edge. Repeat downloads do not touch storage.</p>
+      ${file_rows('mit', mit_latest)}
+      <a class="btn btn-secondary" href="https://github.com/Hartwell-Labs/talus-process-monitor">Source ↗</a>
+    </div>
+
+    <div class="prod" id="enterprise">
+      <div class="row">
+        <div class="kicker">Line 2 — Enterprise</div>
+        <span class="lang">Licensed</span>
+      </div>
+      <h2>Licensed edition${enterprise_latest ? ` · v${escape_html(enterprise_latest.version)}` : ''}</h2>
+      <p>Signed binary and verification material. Send your key in the <code class="inline">X-Talus-License</code> header; it must exist in the license database, be unrevoked and unexpired, with <code class="inline">tier = enterprise</code>.</p>
+      ${file_rows('enterprise', enterprise_latest)}
+      <pre class="block">curl -fLO \\
+  -H "X-Talus-License: $TALUS_LICENSE" \\
   https://download.hartwell-labs.pl/enterprise/${
     enterprise_latest ? encodeURIComponent(enterprise_latest.version) : '0.8.4'
   }/talus-monitor-enterprise</pre>
-  </section>
+      <a class="btn btn-primary" href="https://hartwell-labs.pl/company">Get a license</a>
+    </div>
+  </div>
+</div>
 
-  <footer>
-    Talus is built by Hartwell Labs. MIT detection core ·
-    <a href="https://wiki.hartwell-labs.pl/projects/talus-process-monitor/">documentation</a> ·
-    <a href="https://github.com/Hartwell-Labs/talus-process-monitor">source</a>
-  </footer>
-</main>
+<footer>
+  <div class="container footer-grid">
+    <div>
+      <div class="logo" style="margin-bottom:14px;">
+        <svg width="20" height="20" viewBox="0 0 46 46" aria-hidden="true">
+          <path d="M23,2 L42,13 L42,33 L23,44 L4,33 L4,13 Z" fill="none" stroke="#4f46e5" stroke-width="3.4" stroke-linejoin="round"/>
+        </svg>
+        Hartwell Labs
+      </div>
+      <p class="about">Independent engineering company. Security systems, languages and tools — built in the open, MIT licensed.</p>
+    </div>
+    <div>
+      <h5>Products</h5>
+      <a href="https://hartwell-labs.pl/products">Products</a>
+      <a href="https://hartwell-labs.pl/talus-process-monitor/">talus-process-monitor</a>
+      <a href="https://hartwell-labs.pl/externum/">externum</a>
+      <a href="https://hartwell-labs.pl/hack-the-lab/">hack-the-lab</a>
+    </div>
+    <div>
+      <h5>Resources</h5>
+      <a href="https://hartwell-labs.pl/docs">Documentation</a>
+      <a href="https://github.com/Hartwell-Labs">GitHub organization</a>
+      <a href="https://github.com/Hartwell-Labs/talus-process-monitor/releases">Releases</a>
+    </div>
+    <div>
+      <h5>Company</h5>
+      <a href="https://hartwell-labs.pl/company">About</a>
+      <a href="https://hartwell-labs.pl/security">Security &amp; disclosure</a>
+      <a href="https://hartwell-labs.pl/privacy/">Privacy policy</a>
+    </div>
+  </div>
+  <div class="container f-fine">
+    <span>© 2026 Hartwell Labs. All software released under the MIT License unless stated otherwise.</span>
+    <span>Szczecin, Poland</span>
+  </div>
+</footer>
 </body>
 </html>`;
 
