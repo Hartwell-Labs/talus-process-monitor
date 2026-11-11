@@ -695,6 +695,7 @@ function sha256_hex_sync(bytes) {
 export const __test = {
   handle_download_request,
   handle_publish,
+  github_oidc_claims,
   authorize,
   safe_key,
   range_for,

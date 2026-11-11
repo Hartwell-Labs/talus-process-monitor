@@ -253,6 +253,57 @@ test('publishing requires a GitHub OIDC bearer token', async () => {
   assert.equal(forged.status, 401);
 });
 
+function oidc_token(claims, { kid = 'test-kid' } = {}) {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'RS256', kid });
+  const payload = encode(claims);
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), privateKey);
+  return {
+    token: `${header}.${payload}.${signature.toString('base64url')}`,
+    jwks: { keys: [{ ...jwk, kid, alg: 'RS256', use: 'sig' }] },
+  };
+}
+
+test('GitHub OIDC token is accepted only for an allowed repo and matching tag', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const base_claims = {
+    aud: 'talus-downloads',
+    repository: 'Hartwell-Labs/talus-process-monitor',
+    event_name: 'push',
+    ref: 'refs/tags/v9.9.9',
+    exp: now + 300,
+  };
+  const { token, jwks } = oidc_token(base_claims);
+
+  const original_fetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('jwks')) return new Response(JSON.stringify(jwks));
+    throw new Error('unexpected fetch');
+  };
+  try {
+    const req = new Request(`${base}/publish/mit/9.9.9/talus-monitor`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const claims = await __test.github_oidc_claims(req, '9.9.9');
+    assert.equal(claims?.repository, 'Hartwell-Labs/talus-process-monitor');
+
+    // A different tag, repository or audience must be rejected even with a
+    // valid signature from GitHub.
+    assert.equal(await __test.github_oidc_claims(req, '9.9.8'), null);
+
+    const other = oidc_token({ ...base_claims, repository: 'someone/else' });
+    globalThis.fetch = async () => new Response(JSON.stringify(other.jwks));
+    const other_req = new Request(`${base}/publish/mit/9.9.9/talus-monitor`, {
+      headers: { authorization: `Bearer ${other.token}` },
+    });
+    assert.equal(await __test.github_oidc_claims(other_req, '9.9.9'), null);
+  } finally {
+    globalThis.fetch = original_fetch;
+  }
+});
+
 test('unknown host and non-GET methods are refused', async () => {
   const wrong = await handle_download_request(
     new Request('https://lic.hartwell-labs.pl/mit/0.8.4/talus-monitor'),
