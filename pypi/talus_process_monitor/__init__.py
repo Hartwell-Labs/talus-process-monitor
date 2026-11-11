@@ -4,9 +4,9 @@ Downloads the official prebuilt `process-monitor` binary from the
 talus-process-monitor GitHub releases and runs it. Pure stdlib.
 """
 import argparse
+import hashlib
 import json
 import os
-import shutil
 import stat
 import sys
 import urllib.request
@@ -42,18 +42,54 @@ def pick_asset(rel):
     return None
 
 
+def expected_sha256(text, name):
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        digest, filename = parts[0].lower(), parts[1].lstrip("*")
+        if filename == name and len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
+            return digest
+    return None
+
+
 def do_install(_args):
     rel = gh_latest()
     tag = rel.get("tag_name", "?")
     asset = pick_asset(rel)
     if not asset:
         sys.exit(f"No prebuilt 'process-monitor' asset in {tag}. Get it from: {RELEASES_URL}")
+
+    # Refuse an unverified download: the checksum lives in the same release, so
+    # it catches corruption and a swapped asset, and keeps the wrapper honest.
+    sums = next(
+        (a for a in rel.get("assets", []) if a["name"] == "checksums-sha256.txt"),
+        None,
+    )
+    if not sums:
+        sys.exit(f"Release {tag} has no checksums-sha256.txt; refusing to install an unverified binary.")
+    sums_req = urllib.request.Request(
+        sums["browser_download_url"], headers={"User-Agent": "talus-pypi-wrapper"}
+    )
+    with urllib.request.urlopen(sums_req, timeout=60) as r:
+        expected = expected_sha256(r.read().decode("utf-8", "replace"), asset["name"])
+    if not expected:
+        sys.exit(f"No checksum for {asset['name']} in {tag}; refusing to install.")
+
     BIN_DIR.mkdir(parents=True, exist_ok=True)
     tmp = BIN_DIR / ".download.tmp"
     print(f"talus-monitor: downloading {tag} ({asset['name']}, {asset.get('size', 0)//1024} KB)...")
     req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "talus-pypi-wrapper"})
+    digest = hashlib.sha256()
     with urllib.request.urlopen(req, timeout=300) as r, open(tmp, "wb") as f:
-        shutil.copyfileobj(r, f)
+        for chunk in iter(lambda: r.read(1024 * 1024), b""):
+            digest.update(chunk)
+            f.write(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        tmp.unlink(missing_ok=True)
+        sys.exit(f"checksum mismatch for {asset['name']}: expected {expected}, got {actual}; nothing installed")
+    print(f"talus-monitor: sha256 verified ({actual})")
     tmp.chmod(tmp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     tmp.replace(BIN_PATH)
     print(f"Installed {tag} -> {BIN_PATH}")

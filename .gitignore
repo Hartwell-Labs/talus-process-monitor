@@ -1,4 +1,7 @@
 target/
+node_modules/
+__pycache__/
+*.pyc
 *.dat
 *.hmac
 .env

@@ -222,8 +222,13 @@ function env_error(name) {
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const MAX_BODY_BYTES = 16 * 1024; // 16 KiB is far more than any valid request
-const RATE_LIMIT = 5; // activation attempts
+const RATE_LIMIT = 5; // activation attempts per machine
+const RATE_LIMIT_IP = 60; // activation attempts per source IP
 const RATE_WINDOW_S = 300; // per 5 minutes
+// Key IDs that must never be accepted, even if a key is accidentally added to
+// LICENSE_PUBLIC_KEYS. `test` is a public fixture key (private seed is in the
+// repository), so trusting it would allow forged enterprise licenses.
+const RETIRED_KIDS = new Set(['test']);
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 // ── Router ────────────────────────────────────────────────────────────────
@@ -396,7 +401,7 @@ async function handle_activate(request, env) {
   }
 
   // ── Rate limiting: per machine, then global ────────────────────────────
-  const limited = await rate_limit(env.DB, machine_id);
+  const limited = await rate_limit(env.DB, machine_id, client_ip(request));
   if (limited) {
     return json_response(
       { success: false, message: 'too many activation attempts — try again later' },
@@ -468,6 +473,9 @@ async function handle_activate(request, env) {
   }
 
   const kid = payload.kid || 'v1'; // default to v1 for backward compat
+  if (RETIRED_KIDS.has(kid)) {
+    return json_response({ success: false, message: 'license signature verification failed' }, 401);
+  }
   const pub_key_hex = pub_keys[kid];
   if (!pub_key_hex) {
     return json_response(
@@ -733,6 +741,12 @@ async function handle_download_grant(request, env) {
   }
 
   const kid = payload.kid || 'v1';
+  if (RETIRED_KIDS.has(kid)) {
+    return json_response(
+      { success: false, message: 'license signature verification failed' },
+      401,
+    );
+  }
   const pub_key_hex = pub_keys[kid];
   if (!pub_key_hex) {
     return json_response(
@@ -1806,24 +1820,47 @@ function now_iso(ms = Date.now()) {
 
 // ── Rate limiting ─────────────────────────────────────────────────────────
 
-async function rate_limit(db, machine_id) {
+// Per-source-IP bucket. Cloudflare sets CF-Connecting-IP; without it, fall
+// back to the connecting address Workers expose in request.cf (may be absent
+// in local dev, in which case there is simply no IP bucket).
+function client_ip(request) {
+  const header = request.headers.get('cf-connecting-ip');
+  return header ? header.trim() : null;
+}
+
+async function rate_limit(db, machine_id, ip) {
   const now = Math.floor(Date.now() / 1000);
   const window_start = now - RATE_WINDOW_S;
-  const global_bucket = `global:${Math.floor(now / RATE_WINDOW_S)}`;
-  const machine_bucket = `machine:${machine_id}:${Math.floor(now / RATE_WINDOW_S)}`;
+  const bucket_index = Math.floor(now / RATE_WINDOW_S);
+  const global_bucket = `global:${bucket_index}`;
+  const machine_bucket = `machine:${machine_id}:${bucket_index}`;
+  const ip_bucket = ip ? `ip:${ip}:${bucket_index}` : null;
 
-  // Prune old events, then record this attempt.
+  // Prune old events first, then count BEFORE inserting: rejected attempts
+  // must not grow the table (a caller rotating machine_id could otherwise
+  // insert without bound).
   await db
     .prepare('DELETE FROM rate_events WHERE ts < ?1')
     .bind(window_start)
     .run();
+
+  const per_machine = await count_events(db, machine_bucket, window_start);
+  if (per_machine >= RATE_LIMIT) return true;
+  if (ip_bucket) {
+    const per_ip = await count_events(db, ip_bucket, window_start);
+    if (per_ip >= RATE_LIMIT_IP) return true;
+  }
+
   await db
     .prepare('INSERT INTO rate_events (bucket, ts) VALUES (?1, ?2)')
     .bind(machine_bucket, now)
     .run();
-
-  const per_machine = await count_events(db, machine_bucket, window_start);
-  if (per_machine > RATE_LIMIT) return true;
+  if (ip_bucket) {
+    await db
+      .prepare('INSERT INTO rate_events (bucket, ts) VALUES (?1, ?2)')
+      .bind(ip_bucket, now)
+      .run();
+  }
 
   const global = await count_events(db, global_bucket, window_start);
   // Global cap is intentionally loose (abuse brake, not a per-user limit).
@@ -1841,6 +1878,10 @@ async function count_events(db, bucket, window_start) {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 async function read_json(request) {
+  const declared = Number(request.headers.get('content-length') ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    return { ok: false, error: 'request body too large' };
+  }
   const raw = await request.text();
   if (raw.length > MAX_BODY_BYTES) {
     return { ok: false, error: 'request body too large' };

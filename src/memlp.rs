@@ -284,6 +284,40 @@ pub const RANSOMWARE_EXTS: &[&str] = &[
     "cryptowall",
     "x3m",
     "ransom",
+    // ── BlackCat / ALPHV / BlackSuit ─────────────────
+    "blackcat",
+    "alphv",
+    "blacksuit",
+    "hydra",
+    // ── BianLian (CISA AA23-136A) ────────────────────
+    "bianlian",
+    // ── Cactus ───────────────────────────────────────
+    "cactus",
+    // ── Chaos RaaS (Linux/ESXi/NAS, Feb 2025) ────────
+    "chaos",
+    // ── NightSpire (Mar 2025) ────────────────────────
+    "nspire",
+    // ── Avaddon / Egregor / Nefilim ──────────────────
+    "avaddon",
+    "avdn",
+    "egregor",
+    "nefilim",
+    "nephilim",
+    // ── Other families still seen in incidents ───────
+    "cont",
+    "makop",
+    "phobos",
+    "mallox",
+    "newbot",
+    "abyss",
+    "8base",
+    "trigona",
+    "cuba",
+    "ragnar",
+    "suncrypt",
+    "vice",
+    "blackbyte",
+    "quantum",
     // ── Intentionally excluded (false positives) ─────
     // `.zip`, `.tar`, `.gz` — legitimate archives
     // `.bak` — legitimate backup files
@@ -1604,6 +1638,46 @@ mod tests {
             pf.observe_open(&format!("/d/f{i}.LOCKED"), Some("LOCKED"), 0.5);
         }
         assert!(pf.features()[3] > 0.9);
+    }
+
+    #[test]
+    fn ransomware_extension_table_is_normalised_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for ext in RANSOMWARE_EXTS {
+            assert!(!ext.is_empty(), "empty extension entry");
+            assert!(!ext.starts_with('.'), "extension must omit the dot: {ext}");
+            assert!(ext.is_ascii(), "non-ASCII extension: {ext}");
+            assert_eq!(
+                ext,
+                &ext.to_ascii_lowercase(),
+                "extension must be lowercase: {ext}"
+            );
+            assert!(seen.insert(*ext), "duplicate extension: {ext}");
+        }
+    }
+
+    #[test]
+    fn recent_families_are_covered_by_the_extension_table() {
+        // Families added from the 2024–2026 CISA advisories and vendor
+        // reports; losing one of these silently weakens feature 3.
+        for ext in [
+            "blackcat",
+            "blacksuit",
+            "bianlian",
+            "cactus",
+            "chaos",
+            "nspire",
+            "akiranew",
+            "interlock",
+            "makop",
+            "phobos",
+            "8base",
+        ] {
+            assert!(
+                RANSOMWARE_EXTS.contains(&ext),
+                "missing ransomware extension: {ext}"
+            );
+        }
     }
 
     #[test]

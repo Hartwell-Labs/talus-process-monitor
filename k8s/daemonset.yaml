@@ -22,6 +22,9 @@ spec:
     spec:
       hostPID: true
       hostNetwork: true
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       tolerations:
         - operator: Exists
           effect: NoSchedule
@@ -29,11 +32,13 @@ spec:
           effect: NoExecute
       containers:
         - name: talus
-          image: ghcr.io/Hartwell-Labs/talus-process-monitor:latest
-          imagePullPolicy: Always
+          image: ghcr.io/Hartwell-Labs/talus-process-monitor:0.8.3
+          imagePullPolicy: IfNotPresent
           command:
             - talus-monitor
           args:
+            # Enterprise-only: the MIT image refuses --web. Keep this behind a
+            # NetworkPolicy and TALUS_WEB_AUTH=1 if the port is reachable.
             - --web
             - "0.0.0.0:8080"
             - --alert-threshold

@@ -137,18 +137,17 @@ fn default_kid() -> String {
 
 /// Lookup the verifying key by its `kid`.
 fn verifying_key_for(kid: &str) -> Result<&'static VerifyingKey> {
-    static KEYS: OnceLock<Vec<VerifyingKey>> = OnceLock::new();
+    static KEYS: OnceLock<Vec<(&'static str, VerifyingKey)>> = OnceLock::new();
     let keys = KEYS.get_or_init(|| {
         PUBLIC_KEYS
             .iter()
-            .filter_map(|e| VerifyingKey::from_bytes(&e.key).ok())
+            .filter_map(|e| VerifyingKey::from_bytes(&e.key).ok().map(|k| (e.kid, k)))
             .collect()
     });
-    let idx = PUBLIC_KEYS.iter().position(|e| e.kid == kid);
-    match idx {
-        Some(i) => Ok(&keys[i]),
-        None => Err(anyhow::anyhow!("unknown key ID in license: {kid}")),
-    }
+    keys.iter()
+        .find(|(entry_kid, _)| *entry_kid == kid)
+        .map(|(_, key)| key)
+        .ok_or_else(|| anyhow::anyhow!("unknown key ID in license: {kid}"))
 }
 
 // ── License data types ────────────────────────────────────────────────────
@@ -320,6 +319,14 @@ impl LicenseKey {
             .map_err(|e| anyhow::anyhow!("license key verification failed: {e}"))?;
         vk.verify(&payload_bytes, &signature)
             .map_err(|e| anyhow::anyhow!("license signature verification failed: {e}"))?;
+
+        // v1 is verification-only since the 2026-10-29 rotation. It remains
+        // accepted for licenses issued before that date; a v1 key minted
+        // afterwards means the retired key was used, and is refused.
+        const V1_RETIRED_AT: &str = "2026-10-29T00:00:00Z";
+        if payload.kid == "v1" && payload.issued_at.as_str() > V1_RETIRED_AT {
+            bail!("license key uses the retired v1 signing key");
+        }
 
         Ok(Self { payload, signature })
     }

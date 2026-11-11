@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use crate::monitor::{Kind, Monitor, Output, Responder};
+use crate::monitor::{is_system_comm, Kind, Monitor, Output, Responder};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
@@ -1135,7 +1135,7 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
         for output in outputs {
             match output {
                 Output::Event(ev) => {
-                    if NOISY.contains(&ev.comm.as_str()) {
+                    if NOISY.contains(&ev.comm.as_str()) || is_system_comm(&ev.comm) {
                         continue;
                     }
                     match ev.kind {

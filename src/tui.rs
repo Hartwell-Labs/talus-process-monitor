@@ -14,10 +14,7 @@ use ftui_core::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, Modifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ftui_core::geometry::Rect;
-use ftui_extras::canvas::{Canvas, Mode, Painter};
-use ftui_extras::charts::{
-    heatmap_gradient, BarChart, BarDirection, BarGroup, BarMode, LineChart, Series, Sparkline,
-};
+use ftui_extras::charts::{heatmap_gradient, LineChart, Series, Sparkline};
 use ftui_extras::text_effects::{StyledText, TextEffect};
 use ftui_layout::{Constraint, Flex};
 use ftui_render::budget::FrameBudgetConfig;
@@ -39,7 +36,9 @@ use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::{StatefulWidget, Widget};
 
 use crate::license::LicenseState;
-use crate::monitor::{FileRank, Monitor, Output, ProcStats, RateSample, TUI_SNAPSHOT_EVENT_CAP};
+use crate::monitor::{
+    is_system_comm, FileRank, Monitor, Output, ProcStats, RateSample, TUI_SNAPSHOT_EVENT_CAP,
+};
 
 /// Processes that produce too many events to display (polling, IPC, etc.)
 const NOISY_COMMS: &[&str] = &[
@@ -51,7 +50,6 @@ const NOISY_COMMS: &[&str] = &[
     "upowerd",
     "mutter",
     "Xwayland",
-    "hyprland",
     "sway",
     "fuzzel",
     "wlsunset",
@@ -85,13 +83,16 @@ const FG: PackedRgba = PackedRgba::rgb(169, 177, 214);
 const BRIGHT: PackedRgba = PackedRgba::rgb(192, 202, 245);
 const BORDER: PackedRgba = PackedRgba::rgb(41, 46, 66);
 const BORDER_HI: PackedRgba = PackedRgba::rgb(122, 162, 247);
+/// Selected process row background (muted navy, above the panel background).
+const SELECT_BG: PackedRgba = PackedRgba::rgb(48, 56, 92);
 
 // ── Layout / gateway constants ────────────────────────────────────────────
 
 /// Link shown on the first-run gateway frame.
 const GATEWAY_URL: &str = "https://hartwell-labs.pl";
-/// Height (rows) of the telemetry card in the right-hand 30% column.
-const TELEMETRY_H: u16 = 11;
+/// Height (rows) of the telemetry card in the right-hand detail column.
+/// The card renders 8 rows of content plus a two-row border.
+const TELEMETRY_H: u16 = 10;
 /// Demo-mode figures (only used when `TALUS_TUI_DEMO=1`).
 const DEMO_EPS: f64 = 280_000.0;
 const DEMO_CPU: f64 = 7.6;
@@ -106,17 +107,24 @@ enum Panel {
     TopFiles,
     Extensions,
     Alerts,
+    Heatmap,
 }
 
 impl Panel {
-    const ALL: [Panel; 6] = [
+    /// Panel order is part of the UI contract: `1`-`7` jump straight to the
+    /// index in this array, and the status line prints the focused name.
+    const ALL: [Panel; 7] = [
         Panel::Events,
         Panel::Processes,
         Panel::Network,
         Panel::TopFiles,
         Panel::Extensions,
         Panel::Alerts,
+        Panel::Heatmap,
     ];
+    /// Number of panels. The `collapsed` array carries one extra slot for the
+    /// rate-chart strip, so it is `PANEL_COUNT + 1` long.
+    const COUNT: usize = Self::ALL.len();
     fn name(&self) -> &'static str {
         match self {
             Self::Events => "EVENTS",
@@ -125,6 +133,7 @@ impl Panel {
             Self::TopFiles => "TOP FILES",
             Self::Extensions => "FILE TYPES",
             Self::Alerts => "ALERTS",
+            Self::Heatmap => "HEATMAP",
         }
     }
 }
@@ -226,8 +235,8 @@ struct NetEntry {
 struct App_ {
     log: LogViewer,
     log_st: LogViewerState,
-    _alerts: LogViewer,
-    _alert_st: LogViewerState,
+    alerts: LogViewer,
+    alert_st: LogViewerState,
     net: VecDeque<NetEntry>,
     procs: Vec<ProcRow>,
     tree: Vec<(usize, u32, String, u64, u64)>,
@@ -239,10 +248,6 @@ struct App_ {
     rate_chart: Vec<(f64, f64)>,
     open_chart: Vec<(f64, f64)>,
     alert_chart: Vec<(f64, f64)>,
-    chart_x: f64,
-    smooth_exec: f64,
-    smooth_open: f64,
-    smooth_alert: f64,
     focused: usize,
     paused: bool,
     help: bool,
@@ -263,10 +268,11 @@ struct App_ {
     rate_limit: u64,
     rate_window: Duration,
     rate_suppressed: u64,
-    // ── collapsible panels ──
-    collapsed: [bool; 7],
+    // ── collapsible panels (one slot per panel + the rate-chart strip) ──
+    collapsed: [bool; Panel::COUNT + 1],
     // ── copy buffer ──
     last_event_lines: VecDeque<String>,
+    last_alert_lines: VecDeque<String>,
     /// Identity of the previously pushed log line, split into its parts so
     /// repeated events compare without allocating.
     last_log_kind: &'static str,
@@ -283,6 +289,13 @@ struct App_ {
     // ── 70/30 layout hit-testing ──
     left_area: Cell<Rect>,
     side_area: Cell<Rect>,
+    // ── process table mouse state ──
+    /// Inner rect of the process table from the last render (for hit-testing).
+    proc_area: Cell<Rect>,
+    /// First visible row; bumped by the mouse wheel.
+    proc_scroll: usize,
+    /// PID of the clicked process row, kept across snapshots.
+    proc_sel: Option<u32>,
     // ── first-run gateway frame ──
     gateway: bool,
     gateway_sel: usize,
@@ -329,8 +342,8 @@ impl App_ {
         Self {
             log,
             log_st: LogViewerState::default(),
-            _alerts: LogViewer::new(200),
-            _alert_st: LogViewerState::default(),
+            alerts: LogViewer::new(200),
+            alert_st: LogViewerState::default(),
             net: VecDeque::new(),
             procs: Vec::new(),
             tree: Vec::new(),
@@ -341,10 +354,6 @@ impl App_ {
             rate_chart: Vec::new(),
             open_chart: Vec::new(),
             alert_chart: Vec::new(),
-            chart_x: 0.0,
-            smooth_exec: 0.0,
-            smooth_open: 0.0,
-            smooth_alert: 0.0,
             rates: VecDeque::new(),
             focused: 0,
             paused: false,
@@ -362,8 +371,9 @@ impl App_ {
             rate_limit: 15, // max 15 events per comm per 1s
             rate_window: Duration::from_secs(1),
             rate_suppressed: 0,
-            collapsed: [false; 7],
+            collapsed: [false; Panel::COUNT + 1],
             last_event_lines: VecDeque::new(),
+            last_alert_lines: VecDeque::new(),
             last_log_kind: "",
             last_log_comm: String::new(),
             last_log_file: String::new(),
@@ -374,6 +384,9 @@ impl App_ {
             body_area: Cell::new(Rect::default()),
             left_area: Cell::new(Rect::default()),
             side_area: Cell::new(Rect::default()),
+            proc_area: Cell::new(Rect::default()),
+            proc_scroll: 0,
+            proc_sel: None,
             gateway: gateway_should_show(),
             gateway_sel: 0,
             gateway_note: String::new(),
@@ -386,6 +399,38 @@ impl App_ {
             eps_mark: (Instant::now(), 0),
             cpu_pct: 0.0,
             cpu_mark: proc_cpu_ticks().unwrap_or(0),
+        }
+    }
+
+    /// Rows that fit inside the process table's last drawn inner rect.
+    fn proc_rows(&self) -> usize {
+        self.proc_area.get().height as usize
+    }
+
+    /// Scroll the process table by `delta` rows, clamped to its content.
+    fn scroll_procs(&mut self, delta: isize) {
+        let max = self.tree.len().saturating_sub(self.proc_rows());
+        let next = self.proc_scroll as isize + delta;
+        self.proc_scroll = next.clamp(0, max as isize) as usize;
+    }
+
+    /// Select the process row under screen row `y`; clicking it again clears.
+    fn click_proc_row(&mut self, y: u16) {
+        let area = self.proc_area.get();
+        if area.height == 0 || y < area.y || y >= area.y + area.height {
+            return;
+        }
+        let scroll = self
+            .proc_scroll
+            .min(self.tree.len().saturating_sub(self.proc_rows()));
+        let idx = scroll + (y - area.y) as usize;
+        if let Some(row) = self.tree.get(idx) {
+            let pid = row.1;
+            self.proc_sel = if self.proc_sel == Some(pid) {
+                None
+            } else {
+                Some(pid)
+            };
         }
     }
 
@@ -547,7 +592,11 @@ impl App_ {
             }
             if e.is_alert {
                 self.alert_count += 1;
-                self._alerts.push(line.as_str());
+                self.alerts.push(line.as_str());
+                self.last_alert_lines.push_back(line);
+                if self.last_alert_lines.len() > 50 {
+                    self.last_alert_lines.pop_front();
+                }
             }
         }
         if !s.refresh {
@@ -556,23 +605,10 @@ impl App_ {
             self.uptime = s.uptime;
             return;
         }
-        let system_comms = [
-            "systemd",
-            "kthreadd",
-            "rcu_sched",
-            "ksoftirqd",
-            "migration",
-            "watchdog",
-            "khungtaskd",
-            "kswapd0",
-            "kcompactd0",
-            "jbd2",
-            "init",
-        ];
         self.procs = s
             .stats
             .iter()
-            .filter(|p| !system_comms.contains(&p.comm.as_str()))
+            .filter(|p| !is_system_comm(&p.comm))
             .map(|p| ProcRow {
                 pid: p.pid,
                 comm: p.comm.clone(),
@@ -581,11 +617,31 @@ impl App_ {
             })
             .collect();
         self.procs.sort_by_key(|b| std::cmp::Reverse(b.opens));
-        self.tree = s
+        let mut tree: Vec<(usize, u32, String, u64, u64)> = s
             .tree
             .into_iter()
-            .filter(|(_, _, comm, _, _)| !system_comms.contains(&comm.as_str()))
+            .filter(|(_, _, comm, _, _)| !is_system_comm(comm))
             .collect();
+        // Filtering the kernel roots leaves their children at depth 1+, which
+        // would render every row indented by an invisible parent. Re-root the
+        // visible forest so the first level starts at column 0.
+        if let Some(min_depth) = tree.iter().map(|row| row.0).min() {
+            for row in &mut tree {
+                row.0 -= min_depth;
+            }
+        }
+        self.tree = tree;
+        // A refresh can shrink the table or drop the selected process. Clamp
+        // the scroll offset and forget a selection that is no longer present.
+        let visible = self.proc_area.get().height as usize;
+        self.proc_scroll = self
+            .proc_scroll
+            .min(self.tree.len().saturating_sub(visible));
+        if let Some(pid) = self.proc_sel {
+            if !self.tree.iter().any(|row| row.1 == pid) {
+                self.proc_sel = None;
+            }
+        }
         self.files = s
             .top_files
             .iter()
@@ -601,45 +657,37 @@ impl App_ {
         self.exts = ext_vec;
         self.rates = s.rates;
 
-        // EMA smoothing — process only the LATEST rate sample per tick
-        let alpha = 0.25;
-        if let Some(latest) = self.rates.back() {
-            self.chart_x += 1.0;
-            self.smooth_exec = self.smooth_exec * (1.0 - alpha) + latest.exec_count as f64 * alpha;
-            self.smooth_open = self.smooth_open * (1.0 - alpha) + latest.open_count as f64 * alpha;
-            self.smooth_alert =
-                self.smooth_alert * (1.0 - alpha) + latest.alert_count as f64 * alpha;
-            self.rate_chart.push((self.chart_x, self.smooth_exec));
-            self.open_chart.push((self.chart_x, self.smooth_open));
-            self.alert_chart.push((self.chart_x, self.smooth_alert));
-        }
-        let max_pts = 120;
-        if self.rate_chart.len() > max_pts {
-            self.rate_chart.drain(..self.rate_chart.len() - max_pts);
-            self.open_chart.drain(..self.open_chart.len() - max_pts);
-            self.alert_chart.drain(..self.alert_chart.len() - max_pts);
-        }
+        // Rebuild the charts from the monitor's full 120-second history.
+        // Appending only the newest sample (the old behaviour) left the
+        // charts empty for the first few seconds and one point behind, which
+        // made the RATES strip look broken on startup and during demos.
+        self.rate_chart = self
+            .rates
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (i as f64, r.exec_count as f64))
+            .collect();
+        self.open_chart = self
+            .rates
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (i as f64, r.open_count as f64))
+            .collect();
+        self.alert_chart = self
+            .rates
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (i as f64, r.alert_count as f64))
+            .collect();
         self.total = s.total;
         self.lost = s.lost;
         self.uptime = s.uptime;
 
         // Build heatmap: top procs × top exts (using global ext counts)
-        let system_comms = [
-            "systemd",
-            "kthreadd",
-            "rcu_sched",
-            "ksoftirqd",
-            "migration",
-            "watchdog",
-            "khungtaskd",
-            "kswapd0",
-            "kcompactd0",
-            "jbd2",
-        ];
         let mut procs_for_heat: Vec<&ProcStats> = s
             .stats
             .iter()
-            .filter(|p| !system_comms.contains(&p.comm.as_str()))
+            .filter(|p| !is_system_comm(&p.comm))
             .collect();
         procs_for_heat.sort_by_key(|b| std::cmp::Reverse(b.total_opens));
         procs_for_heat.truncate(8);
@@ -714,74 +762,30 @@ impl Model for App_ {
                     }
                 }
             }
-            Msg::Key(k) if k.kind == KeyEventKind::Press => {
-                if self.help {
-                    self.help = false;
-                    return Cmd::None;
-                }
+            // Search mode must be matched before the global key handler:
+            // otherwise every typed character is consumed as a panel shortcut
+            // and the search buffer never fills.
+            Msg::Key(k) if k.kind == KeyEventKind::Press && self.search_mode => {
                 if k.modifiers.contains(Modifiers::CTRL) && k.code == KeyCode::Char('c') {
                     return Cmd::Quit;
                 }
                 match k.code {
-                    KeyCode::Char('q') | KeyCode::Escape => {
-                        if self.focused == 0 {
-                            return Cmd::Quit;
-                        }
-                    }
-                    KeyCode::Char('?') => self.help = true,
-                    KeyCode::Char('/') => {
-                        self.search_mode = true;
-                        self.search_buf.clear();
-                    }
-                    KeyCode::Char('p') => self.paused = !self.paused,
-                    KeyCode::Char('r') => {
-                        self.rate_limit = if self.rate_limit == 15 {
-                            5
-                        } else if self.rate_limit == 5 {
-                            50
-                        } else {
-                            15
-                        };
-                    }
-                    KeyCode::Char('y') => self.copy_focused_panel(),
-                    KeyCode::Char(' ') => {
-                        // toggle collapse of focused panel
-                        let idx = self.focused.min(6);
-                        self.collapsed[idx] = !self.collapsed[idx];
-                    }
-                    KeyCode::Tab => self.focused = (self.focused + 1) % 6,
-                    KeyCode::BackTab => {
-                        self.focused = if self.focused == 0 {
-                            5
-                        } else {
-                            self.focused - 1
-                        }
-                    }
-                    KeyCode::Char(c @ '1'..='6') => self.focused = (c as usize) - ('1' as usize),
-                    KeyCode::Up | KeyCode::Char('k') => self.log.scroll_up(1),
-                    KeyCode::Down | KeyCode::Char('j') => self.log.scroll_down(1),
-                    KeyCode::PageUp => self.log.page_up(&self.log_st),
-                    KeyCode::PageDown => self.log.page_down(&self.log_st),
-                    KeyCode::Home => self.log.scroll_to_top(),
-                    KeyCode::End => self.log.scroll_to_bottom(),
-                    _ => {}
-                }
-            }
-            // Search mode input
-            Msg::Key(k) if k.kind == KeyEventKind::Press && self.search_mode => {
-                match k.code {
                     KeyCode::Escape => {
                         self.search_mode = false;
+                        self.search_buf.clear();
+                        self.search_hits = 0;
                         self.log.clear_search();
                         self.log.set_filter(None);
                     }
                     KeyCode::Enter => {
+                        // Keep the filter active, leave the input line.
                         self.search_mode = false;
-                        // keep filter active
                     }
                     KeyCode::Backspace => {
                         self.search_buf.pop();
                         if self.search_buf.is_empty() {
+                            self.search_hits = 0;
+                            self.log.clear_search();
                             self.log.set_filter(None);
                         } else {
                             self.log.set_filter(Some(&self.search_buf));
@@ -796,13 +800,145 @@ impl Model for App_ {
                     _ => {}
                 }
             }
+            Msg::Key(k) if k.kind == KeyEventKind::Press => {
+                if self.help {
+                    self.help = false;
+                    return Cmd::None;
+                }
+                if k.modifiers.contains(Modifiers::CTRL) && k.code == KeyCode::Char('c') {
+                    return Cmd::Quit;
+                }
+                // Scroll keys follow the focused panel: the event log on
+                // EVENTS, the alert history on ALERTS. Other panels keep no
+                // scrollback, so the keys are ignored there.
+                let scroll_alerts = self.focused == 5;
+                match k.code {
+                    KeyCode::Char('q') => return Cmd::Quit,
+                    KeyCode::Escape => {
+                        // Esc clears an active filter first; only a second Esc
+                        // (or `q`) quits. Avoids closing the dashboard when
+                        // the user meant to dismiss a search.
+                        if self.search_buf.is_empty() {
+                            return Cmd::Quit;
+                        }
+                        self.search_buf.clear();
+                        self.search_hits = 0;
+                        self.log.clear_search();
+                        self.log.set_filter(None);
+                    }
+                    KeyCode::Char('?') | KeyCode::Char('h') => self.help = true,
+                    KeyCode::Char('/') => {
+                        // Search targets the event log; move focus there so
+                        // the filtered panel and the input are visibly linked.
+                        self.focused = 0;
+                        self.search_mode = true;
+                        self.search_buf.clear();
+                        self.search_hits = 0;
+                        self.log.clear_search();
+                        self.log.set_filter(None);
+                    }
+                    KeyCode::Char('p') => self.paused = !self.paused,
+                    KeyCode::Char('c') => self.clear_panels(),
+                    KeyCode::Char('r') => {
+                        self.rate_limit = if self.rate_limit == 15 {
+                            5
+                        } else if self.rate_limit == 5 {
+                            50
+                        } else {
+                            15
+                        };
+                    }
+                    KeyCode::Char('y') => self.copy_focused_panel(),
+                    KeyCode::Char(' ') => {
+                        // toggle collapse of focused panel
+                        let idx = self.focused.min(Panel::COUNT - 1);
+                        self.collapsed[idx] = !self.collapsed[idx];
+                    }
+                    KeyCode::Tab => self.focused = (self.focused + 1) % Panel::COUNT,
+                    KeyCode::BackTab => {
+                        self.focused = if self.focused == 0 {
+                            Panel::COUNT - 1
+                        } else {
+                            self.focused - 1
+                        }
+                    }
+                    KeyCode::Char(c @ '1'..='7') => self.focused = (c as usize) - ('1' as usize),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if scroll_alerts {
+                            self.alerts.scroll_up(1);
+                        } else if self.focused == 0 {
+                            self.log.scroll_up(1);
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if scroll_alerts {
+                            self.alerts.scroll_down(1);
+                        } else if self.focused == 0 {
+                            self.log.scroll_down(1);
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        if scroll_alerts {
+                            self.alerts.page_up(&self.alert_st);
+                        } else if self.focused == 0 {
+                            self.log.page_up(&self.log_st);
+                        }
+                    }
+                    KeyCode::PageDown => {
+                        if scroll_alerts {
+                            self.alerts.page_down(&self.alert_st);
+                        } else if self.focused == 0 {
+                            self.log.page_down(&self.log_st);
+                        }
+                    }
+                    KeyCode::Home => {
+                        if scroll_alerts {
+                            self.alerts.scroll_to_top();
+                        } else if self.focused == 0 {
+                            self.log.scroll_to_top();
+                        }
+                    }
+                    KeyCode::End => {
+                        if scroll_alerts {
+                            self.alerts.scroll_to_bottom();
+                        } else if self.focused == 0 {
+                            self.log.scroll_to_bottom();
+                        }
+                    }
+                    _ => {}
+                }
+            }
             Msg::Mouse(m) => {
+                // The process table is interactive even when the event stream
+                // owns focus (PROCESSES is the default detail panel).
+                let proc = self.proc_area.get();
+                let over_procs = proc.width > 0 && proc.contains(m.x, m.y);
                 match m.kind {
+                    MouseEventKind::ScrollUp if over_procs => {
+                        self.focused = 1;
+                        self.scroll_procs(-3);
+                    }
+                    MouseEventKind::ScrollDown if over_procs => {
+                        self.focused = 1;
+                        self.scroll_procs(3);
+                    }
+                    MouseEventKind::Down(MouseButton::Left) if over_procs => {
+                        self.focused = 1;
+                        self.click_proc_row(m.y);
+                    }
                     MouseEventKind::ScrollUp => {
-                        self.collapsed[self.focused.min(6)] = true;
+                        if self.focused == 5 {
+                            self.alerts.scroll_up(3);
+                        } else if self.focused == 0 {
+                            self.log.scroll_up(3);
+                        }
                     }
                     MouseEventKind::ScrollDown => {
-                        self.collapsed[self.focused.min(6)] = false;
+                        if self.focused == 5 {
+                            self.alerts.scroll_down(3);
+                        } else if self.focused == 0 {
+                            self.log.scroll_down(3);
+                        }
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
                         // Hit-test the 70/30 split from draw_body
@@ -816,7 +952,14 @@ impl Model for App_ {
                     _ => {}
                 }
             }
-            Msg::Tick if !self.paused => {
+            Msg::Tick if self.paused => {
+                // While paused the poll thread keeps sending (the channel is
+                // unbounded). Drain and discard so resuming does not replay a
+                // multi-minute backlog in a single frame. Counters are
+                // authoritative in the next live snapshot.
+                while self.rx.try_recv().is_ok() {}
+            }
+            Msg::Tick => {
                 // Advance the animation clock by one full tick period so the
                 // ColorWave speed is independent of the divisor.
                 self.time += (TICK_BASE * UNIFORM_TICK_DIVISOR).as_secs_f64();
@@ -849,7 +992,15 @@ impl Model for App_ {
             return self.draw_help(frame, area);
         }
 
-        let lc_h: u16 = if self.collapsed[6] { 1 } else { 6 };
+        // Rate-chart strip: 6 rows on normal terminals, 5 on short ones so
+        // the detail panel keeps usable height. Collapsed = title row only.
+        let lc_h: u16 = if self.collapsed[Panel::COUNT] {
+            1
+        } else if area.height < 28 {
+            5
+        } else {
+            6
+        };
         let outer = Flex::vertical()
             .constraints([
                 Constraint::Fixed(2), // header
@@ -965,9 +1116,11 @@ impl App_ {
     }
 
     fn draw_body(&self, f: &mut Frame, area: Rect) {
-        // Strict asymmetric split: 70% event stream | 30% telemetry + detail.
+        // Asymmetric split: event stream | telemetry + detail. The detail
+        // panels (process tree, top files, network, heatmap) need real width
+        // for their labels and bars, so they get 35% rather than 30%.
         let cols = Flex::horizontal()
-            .constraints([Constraint::Percentage(70.0), Constraint::Percentage(30.0)])
+            .constraints([Constraint::Percentage(65.0), Constraint::Percentage(35.0)])
             .split(area);
         let side = Flex::vertical()
             .constraints([Constraint::Fixed(TELEMETRY_H), Constraint::Min(0)])
@@ -975,13 +1128,17 @@ impl App_ {
 
         self.draw_events(f, cols[0]);
         self.draw_telemetry(f, side[0]);
-        // The detail panel under the telemetry card follows focus (Tab / 1-6);
+        // Clear the process hit-box before drawing; only `draw_procs` fills it,
+        // so a hidden table cannot still receive clicks.
+        self.proc_area.set(Rect::default());
+        // The detail panel under the telemetry card follows focus (Tab / 1-7);
         // with the event stream focused it shows PROCESSES.
         match self.focused {
             2 => self.draw_net(f, side[1]),
             3 => self.draw_files(f, side[1]),
             4 => self.draw_exts_chart(f, side[1]),
-            5 => self.draw_heatmap(f, side[1]),
+            5 => self.draw_alerts(f, side[1]),
+            6 => self.draw_heatmap(f, side[1]),
             _ => self.draw_procs(f, side[1]),
         }
 
@@ -1123,10 +1280,19 @@ impl App_ {
     }
 
     fn draw_events(&self, f: &mut Frame, area: Rect) {
+        let title = if self.search_buf.is_empty() {
+            " EVENTS ".to_string()
+        } else {
+            format!(
+                " EVENTS — \"{}\" ({} hits) ",
+                trunc(&self.search_buf, 18),
+                self.search_hits
+            )
+        };
+        let b = self.block(0, &title);
+        let inner = b.inner(area);
+        b.render(area, f);
         if self.collapsed[0] {
-            let b = self.block(0, " EVENTS ");
-            let inner = b.inner(area);
-            b.render(area, f);
             if inner.height > 0 {
                 Paragraph::new(Line::from_spans(vec![Span::styled(
                     "  [space] to expand",
@@ -1136,54 +1302,88 @@ impl App_ {
             }
             return;
         }
-        let b = self.block(0, " EVENTS ");
-        let inner = b.inner(area);
-        b.render(area, f);
         let mut st = self.log_st.clone();
         self.log.render(inner, f, &mut st);
     }
 
+    fn draw_alerts(&self, f: &mut Frame, area: Rect) {
+        let title = format!(" ALERTS ({}) ", self.alert_count);
+        let b = self.block(5, &title);
+        let inner = b.inner(area);
+        b.render(area, f);
+        if self.collapsed[5] {
+            return;
+        }
+        if self.alert_count == 0 {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                "  no alerts — system quiet",
+                Style::new().fg(DIM),
+            )]))
+            .render(inner, f);
+            return;
+        }
+        let mut st = self.alert_st.clone();
+        self.alerts.render(inner, f, &mut st);
+    }
+
     fn draw_procs(&self, f: &mut Frame, area: Rect) {
-        let title = format!(" PROCESSES ({}) ", self.tree.len());
+        // Rows available inside the border, known before the title so the
+        // title can show the visible slice when the table is scrolled.
+        let rows = area.height.saturating_sub(2) as usize;
+        let max_scroll = self.tree.len().saturating_sub(rows);
+        let scroll = self.proc_scroll.min(max_scroll);
+        let title = if max_scroll > 0 {
+            format!(
+                " PROCESSES ({}) [{}-{}] ",
+                self.tree.len(),
+                scroll + 1,
+                (scroll + rows).min(self.tree.len())
+            )
+        } else {
+            format!(" PROCESSES ({}) ", self.tree.len())
+        };
         let b = self.block(1, &title);
         let inner = b.inner(area);
         b.render(area, f);
+        // Even an empty/collapsed table keeps its hit-box so wheel/click do
+        // nothing instead of falling through to the event log.
+        self.proc_area.set(inner);
         if self.collapsed[1] || self.tree.is_empty() {
             return;
         }
 
-        let max = self
-            .tree
-            .iter()
-            .map(|&(_, _, _, opens, _)| opens)
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let bar_w = inner.width.saturating_sub(38) as usize;
+        let max = self.tree.iter().map(|row| row.3).max().unwrap_or(1).max(1);
+
+        // A bar only earns its space on a wide detail column; below that the
+        // open count itself is more useful than a one-cell stub.
+        let bar_w = if inner.width >= 36 {
+            (inner.width as usize / 3).clamp(8, 20)
+        } else {
+            0
+        };
+        // Keep one blank column between the bar and the panel border.
+        let text_w = inner.width as usize - bar_w;
         let colors = MiniBarColors::new(BLUE, GREEN, AMBER, RED);
         let rows = inner.height as usize;
+        let scroll = self.proc_scroll.min(self.tree.len().saturating_sub(rows));
 
-        for (i, &(depth, pid, ref comm, opens, alerts)) in self.tree.iter().take(rows).enumerate() {
-            let y = inner.y + i as u16;
+        for (offset, &(depth, pid, ref comm, opens, alerts)) in
+            self.tree.iter().skip(scroll).take(rows).enumerate()
+        {
+            let i = scroll + offset; // absolute index for `tree_prefix`
+            let y = inner.y + offset as u16;
             let value = (opens as f64 / max as f64).clamp(0.0, 1.0);
-
-            // Tree connector prefix
-            let indent = "│   ".repeat(depth);
-            let connector = if i + 1 < self.tree.len()
-                && self
-                    .tree
-                    .get(i + 1)
-                    .is_some_and(|&(d, _, _, _, _)| d > depth)
-            {
-                "├── "
-            } else if depth > 0 {
-                "└── "
-            } else {
-                "    "
-            };
-
-            let prefix = format!("{}{}", indent, connector);
-            let label = format!("{} {:>5} {:<16}", prefix, pid, trunc(comm, 16));
+            let prefix = tree_prefix(&self.tree, i, depth);
+            let prefix_w = prefix.chars().count();
+            // Columns: tree prefix, pid, name, opens. `comm_w` soaks up the
+            // remaining width so the opens count is always visible instead of
+            // being clipped off at the right edge on an 80-column terminal.
+            let comm_w = text_w.saturating_sub(prefix_w + 13).clamp(4, 20);
+            let label = format!(
+                "{prefix}{pid:>5} {:<width$}{opens:>6}",
+                trunc(comm, comm_w),
+                width = comm_w
+            );
             let label_c = if alerts > 0 {
                 RED
             } else if opens > 10 {
@@ -1191,21 +1391,21 @@ impl App_ {
             } else {
                 BRIGHT
             };
+            let mut style = Style::new().fg(label_c);
+            if self.proc_sel == Some(pid) {
+                style = style.bg(SELECT_BG).attrs(StyleFlags::BOLD);
+            }
+            Paragraph::new(Line::from_spans(vec![Span::styled(label, style)]))
+                .render(Rect::new(inner.x, y, text_w as u16, 1), f);
 
-            let text_w = inner.width.saturating_sub(bar_w as u16 + 1);
-            Paragraph::new(Line::from_spans(vec![Span::styled(
-                label,
-                Style::new().fg(label_c),
-            )]))
-            .render(Rect::new(inner.x, y, text_w, 1), f);
-
-            // MiniBar
-            let bar_x = inner.x + text_w;
-            let bar_area = Rect::new(bar_x, y, bar_w as u16, 1);
-            MiniBar::new(value, bar_w as u16)
-                .colors(colors)
-                .show_percent(true)
-                .render(bar_area, f);
+            if bar_w > 1 {
+                let fill_w = (bar_w - 1) as u16;
+                let bar_area = Rect::new(inner.x + text_w as u16, y, fill_w, 1);
+                MiniBar::new(value, fill_w)
+                    .colors(colors)
+                    .show_percent(fill_w >= 16)
+                    .render(bar_area, f);
+            }
         }
     }
 
@@ -1213,39 +1413,52 @@ impl App_ {
         let b = self.block(4, " FILE TYPES ");
         let inner = b.inner(area);
         b.render(area, f);
+        if self.collapsed[4] {
+            return;
+        }
         if self.exts.is_empty() {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                "  no file activity yet",
+                Style::new().fg(DIM),
+            )]))
+            .render(inner, f);
             return;
         }
 
-        // BarChart from ftui-extras
-        let max_count = self
-            .exts
-            .iter()
-            .map(|(_, c)| *c as f64)
-            .fold(0.0f64, f64::max)
-            .max(1.0);
-        let groups: Vec<BarGroup> = self
-            .exts
-            .iter()
-            .take(10)
-            .map(|(ext, cnt)| BarGroup::new(ext.as_str(), vec![*cnt as f64]))
-            .collect();
+        let max = self.exts.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
+        let colors = MiniBarColors::new(BLUE, GREEN, AMBER, RED);
+        let rows = inner.height as usize;
+        let label_w = 10u16.min(inner.width);
+        let count_w = 6u16.min(inner.width.saturating_sub(label_w));
+        let bar_w = inner.width.saturating_sub(label_w + count_w + 2);
 
-        let palette: Vec<PackedRgba> = self
-            .exts
-            .iter()
-            .take(10)
-            .map(|(ext, _)| ext_color(ext))
-            .collect();
+        // One compact row per extension (label, count, bar). The generic
+        // BarChart left a blank row between bars and printed no counts.
+        for (i, (ext, count)) in self.exts.iter().take(rows).enumerate() {
+            let y = inner.y + i as u16;
+            let label = format!(
+                "{:<width$}",
+                trunc(&format!(".{ext}"), label_w as usize),
+                width = label_w as usize
+            );
+            let value = (*count as f64 / max as f64).clamp(0.0, 1.0);
+            Paragraph::new(Line::from_spans(vec![
+                Span::styled(label, Style::new().fg(ext_color(ext))),
+                Span::styled(
+                    format!("{count:>width$}", width = count_w as usize),
+                    Style::new().fg(BRIGHT),
+                ),
+            ]))
+            .render(Rect::new(inner.x, y, label_w + count_w, 1), f);
 
-        BarChart::new(groups)
-            .direction(BarDirection::Horizontal)
-            .mode(BarMode::Grouped)
-            .bar_width(1)
-            .colors(palette)
-            .style(Style::new().fg(FG))
-            .max(max_count)
-            .render(inner, f);
+            if bar_w > 1 {
+                let bar_area = Rect::new(inner.x + label_w + count_w + 1, y, bar_w, 1);
+                MiniBar::new(value, bar_w)
+                    .colors(colors)
+                    .show_percent(false)
+                    .render(bar_area, f);
+            }
+        }
     }
 
     fn draw_net(&self, f: &mut Frame, area: Rect) {
@@ -1257,115 +1470,71 @@ impl App_ {
             return;
         }
         if self.net.is_empty() {
-            Paragraph::new(Line::from_spans(vec![
-                Span::styled("  no network events captured", Style::new().fg(DIM)),
-                Span::styled(
-                    "\n  (kernel may lack sockaddr capture)",
+            Paragraph::new(ftui_text::Text::from_lines(vec![
+                Line::from_spans(vec![Span::styled(
+                    "  no network events captured",
                     Style::new().fg(DIM),
-                ),
+                )]),
+                Line::from_spans(vec![Span::styled(
+                    "  (kernel may lack sockaddr capture)",
+                    Style::new().fg(DIM),
+                )]),
             ]))
             .render(inner, f);
             return;
         }
 
-        // Split: top = aggregated per-process, bottom = Canvas traffic flow
-        let split = Flex::vertical()
-            .constraints([Constraint::Percentage(60.0), Constraint::Percentage(40.0)])
-            .split(inner);
+        // Recent-connections list replaces the sparse canvas. `net` is a
+        // newest-first deque, so take from the front and draw oldest-first:
+        // the previous `rev().take()` showed the *oldest* N connections and
+        // hid every new one.
+        let rows = inner.height as usize;
+        let recent: Vec<&NetEntry> = self.net.iter().take(rows).collect();
+        let width = inner.width as usize;
 
-        // --- Top: per-process aggregated connections ---
-        let mut proc_conns: std::collections::HashMap<String, (u64, u64, u64, u64)> =
-            std::collections::HashMap::new(); // (connect, accept, send, recv)
-        for e in self.net.iter() {
-            let entry = proc_conns.entry(e.comm.clone()).or_insert((0, 0, 0, 0));
-            match e.kind.as_str() {
-                "Connect" => entry.0 += 1,
-                "Accept" => entry.1 += 1,
-                "SendTo" => entry.2 += 1,
-                "RecvFrom" => entry.3 += 1,
-                _ => {}
+        // Column widths shrink with the panel so the address (the reason the
+        // panel exists) is never clipped to its first character.
+        let (ts_w, kind_w, comm_w) = if width >= 50 {
+            (8, 5, 14)
+        } else if width >= 34 {
+            (8, 5, 8)
+        } else {
+            (0, 5, 7)
+        };
+        let used = if ts_w == 0 {
+            kind_w + comm_w + 2
+        } else {
+            ts_w + kind_w + comm_w + 3
+        };
+        let addr_w = width.saturating_sub(used).max(4);
+
+        for (i, e) in recent.iter().rev().enumerate() {
+            let y = inner.y + i as u16;
+            let mut spans = Vec::with_capacity(4);
+            if ts_w > 0 {
+                spans.push(Span::styled(
+                    format!("{:<ts_w$} ", trunc(&e.ts, ts_w)),
+                    Style::new().fg(DIM),
+                ));
             }
-        }
-        let mut procs: Vec<_> = proc_conns.into_iter().collect();
-        procs.sort_by(|a, b| {
-            let a_total = a.1 .0 + a.1 .1 + a.1 .2 + a.1 .3;
-            let b_total = b.1 .0 + b.1 .1 + b.1 .2 + b.1 .3;
-            b_total.cmp(&a_total)
-        });
-        let max_conns = procs
-            .iter()
-            .map(|(_, c)| c.0 + c.1 + c.2 + c.3)
-            .max()
-            .unwrap_or(1)
-            .max(1);
-
-        let rows = split[0].height as usize;
-        let bar_w = split[0].width.saturating_sub(38) as usize;
-        for (i, (comm, (conn, acc, send, recv))) in procs.iter().take(rows).enumerate() {
-            let y = split[0].y + i as u16;
-            let total = conn + acc + send + recv;
-            let value = (total as f64 / max_conns as f64).clamp(0.0, 1.0);
-
-            // Label: comm + counts
-            let label = format!(" {:<14}", trunc(comm, 14));
-            Paragraph::new(Line::from_spans(vec![
-                Span::styled(label, Style::new().fg(BRIGHT)),
-                Span::styled(format!(" >{:<4} <{:<4} ", conn, acc), Style::new().fg(CYAN)),
-                Span::styled(
-                    format!(" {:>4}  {:>4} ", send, recv),
-                    Style::new().fg(PURPLE),
-                ),
-            ]))
-            .render(Rect::new(split[0].x, y, 38.min(split[0].width), 1), f);
-
-            // Bar: stacked direction
-            let bar_area = Rect::new(split[0].x + 38, y, bar_w as u16, 1);
-            let colors = MiniBarColors::new(BLUE, GREEN, AMBER, PURPLE);
-            MiniBar::new(value, bar_w as u16)
-                .colors(colors)
-                .show_percent(false)
-                .render(bar_area, f);
-        }
-
-        // --- Bottom: Canvas traffic flow visualization ---
-        if split[1].height >= 3 {
-            let canvas_area = Rect::new(
-                split[1].x + 1,
-                split[1].y + 1,
-                split[1].width.saturating_sub(2),
-                split[1].height.saturating_sub(2),
-            );
-            if canvas_area.width >= 4 && canvas_area.height >= 2 {
-                let mut painter = Painter::for_area(canvas_area, Mode::Block);
-                let (pw, ph) = painter.size();
-                let _t = self.time;
-
-                // Draw traffic flow: each recent event becomes a colored dot
-                // moving right (out) or left (in)
-                for (i, e) in self.net.iter().rev().take((pw * ph) as usize).enumerate() {
-                    let frac = i as f64 / (pw * ph).max(1) as f64;
-                    let px = if matches!(e.kind.as_str(), "Connect" | "SendTo") {
-                        // Outgoing: left to right
-                        (frac * pw as f64) as i32
-                    } else {
-                        // Incoming: right to left
-                        ((1.0 - frac) * pw as f64) as i32
-                    };
-                    let py = ((i as f64 / pw as f64).fract() * ph as f64) as i32;
-                    let c = match e.kind.as_str() {
-                        "Connect" => BLUE,
-                        "Accept" => GREEN,
-                        "SendTo" => AMBER,
-                        "RecvFrom" => PURPLE,
-                        _ => CYAN,
-                    };
-                    painter.point_colored(px, py, c);
-                }
-
-                Canvas::from_painter(&painter)
-                    .style(Style::new().fg(FG))
-                    .render(canvas_area, f);
-            }
+            let (kind, kind_c) = match e.kind.as_str() {
+                "Connect" => ("CONN", CYAN),
+                "Accept" => ("ACPT", PURPLE),
+                "SendTo" => ("SEND", BLUE),
+                "RecvFrom" => ("RECV", BLUE),
+                other => (other, FG),
+            };
+            spans.push(Span::styled(
+                format!("{:<kind_w$} ", trunc(kind, kind_w)),
+                Style::new().fg(kind_c),
+            ));
+            spans.push(Span::styled(
+                format!("{:<comm_w$} ", trunc(&e.comm, comm_w)),
+                Style::new().fg(BRIGHT),
+            ));
+            spans.push(Span::styled(trunc(&e.addr, addr_w), Style::new().fg(FG)));
+            Paragraph::new(Line::from_spans(spans))
+                .render(Rect::new(inner.x, y, inner.width, 1), f);
         }
     }
 
@@ -1379,7 +1548,14 @@ impl App_ {
 
         let max = self.files.iter().map(|r| r.count).max().unwrap_or(1).max(1);
         let rows = inner.height as usize;
-        let bar_w = inner.width.saturating_sub(36) as usize;
+
+        // Bar width: only show when there's room beyond the label + rank column.
+        // The label + rank takes ~20 cols; bar appears only when width > 36.
+        let bar_w = if inner.width > 36 {
+            inner.width.saturating_sub(36) as usize
+        } else {
+            0
+        };
         let colors = MiniBarColors::new(BLUE, GREEN, AMBER, RED);
 
         for (i, r) in self.files.iter().take(rows).enumerate() {
@@ -1387,38 +1563,63 @@ impl App_ {
             let value = (r.count as f64 / max as f64).clamp(0.0, 1.0);
 
             let rank_c = if i < 3 { AMBER } else { DIM };
-            let label = format!("{:>2}. {:<16}", i + 1, trunc(&r.name, 16));
-            let ext_c = ext_color(&r.ext);
-            let entropy_c = if r.entropy > 0.7 {
-                RED
-            } else if r.entropy > 0.4 {
-                AMBER
+            // Show rank + filename; when width is tight drop the bar and shrink the label.
+            if bar_w == 0 {
+                let label = format!(
+                    "{:>2}. {}",
+                    i + 1,
+                    trunc(&r.name, (inner.width.saturating_sub(3).max(1)).into())
+                );
+                Paragraph::new(Line::from_spans(vec![Span::styled(
+                    label,
+                    Style::new().fg(rank_c),
+                )]))
+                .render(Rect::new(inner.x, y, inner.width.max(1), 1), f);
             } else {
-                GREEN
-            };
+                let _label = format!(
+                    "{:>2}. {:<}",
+                    i + 1,
+                    trunc(&r.name, (inner.width.saturating_sub(5).max(1)).into())
+                );
+                let ext_c = ext_color(&r.ext);
+                let entropy_c = if r.entropy > 0.7 {
+                    RED
+                } else if r.entropy > 0.4 {
+                    AMBER
+                } else {
+                    GREEN
+                };
 
-            let label_w = 28.min(inner.width);
-            Paragraph::new(Line::from_spans(vec![
-                Span::styled(label, Style::new().fg(rank_c)),
-                Span::styled(format!(" .{:<5}", r.ext), Style::new().fg(ext_c)),
-                Span::styled(format!("H:{:.1}", r.entropy), Style::new().fg(entropy_c)),
-            ]))
-            .render(Rect::new(inner.x, y, label_w, 1), f);
+                let label_w = (inner.width - bar_w as u16 - 1).max(1);
+                // Reserve the trailing ` H:x.x` column so long names cannot
+                // push the entropy value out of the row.
+                let name_w = label_w.saturating_sub(10) as usize;
+                Paragraph::new(Line::from_spans(vec![
+                    Span::styled(format!("{:>2}.", i + 1), Style::new().fg(rank_c)),
+                    Span::styled(
+                        format!(" {}", trunc(&r.name, name_w)),
+                        Style::new().fg(ext_c),
+                    ),
+                    Span::styled(format!(" H:{:.1}", r.entropy), Style::new().fg(entropy_c)),
+                ]))
+                .render(Rect::new(inner.x, y, label_w, 1), f);
 
-            // MiniBar
-            let bar_area = Rect::new(inner.x + label_w, y, bar_w as u16, 1);
-            MiniBar::new(value, bar_w as u16)
-                .colors(colors)
-                .show_percent(false)
-                .render(bar_area, f);
+                // MiniBar only when width permits
+                let bar_x = inner.x + label_w;
+                let bar_area = Rect::new(bar_x, y, bar_w as u16, 1);
+                MiniBar::new(value, bar_w as u16)
+                    .colors(colors)
+                    .show_percent(false)
+                    .render(bar_area, f);
+            }
         }
     }
 
     fn draw_heatmap(&self, f: &mut Frame, area: Rect) {
-        let b = self.block(5, " HEATMAP ");
+        let b = self.block(6, " HEATMAP ");
         let inner = b.inner(area);
         b.render(area, f);
-        if self.collapsed[5] || self.heatmap.is_empty() {
+        if self.collapsed[6] || self.heatmap.is_empty() {
             return;
         }
 
@@ -1428,14 +1629,36 @@ impl App_ {
             return;
         }
 
+        // The label column is carved out first; the remaining width is split
+        // between the extension cells. Previously `cell_w` was derived from
+        // the full width and then shifted by 14 columns, so the last cells
+        // rendered past the panel border (and into the event log).
+        let label_w: u16 = 12.min(inner.width);
+        let grid_w = inner.width.saturating_sub(label_w);
+        let shown = ext_count.min((grid_w / 4).max(1) as usize);
+        let cell_w = (grid_w as usize / shown.max(1)).max(4);
+
         // Header row: extension labels
-        let cell_w = (inner.width as usize / ext_count).max(4);
         for (j, ext) in self.heatmap_exts.iter().enumerate() {
-            let x = inner.x + (j * cell_w) as u16;
-            let label = format!(".{:<4}", trunc(ext, 4));
+            if j >= shown {
+                break;
+            }
+            let x = inner.x + label_w + (j * cell_w) as u16;
+            if x >= inner.right() {
+                break;
+            }
+            // One label per heatmap cell, clipped to that cell so adjacent
+            // columns never run together (`.pdf.rs.png.jso.txt`). Narrow
+            // cells drop the dot so three-letter extensions keep a gap.
+            let label = if cell_w >= 5 {
+                clip(&format!(".{ext}"), cell_w)
+            } else {
+                // Leave one separator column in a 4-wide cell.
+                format!("{:<width$}", clip(ext, cell_w - 1), width = cell_w)
+            };
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 label,
-                Style::new().fg(DIM),
+                Style::new().fg(ext_color(ext)),
             )]))
             .render(Rect::new(x, inner.y, cell_w as u16, 1), f);
         }
@@ -1453,19 +1676,25 @@ impl App_ {
             let y = inner.y + 1 + i as u16;
 
             // Process label
-            let label = format!("{:<14}", trunc(&row.label, 14));
+            let label = format!("{:<12}", trunc(&row.label, 12));
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 label,
                 Style::new().fg(BRIGHT),
             )]))
-            .render(Rect::new(inner.x, y, 14.min(inner.width), 1), f);
+            .render(Rect::new(inner.x, y, label_w, 1), f);
 
-            // Heatmap cells
+            // Heatmap cells - only render `shown` columns
             for (j, (_ext, count)) in row.ext_counts.iter().enumerate() {
-                let x = inner.x + 14 + (j * cell_w) as u16;
+                if j >= shown {
+                    break;
+                }
+                let x = inner.x + label_w + (j * cell_w) as u16;
+                if x >= inner.right() {
+                    break;
+                }
                 let frac = *count as f64 / max_val as f64;
                 let color = heatmap_gradient(frac);
-                let bar_len = ((cell_w - 1) as f64 * frac) as usize;
+                let bar_len = ((cell_w - 1) as f64 * frac).round() as usize;
                 let bar = "█".repeat(bar_len);
                 if !bar.is_empty() {
                     Paragraph::new(Line::from_spans(vec![Span::styled(
@@ -1479,7 +1708,25 @@ impl App_ {
     }
 
     fn draw_linechart(&self, f: &mut Frame, area: Rect) {
-        if self.collapsed[6] || area.height < 2 {
+        if self.collapsed[Panel::COUNT] || area.height < 2 {
+            return;
+        }
+
+        // Wrap the three charts in a titled block so the strip reads as intentional
+        // even when empty. The block uses the rate-chart slot (index Panel::COUNT).
+        let title = format!(" RATES (last {}s) ", self.rate_chart.len());
+        let b = self.block(Panel::COUNT, &title);
+        let inner = b.inner(area);
+        b.render(area, f);
+
+        // The monitor publishes its first rate sample after one second. Show
+        // a deliberate placeholder instead of an empty box until then.
+        if self.rate_chart.len() <= 2 {
+            Paragraph::new(Line::from_spans(vec![Span::styled(
+                "  collecting rate samples...",
+                Style::new().fg(DIM),
+            )]))
+            .render(inner, f);
             return;
         }
 
@@ -1489,7 +1736,7 @@ impl App_ {
                 Constraint::Percentage(33.0),
                 Constraint::Percentage(33.0),
             ])
-            .split(area);
+            .split(inner);
 
         // Exec/s chart
         if self.rate_chart.len() > 2 {
@@ -1504,6 +1751,7 @@ impl App_ {
                 .style(Style::new().fg(GREEN))
                 .y_bounds(0.0, max_y)
                 .render(charts_layout[0], f);
+            chart_label(f, charts_layout[0], "exec/s", GREEN);
         }
 
         // Open/s chart
@@ -1519,6 +1767,7 @@ impl App_ {
                 .style(Style::new().fg(BLUE))
                 .y_bounds(0.0, max_y)
                 .render(charts_layout[1], f);
+            chart_label(f, charts_layout[1], "open/s", BLUE);
         }
 
         // Alert/s chart
@@ -1534,13 +1783,16 @@ impl App_ {
                 .style(Style::new().fg(RED))
                 .y_bounds(0.0, max_y)
                 .render(charts_layout[2], f);
+            chart_label(f, charts_layout[2], "alert/s", RED);
         }
     }
 
     fn draw_search_bar(&self, f: &mut Frame, area: Rect) {
+        // Draw over the status line (last row) so the input is always visible
+        // and never lands in the middle of the rate charts.
         let bar_area = Rect::new(
             area.x,
-            area.y + area.height.saturating_sub(3),
+            area.y + area.height.saturating_sub(1),
             area.width,
             1,
         );
@@ -1561,13 +1813,22 @@ impl App_ {
         let p = Panel::ALL[self.focused];
         let tier_display = if self.is_activated { "ENT" } else { "COMM" };
         let left = format!(" {} | {} ", p.name(), tier_display);
-        let center = format!(
-            "evt:{}  lost:{}  sup:{}  up:{}  r:limit  y:copy  space:collapse",
-            self.total,
-            self.lost,
-            self.rate_suppressed,
-            fmt_dur(self.uptime)
-        );
+        let selected = if self.focused == 1 {
+            self.proc_sel
+                .and_then(|pid| self.tree.iter().find(|row| row.1 == pid))
+        } else {
+            None
+        };
+        let center = if let Some((_, pid, comm, opens, alerts)) = selected {
+            format!("sel:{comm} pid:{pid}  opens:{opens}  alerts:{alerts}")
+        } else {
+            format!(
+                "evt:{}  lost:{}  up:{}   /:search  p:pause  space:collapse",
+                self.total,
+                self.lost,
+                fmt_dur(self.uptime)
+            )
+        };
         let status = StatusLine::new()
             .left(StatusItem::text(&left))
             .center(StatusItem::text(&center))
@@ -1629,7 +1890,12 @@ impl App_ {
                 }
             }
             5 => {
-                // ALERTS / HEATMAP
+                // ALERTS
+                let start = self.last_alert_lines.len().saturating_sub(20);
+                lines = self.last_alert_lines.range(start..).cloned().collect();
+            }
+            6 => {
+                // HEATMAP
                 for row in self.heatmap.iter().take(20) {
                     let parts: Vec<String> = row
                         .ext_counts
@@ -1672,6 +1938,32 @@ impl App_ {
         }
     }
 
+    /// Clear every panel's contents without touching the monitor counters.
+    fn clear_panels(&mut self) {
+        self.log.clear();
+        self.alerts.clear();
+        self.net.clear();
+        self.procs.clear();
+        self.tree.clear();
+        self.files.clear();
+        self.exts.clear();
+        self.heatmap.clear();
+        self.heatmap_exts.clear();
+        self.rate_chart.clear();
+        self.open_chart.clear();
+        self.alert_chart.clear();
+        self.last_event_lines.clear();
+        self.last_alert_lines.clear();
+        self.alert_count = 0;
+        self.search_mode = false;
+        self.search_buf.clear();
+        self.search_hits = 0;
+        self.proc_scroll = 0;
+        self.proc_sel = None;
+        self.log.clear_search();
+        self.log.set_filter(None);
+    }
+
     fn draw_help(&self, f: &mut Frame, area: Rect) {
         let lines = vec![
             Line::from_spans(vec![Span::styled(
@@ -1684,8 +1976,10 @@ impl App_ {
                 Style::new().fg(AMBER).attrs(StyleFlags::BOLD),
             )]),
             Line::raw("   Tab/Shift+Tab   cycle panels"),
-            Line::raw("   1-6             jump to panel"),
-            Line::raw("   j/k or arrows   scroll"),
+            Line::raw("   1-7             jump to panel"),
+            Line::raw("   j/k or arrows   scroll events / alerts"),
+            Line::raw("   PgUp/PgDn/Home/End  scroll to page / edge"),
+            Line::raw("   mouse           click process row to select, wheel scrolls"),
             Line::raw(""),
             Line::from_spans(vec![Span::styled(
                 " ACT",
@@ -1693,10 +1987,12 @@ impl App_ {
             )]),
             Line::raw("   p               pause/resume"),
             Line::raw("   r               cycle rate limit (5/15/50)"),
-            Line::raw("   /               search/filter events"),
+            Line::raw("   /               search/filter events (Enter keep, Esc clear)"),
+            Line::raw("   c               clear all panels"),
             Line::raw("   space           collapse/expand panel"),
             Line::raw("   y               copy last 20 lines"),
-            Line::raw("   q/Esc           quit"),
+            Line::raw("   Esc             clear filter, then quit"),
+            Line::raw("   q               quit"),
             Line::raw("   Ctrl+C          force quit"),
         ];
         let b = Block::new()
@@ -1713,11 +2009,67 @@ impl App_ {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 fn trunc(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    // Count/slice by chars, not bytes: slicing a UTF-8 string at a byte offset
+    // panics on multi-byte process names and file paths.
+    if s.chars().count() <= max {
         s.to_string()
+    } else if max == 0 {
+        String::new()
     } else {
-        format!("{}~", &s[..max.saturating_sub(1)])
+        let mut out: String = s.chars().take(max - 1).collect();
+        out.push('~');
+        out
     }
+}
+
+/// Hard character clip with no ellipsis — for column headers where a `~`
+/// would be noise (e.g. `.jso` rather than `.js~`).
+fn clip(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
+/// Overlay a filled label on the top-right corner of a rate chart.
+///
+/// `LineChart`'s built-in legend leaves the cell between the marker and the
+/// name untouched, so a plotted glyph can sit flush against the label. A
+/// background-filled label masks the plot and keeps the strip legible.
+fn chart_label(f: &mut Frame, area: Rect, name: &str, color: PackedRgba) {
+    let text = format!("■ {name}");
+    let w = text.chars().count() as u16;
+    if area.width <= w + 1 {
+        return;
+    }
+    let rect = Rect::new(area.right() - w, area.y, w, 1);
+    Paragraph::new(Line::from_spans(vec![Span::styled(
+        text,
+        Style::new().fg(color).bg(BG),
+    )]))
+    .render(rect, f);
+}
+
+/// Tree-drawing prefix for row `i` of the visible process forest.
+///
+/// `└──` is used only when no later sibling exists at the same depth before
+/// the walk returns to a shallower level; `├──` otherwise. Ancestor rails
+/// (`│`) stay open while that ancestor still has siblings below.
+fn tree_prefix(rows: &[(usize, u32, String, u64, u64)], i: usize, depth: usize) -> String {
+    if depth == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    for level in 1..depth {
+        let rail = rows[i + 1..]
+            .iter()
+            .take_while(|row| row.0 >= level)
+            .any(|row| row.0 == level);
+        out.push_str(if rail { "│   " } else { "    " });
+    }
+    let last = !rows[i + 1..]
+        .iter()
+        .take_while(|row| row.0 >= depth)
+        .any(|row| row.0 == depth);
+    out.push_str(if last { "└── " } else { "├── " });
+    out
 }
 
 fn fmt_rate(v: f64) -> String {
@@ -1894,4 +2246,468 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
         .run();
     let _ = h.join();
     res.map_err(|e| anyhow::anyhow!("tui: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ftui_render::grapheme_pool::GraphemePool;
+
+    fn app() -> App_ {
+        let (_tx, rx) = mpsc::channel();
+        let mut app = App_::new(rx, &LicenseState::community());
+        app.gateway = false;
+        app
+    }
+
+    fn render(app: &App_, w: u16, h: u16) -> String {
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(w, h, &mut pool);
+        app.view(&mut frame);
+        let mut out = String::with_capacity((w as usize + 1) * h as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let c = frame
+                    .buffer
+                    .get(x, y)
+                    .and_then(|c| c.content.as_char())
+                    .unwrap_or(' ');
+                out.push(c);
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn every_panel_is_reachable_and_titled() {
+        let panels = [
+            (2, "NETWORK"),
+            (3, "TOP FILES"),
+            (4, "FILE TYPES"),
+            (5, "ALERTS"),
+            (6, "HEATMAP"),
+        ];
+        for (idx, title) in panels {
+            let mut app = app();
+            app.focused = idx;
+            let screen = render(&app, 120, 40);
+            assert!(
+                screen.contains(title),
+                "panel {idx} should render {title}\n{screen}"
+            );
+        }
+    }
+
+    #[test]
+    fn alerts_panel_shows_quiet_placeholder() {
+        let mut app = app();
+        app.focused = 5;
+        let screen = render(&app, 120, 40);
+        assert!(screen.contains("ALERTS (0)"), "{screen}");
+        assert!(screen.contains("no alerts"), "{screen}");
+    }
+
+    #[test]
+    fn process_table_click_selects_and_wheel_scrolls() {
+        let mut app = app();
+        app.focused = 1;
+        app.tree = (0..60)
+            .map(|i| (0, 1000 + i, format!("p{i}"), 0u64, 0u64))
+            .collect();
+        let _ = render(&app, 120, 40);
+        let area = app.proc_area.get();
+        assert!(area.height > 3, "process table should be visible");
+
+        // Click the second visible row → that PID is selected.
+        app.update(Msg::Mouse(MouseEvent::new(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 1,
+            area.y + 1,
+        )));
+        assert_eq!(app.focused, 1);
+        assert_eq!(app.proc_sel, Some(1001));
+
+        // Clicking the same row again clears the selection.
+        app.update(Msg::Mouse(MouseEvent::new(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 1,
+            area.y + 1,
+        )));
+        assert_eq!(app.proc_sel, None);
+
+        // Wheel down three rows, then back up past the top (clamped to 0).
+        app.update(Msg::Mouse(MouseEvent::new(
+            MouseEventKind::ScrollDown,
+            area.x + 1,
+            area.y + 1,
+        )));
+        assert_eq!(app.proc_scroll, 3);
+        app.update(Msg::Mouse(MouseEvent::new(
+            MouseEventKind::ScrollUp,
+            area.x + 1,
+            area.y + 1,
+        )));
+        assert_eq!(app.proc_scroll, 0);
+    }
+
+    #[test]
+    fn digit_keys_cover_all_seven_panels() {
+        for (key, expected) in [
+            ('1', 0),
+            ('2', 1),
+            ('3', 2),
+            ('4', 3),
+            ('5', 4),
+            ('6', 5),
+            ('7', 6),
+        ] {
+            let mut app = app();
+            app.update(Msg::Key(KeyEvent::new(KeyCode::Char(key))));
+            assert_eq!(app.focused, expected, "key {key}");
+        }
+    }
+
+    #[test]
+    fn tab_cycles_through_seven_panels() {
+        let mut app = app();
+        for _ in 0..Panel::COUNT {
+            app.update(Msg::Key(KeyEvent::new(KeyCode::Tab)));
+        }
+        assert_eq!(app.focused, 0);
+        app.update(Msg::Key(KeyEvent::new(KeyCode::BackTab)));
+        assert_eq!(app.focused, Panel::COUNT - 1);
+    }
+
+    #[test]
+    fn search_mode_receives_typed_characters() {
+        let mut app = app();
+        app.update(Msg::Key(KeyEvent::new(KeyCode::Char('/'))));
+        assert!(app.search_mode);
+        for c in "hello".chars() {
+            app.update(Msg::Key(KeyEvent::new(KeyCode::Char(c))));
+        }
+        assert_eq!(app.search_buf, "hello");
+        // Esc leaves search mode and clears the filter.
+        app.update(Msg::Key(KeyEvent::new(KeyCode::Escape)));
+        assert!(!app.search_mode);
+        assert!(app.search_buf.is_empty());
+    }
+
+    #[test]
+    fn quit_works_from_any_panel() {
+        for focused in 0..Panel::COUNT {
+            let mut app = app();
+            app.focused = focused;
+            let cmd = app.update(Msg::Key(KeyEvent::new(KeyCode::Char('q'))));
+            assert!(matches!(cmd, Cmd::Quit), "q must quit from panel {focused}");
+        }
+    }
+
+    #[test]
+    fn heatmap_stays_inside_its_panel() {
+        let mut app = app();
+        app.focused = 6;
+        app.heatmap_exts = (0..12).map(|i| format!("e{i}")).collect();
+        app.heatmap = (0..4)
+            .map(|i| HeatmapRow {
+                label: format!("proc{i}"),
+                ext_counts: (0..12).map(|j| (format!("e{j}"), (i * j) as u64)).collect(),
+            })
+            .collect();
+        let screen = render(&app, 120, 40);
+        // The right-hand detail column starts at 70% of 120 columns (x=84).
+        // No heatmap cell may spill left into the event panel.
+        for (y, row) in screen.lines().enumerate() {
+            if row.contains("HEATMAP") {
+                continue;
+            }
+            let left: String = row.chars().take(84).collect();
+            assert!(
+                !left.contains('█'),
+                "heatmap bar leaked into the left column on row {y}: {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn dump_layout_for_inspection() {
+        if std::env::var("TALUS_DUMP_TUI").is_err() {
+            return;
+        }
+        let mut app = app();
+        populate(&mut app);
+        for (f, w, h) in [
+            (0u16, 120u16, 40u16),
+            (2, 120, 40),
+            (3, 120, 40),
+            (4, 120, 40),
+            (5, 120, 40),
+            (6, 120, 40),
+            (1, 80, 24),
+        ] {
+            app.focused = f as usize;
+            println!("=== focus {f} {w}x{h} ===\n{}", render(&app, w, h));
+        }
+    }
+
+    fn populate(app: &mut App_) {
+        use crate::monitor::{FileRank, ProcStats, RateSample};
+        let mut events = Vec::new();
+        let comms = [
+            "firefox", "code", "cargo", "find", "python3", "rg", "node", "ssh",
+        ];
+        for i in 0..24u32 {
+            let comm = comms[(i as usize) % comms.len()].to_string();
+            events.push(Evt {
+                ts: format!("20:31:{:02}", i % 60),
+                kind: if i % 7 == 0 {
+                    "Connect".into()
+                } else if i % 3 == 0 {
+                    "Exec".into()
+                } else {
+                    "Open".into()
+                },
+                pid: 1000 + i,
+                comm: comm.clone(),
+                file: Some(if i % 7 == 0 {
+                    format!("10.0.0.{}:443", i % 250)
+                } else {
+                    format!(
+                        "/home/htw/projects/file_{i}.{}",
+                        if i % 2 == 0 { "rs" } else { "pdf" }
+                    )
+                }),
+                is_alert: false,
+                opens: 0,
+                memlp: None,
+            });
+        }
+        events.push(Evt {
+            ts: "20:31:59".into(),
+            kind: "Alert".into(),
+            pid: 4242,
+            comm: "encrypt0r".into(),
+            file: None,
+            is_alert: true,
+            opens: 812,
+            memlp: None,
+        });
+        let mut exts = std::collections::HashMap::new();
+        for (e, c) in [
+            ("pdf", 120u64),
+            ("rs", 94),
+            ("png", 71),
+            ("json", 55),
+            ("txt", 33),
+            ("enc", 12),
+        ] {
+            exts.insert(e.to_string(), c);
+        }
+        let mut pext = std::collections::HashMap::new();
+        pext.insert("pdf".to_string(), 40u64);
+        pext.insert("rs".to_string(), 12);
+        let stats = vec![
+            ProcStats {
+                pid: 4242,
+                ppid: 1,
+                comm: "encrypt0r".into(),
+                window_opens: 812,
+                total_opens: 9812,
+                total_execs: 1,
+                alerts: 3,
+                extensions: pext.clone(),
+            },
+            ProcStats {
+                pid: 3311,
+                ppid: 1,
+                comm: "firefox".into(),
+                window_opens: 240,
+                total_opens: 4200,
+                total_execs: 2,
+                alerts: 0,
+                extensions: pext.clone(),
+            },
+            ProcStats {
+                pid: 2100,
+                ppid: 1,
+                comm: "cargo".into(),
+                window_opens: 120,
+                total_opens: 900,
+                total_execs: 5,
+                alerts: 0,
+                extensions: pext.clone(),
+            },
+            ProcStats {
+                pid: 9001,
+                ppid: 1,
+                comm: "find".into(),
+                window_opens: 64,
+                total_opens: 320,
+                total_execs: 1,
+                alerts: 0,
+                extensions: pext,
+            },
+        ];
+        let tree = vec![
+            (0usize, 1u32, "systemd".to_string(), 0u64, 0u64),
+            (1, 3311, "firefox".to_string(), 240, 0),
+            (1, 2100, "cargo".to_string(), 120, 0),
+            (2, 2101, "rustc".to_string(), 88, 0),
+            (2, 4242, "encrypt0r".to_string(), 812, 3),
+            (1, 9001, "find".to_string(), 64, 0),
+        ];
+        let top_files = (0..12)
+            .map(|i| FileRank {
+                path: format!(
+                    "/home/htw/Documents/quarterly_report_{i}.{}",
+                    if i % 2 == 0 { "pdf" } else { "rs" }
+                ),
+                count: 400 - i * 27,
+                extension: if i % 2 == 0 {
+                    "pdf".into()
+                } else {
+                    "rs".into()
+                },
+                entropy: 0.1 + (i as f64) * 0.07,
+            })
+            .collect();
+        let mut rates = VecDeque::new();
+        for i in 0..40u64 {
+            rates.push_back(RateSample {
+                exec_count: 40 + (i * 17) % 120,
+                open_count: 300 + (i * 61) % 900,
+                alert_count: i % 5,
+            });
+        }
+        app.apply_snapshot(Snapshot {
+            events,
+            stats,
+            tree,
+            top_files,
+            exts,
+            rates,
+            total: 18_420,
+            lost: 3,
+            uptime: 3_725,
+            refresh: true,
+        });
+    }
+
+    #[test]
+    fn gateway_and_help_render_on_small_terminals() {
+        let mut app = app();
+        app.gateway = true;
+        for (w, h) in [(80, 24), (40, 12), (24, 8)] {
+            let screen = render(&app, w, h);
+            assert!(screen.contains("talus"), "gateway {w}x{h}\n{screen}");
+        }
+        app.gateway = false;
+        app.help = true;
+        let screen = render(&app, 80, 24);
+        assert!(screen.contains("keyboard shortcuts"), "{screen}");
+    }
+
+    #[test]
+    fn escape_clears_filter_before_quitting() {
+        let mut app = app();
+        app.update(Msg::Key(KeyEvent::new(KeyCode::Char('/'))));
+        for c in "cargo".chars() {
+            app.update(Msg::Key(KeyEvent::new(KeyCode::Char(c))));
+        }
+        app.update(Msg::Key(KeyEvent::new(KeyCode::Enter)));
+        let cmd = app.update(Msg::Key(KeyEvent::new(KeyCode::Escape)));
+        assert!(
+            !matches!(cmd, Cmd::Quit),
+            "first Esc must only clear filter"
+        );
+        assert!(app.search_buf.is_empty());
+        let cmd = app.update(Msg::Key(KeyEvent::new(KeyCode::Escape)));
+        assert!(matches!(cmd, Cmd::Quit), "second Esc must quit");
+    }
+
+    #[test]
+    fn slash_moves_focus_to_the_event_log() {
+        let mut app = app();
+        app.focused = 4;
+        app.update(Msg::Key(KeyEvent::new(KeyCode::Char('/'))));
+        assert_eq!(app.focused, 0);
+        assert!(app.search_mode);
+    }
+
+    #[test]
+    fn pause_discards_the_snapshot_backlog() {
+        let (tx, rx) = mpsc::channel();
+        let mut app = App_::new(rx, &LicenseState::community());
+        app.gateway = false;
+        app.paused = true;
+        tx.send(Snapshot {
+            events: Vec::new(),
+            stats: Vec::new(),
+            tree: Vec::new(),
+            top_files: Vec::new(),
+            exts: std::collections::HashMap::new(),
+            rates: VecDeque::new(),
+            total: 999,
+            lost: 0,
+            uptime: 1,
+            refresh: false,
+        })
+        .unwrap();
+        app.update(Msg::Tick);
+        assert_eq!(app.total, 0, "paused ticks must not apply snapshots");
+        app.paused = false;
+        app.update(Msg::Tick);
+        assert_eq!(app.total, 0, "drained backlog must not replay on resume");
+    }
+
+    #[test]
+    fn rate_charts_are_seeded_from_the_full_history() {
+        let mut app = app();
+        populate(&mut app);
+        assert_eq!(app.rate_chart.len(), 40);
+        assert_eq!(app.open_chart.len(), 40);
+        assert_eq!(app.alert_chart.len(), 40);
+        let screen = render(&app, 120, 40);
+        assert!(screen.contains("RATES (last 40s)"), "{screen}");
+        assert!(!screen.contains("collecting rate samples"), "{screen}");
+    }
+
+    #[test]
+    fn network_panel_keeps_full_addresses() {
+        let mut app = app();
+        populate(&mut app);
+        app.focused = 2;
+        let screen = render(&app, 120, 40);
+        // Oldest→newest order, last connection is the newest one.
+        assert!(screen.contains("10.0.0.0:443"), "{screen}");
+        assert!(screen.contains("10.0.0.21:443"), "{screen}");
+    }
+
+    #[test]
+    fn process_tree_connectors_respect_siblings() {
+        let mut app = app();
+        populate(&mut app);
+        app.focused = 1;
+        let screen = render(&app, 120, 40);
+        assert!(screen.contains("├──  2101 rustc"), "{screen}");
+        assert!(screen.contains("└──  4242 encrypt0r"), "{screen}");
+    }
+
+    #[test]
+    fn narrow_process_panel_keeps_open_counts() {
+        let mut app = app();
+        populate(&mut app);
+        app.focused = 1;
+        let screen = render(&app, 80, 24);
+        assert!(screen.contains("encrypt0r"), "{screen}");
+        assert!(!screen.contains("encrypt~"), "{screen}");
+        assert!(screen.contains("812"), "{screen}");
+    }
+
+    #[test]
+    fn trunc_is_utf8_safe() {
+        assert_eq!(trunc("zażółć", 4), "zaż~");
+        assert_eq!(trunc("abc", 10), "abc");
+    }
 }

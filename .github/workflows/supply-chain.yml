@@ -45,8 +45,8 @@ jobs:
           # cargo-cyclonedx has no --output-dir; it writes next to the
           # manifest, so target the userspace crate and collect the files.
           mkdir -p sbom/
-          cargo cyclonedx --manifest-path process-monitor/Cargo.toml --format json
-          cargo cyclonedx --manifest-path process-monitor/Cargo.toml --format xml
+          cargo cyclonedx --manifest-path Cargo.toml --format json
+          cargo cyclonedx --manifest-path Cargo.toml --format xml
           find . \( -name '*.cdx.json' -o -name '*.cdx.xml' \) -exec cp -t sbom/ {} +
       - name: Verify SBOM
         run: |

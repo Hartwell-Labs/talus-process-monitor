@@ -3,7 +3,11 @@
 // Enterprise security hardening for the Talus agent:
 //
 // 1. Capability dropping — reduce from root to minimal caps needed for eBPF:
-//    CAP_BPF (39), CAP_PERFMON (38), CAP_NET_ADMIN (12)
+//    CAP_BPF (39), CAP_PERFMON (38), CAP_KILL (5)
+//
+//    Both the bounding set and the effective/permitted sets are reduced; the
+//    latter matters, because dropping only the bounding set leaves the running
+//    process with every capability it started with.
 //
 // 2. seccomp-BPF — whitelist of syscalls for the event-processing loop.
 //    Installs AFTER eBPF programs are loaded (aya needs many syscalls during init).
@@ -32,7 +36,11 @@ const SECCOMP_MODE_FILTER: u64 = 2;
 // capability constants (linux/capability.h)
 const CAP_BPF: i32 = 39;
 const CAP_PERFMON: i32 = 38;
-const CAP_NET_ADMIN: i32 = 12;
+const CAP_KILL: i32 = 5;
+const _CAP_NET_ADMIN: i32 = 12;
+
+// _LINUX_CAPABILITY_VERSION_3 (two 32-bit words cover CAP_LAST_CAP = 40).
+const CAP_VERSION_3: u32 = 0x2008_0522;
 const _CAP_FOWNER: i32 = 3;
 
 // Landlock ABI v3 (kernel 5.19+)
@@ -54,10 +62,12 @@ const _LANDLOCK_ACCESS_FS_EXECUTE: u64 = 1 << 2;
 /// Required capabilities:
 /// - CAP_BPF (39): load/attach eBPF programs
 /// - CAP_PERFMON (38): perf_event_open for perf buffer
-/// - CAP_NET_ADMIN (12): some eBPF program types (XDP, cgroup)
+/// - CAP_KILL (5): the Enterprise responder terminating a process
 ///
-/// Drops: CAP_SYS_ADMIN (no longer needed after load), CAP_DAC_OVERRIDE,
-/// CAP_FOWNER, and everything else.
+/// Drops: CAP_SYS_ADMIN (no longer needed after load), CAP_NET_ADMIN (only
+/// needed while some BPF program types are loaded), CAP_DAC_OVERRIDE,
+/// CAP_FOWNER, and everything else. Both the bounding set and the
+/// effective/permitted sets are reduced.
 pub fn drop_capabilities() -> Result<()> {
     // Read current capabilities
     let caps = get_current_capabilities().context("failed to read current capabilities")?;
@@ -66,7 +76,7 @@ pub fn drop_capabilities() -> Result<()> {
     let mut keep = HashSet::new();
     keep.insert(CAP_BPF as u32);
     keep.insert(CAP_PERFMON as u32);
-    keep.insert(CAP_NET_ADMIN as u32);
+    keep.insert(CAP_KILL as u32);
 
     // Compute caps to drop
     let to_drop: Vec<u32> = caps.difference(&keep).copied().collect();
@@ -90,11 +100,53 @@ pub fn drop_capabilities() -> Result<()> {
         }
     }
 
+    // Bounding-set drops only affect future execve calls. Reduce the sets the
+    // running process actually holds as well; otherwise the agent keeps the
+    // full root capability set for its whole lifetime.
+    apply_capset(&keep).context("failed to reduce effective capabilities")?;
+
     eprintln!(
-        "[sandbox] dropped {} capabilities, kept: CAP_BPF, CAP_PERFMON, CAP_NET_ADMIN",
+        "[sandbox] dropped {} capabilities, kept: CAP_BPF, CAP_PERFMON, CAP_KILL",
         to_drop.len()
     );
 
+    Ok(())
+}
+
+#[repr(C)]
+struct CapHeader {
+    version: u32,
+    pid: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct CapData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
+
+/// Replace the process's effective/permitted capability sets with `keep`.
+fn apply_capset(keep: &HashSet<u32>) -> Result<()> {
+    let mut data = [CapData::default(); 2];
+    for &cap in keep {
+        let idx = (cap / 32) as usize;
+        let bit = 1u32 << (cap % 32);
+        if idx < data.len() {
+            data[idx].effective |= bit;
+            data[idx].permitted |= bit;
+        }
+    }
+    let header = CapHeader {
+        version: CAP_VERSION_3,
+        pid: 0,
+    };
+    let ret =
+        unsafe { libc::syscall(libc::SYS_capset, &header as *const CapHeader, data.as_ptr()) };
+    if ret != 0 {
+        bail!("capset failed: {}", std::io::Error::last_os_error());
+    }
     Ok(())
 }
 

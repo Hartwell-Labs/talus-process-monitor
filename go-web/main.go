@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -40,7 +41,7 @@ var (
 
 func init() {
 	flag.StringVar(&bpfPath, "bpf", "", "Path to compiled eBPF object")
-	flag.StringVar(&listenAddr, "addr", ":8080", "Listen address")
+	flag.StringVar(&listenAddr, "addr", "127.0.0.1:8080", "Listen address")
 	flag.Uint64Var(&threshold, "threshold", 50, "Alert threshold")
 }
 
@@ -315,7 +316,41 @@ func handleExtensions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ApiResponse{OK: true, Data: data})
 }
 
+// originAllowed rejects cross-site browser requests against the local API.
+//
+// The dashboard runs without authentication by design (it is a localhost
+// operator view), so a page on the internet must not be able to drive it.
+// Requests with no Origin (curl, the Tauri shell before it sets one) are
+// allowed; browser origins must be same-host or the Tauri webview schemes.
+func originAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme == "tauri" {
+		return true
+	}
+	if u.Host == "tauri.localhost" {
+		return true
+	}
+	return u.Host == r.Host && (u.Scheme == "http" || u.Scheme == "https")
+}
+
 func handleSetThreshold(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		writeJSON(w, ApiResponse{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !originAllowed(r) {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, ApiResponse{OK: false, Error: "cross-origin request rejected"})
+		return
+	}
 	var req ThresholdRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, ApiResponse{OK: false, Error: err.Error()})
@@ -378,6 +413,10 @@ type wsConn struct {
 }
 
 func handleWS(w http.ResponseWriter, r *http.Request) {
+	if !originAllowed(r) {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
@@ -402,6 +441,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
 				return
+			}
+			if len(msg) == 0 {
+				continue
 			}
 			// Handle close messages
 			if msg[0] == websocket.CloseMessage {
@@ -509,10 +551,10 @@ const dashboardHTML = `<!DOCTYPE html>
   <span>Uptime: <span id="uptime">0s</span></span>
 </div>
 <script>
-const MAX_EVENTS=500;let eventCount=0;const eventsEl=document.getElementById('events');const alertsEl=document.getElementById('alerts');
-function connect(){const ws=new WebSocket(` + "`ws://${location.host}/ws`" + `);ws.onopen=()=>{document.getElementById('ws-status').textContent='connected';document.getElementById('ws-status').className='connected'};ws.onclose=()=>{document.getElementById('ws-status').textContent='disconnected';document.getElementById('ws-status').className='disconnected';setTimeout(connect,2000)};ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='event'){eventCount++;document.getElementById('event-count').textContent=eventCount;const div=document.createElement('div');div.className='event';const tc=d.kind==='Exec'?'tag-exec':d.kind==='Open'?'tag-open':'tag-net';const tt=d.kind==='Exec'?'EXEC':d.kind==='Open'?'OPEN':d.kind||'NET';const f=d.file?' → '+d.file:'';div.innerHTML=` + "`<span class=\"ts\">${d.ts}</span> <span class=\"tag ${tc}\">${tt}</span> [${d.pid}] ${d.comm}${f}`" + `;eventsEl.appendChild(div);if(eventsEl.children.length>MAX_EVENTS)eventsEl.removeChild(eventsEl.firstChild);eventsEl.scrollTop=eventsEl.scrollHeight}else if(d.type==='alert'){const div=document.createElement('div');div.className='event';div.innerHTML=` + "`<span class=\"ts\">${d.ts}</span> <span class=\"tag tag-alert\">⚠ ALERT</span> [${d.pid}] ${d.comm}`" + `;alertsEl.appendChild(div)}}}connect();
+const MAX_EVENTS=500;const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let eventCount=0;const eventsEl=document.getElementById('events');const alertsEl=document.getElementById('alerts');
+function connect(){const ws=new WebSocket(` + "`ws://${location.host}/ws`" + `);ws.onopen=()=>{document.getElementById('ws-status').textContent='connected';document.getElementById('ws-status').className='connected'};ws.onclose=()=>{document.getElementById('ws-status').textContent='disconnected';document.getElementById('ws-status').className='disconnected';setTimeout(connect,2000)};ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='event'){eventCount++;document.getElementById('event-count').textContent=eventCount;const div=document.createElement('div');div.className='event';const tc=d.kind==='Exec'?'tag-exec':d.kind==='Open'?'tag-open':'tag-net';const tt=d.kind==='Exec'?'EXEC':d.kind==='Open'?'OPEN':d.kind||'NET';const f=d.file?' → '+esc(d.file):'';div.innerHTML=` + "`<span class=\"ts\">${esc(d.ts)}</span> <span class=\"tag ${tc}\">${tt}</span> [${esc(d.pid)}] ${esc(d.comm)}${f}`" + `;eventsEl.appendChild(div);if(eventsEl.children.length>MAX_EVENTS)eventsEl.removeChild(eventsEl.firstChild);eventsEl.scrollTop=eventsEl.scrollHeight}else if(d.type==='alert'){const div=document.createElement('div');div.className='event';div.innerHTML=` + "`<span class=\"ts\">${esc(d.ts)}</span> <span class=\"tag tag-alert\">⚠ ALERT</span> [${esc(d.pid)}] ${esc(d.comm)}`" + `;alertsEl.appendChild(div)}}}connect();
 setInterval(async()=>{try{const r=await fetch('/api/v1/stats');const j=await r.json();if(j.ok){const d=j.data;document.getElementById('stats').textContent=` + "`evt ${d.total_events} | lost ${d.total_lost} | uptime ${d.uptime_secs}s | threshold ${d.threshold}/s`" + `;document.getElementById('total-events').textContent=d.total_events;document.getElementById('total-lost').textContent=d.total_lost;document.getElementById('uptime').textContent=d.uptime_secs+'s'}}catch(e){}},2000);
-setInterval(async()=>{try{const r=await fetch('/api/v1/files');const j=await r.json();if(j.ok){document.getElementById('files').innerHTML=j.data.map(f=>` + "`<div class=\"file-row\"><span>${f.path.length>30?'…'+f.path.slice(-27):f.path}</span><span>.${f.extension}</span><span>${f.count} E:${f.entropy.toFixed(2)}</span></div>`" + `).join('')}}catch(e){}try{const r=await fetch('/api/v1/extensions');const j=await r.json();if(j.ok&&j.data.length>0){const max=Math.max(...j.data.map(e=>e.count));document.getElementById('extensions').innerHTML=j.data.slice(0,8).map(e=>` + "`<div class=\"ext-bar\"><span style=\"width:50px\">.${e.extension}</span><div class=\"bar\" style=\"width:${(e.count/max*100).toFixed(0)}%\"></div><span>${e.count}</span></div>`" + `).join('')}}catch(e){}try{const r=await fetch('/api/v1/processes');const j=await r.json();if(j.ok){document.getElementById('processes').innerHTML=j.data.slice(0,30).map(p=>{const ab=p.alerts>0?` + "` <span class=\"alerts\">⚠${p.alerts}</span>`" + `:'return ` + "`<div class=\"process-row\"><span>${p.comm} [${p.pid}]</span><span>${p.total_opens} opens${ab}</span></div>`" + `}).join('')}}catch(e){}},3000);
+setInterval(async()=>{try{const r=await fetch('/api/v1/files');const j=await r.json();if(j.ok){document.getElementById('files').innerHTML=j.data.map(f=>` + "`<div class=\"file-row\"><span>${esc(f.path.length>30?'…'+f.path.slice(-27):f.path)}</span><span>.${esc(f.extension)}</span><span>${f.count} E:${f.entropy.toFixed(2)}</span></div>`" + `).join('')}}catch(e){}try{const r=await fetch('/api/v1/extensions');const j=await r.json();if(j.ok&&j.data.length>0){const max=Math.max(...j.data.map(e=>e.count));document.getElementById('extensions').innerHTML=j.data.slice(0,8).map(e=>` + "`<div class=\"ext-bar\"><span style=\"width:50px\">.${esc(e.extension)}</span><div class=\"bar\" style=\"width:${(e.count/max*100).toFixed(0)}%\"></div><span>${e.count}</span></div>`" + `).join('')}}catch(e){}try{const r=await fetch('/api/v1/processes');const j=await r.json();if(j.ok){document.getElementById('processes').innerHTML=j.data.slice(0,30).map(p=>{const ab=p.alerts>0?` + "` <span class=\"alerts\">⚠${p.alerts}</span>`" + `:'';return ` + "`<div class=\"process-row\"><span>${esc(p.comm)} [${esc(p.pid)}]</span><span>${p.total_opens} opens${ab}</span></div>`" + `}).join('')}}catch(e){}},3000);
 </script>
 </body>
 </html>`

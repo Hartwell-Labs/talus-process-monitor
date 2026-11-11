@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTalus } from "./hooks/useTalus";
 import { EventsPanel } from "./components/EventsPanel";
 import { ProcessesPanel } from "./components/ProcessesPanel";
@@ -28,7 +28,6 @@ function useSmoothedRates(
 ): RateSmooth {
   const [smooth, setSmooth] = useState<RateSmooth>({ exec: 0, open: 0, alert: 0 });
   const alpha = 0.25;
-  const prevIdx = useRef(0);
 
   useEffect(() => {
     if (rates.length === 0) return;

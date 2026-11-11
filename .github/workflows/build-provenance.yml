@@ -42,11 +42,11 @@ jobs:
             tag="${GITHUB_REF_NAME}"
           fi
           clean="${tag#v}"
-          manifest="$(grep -m1 '^version' process-monitor/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          manifest="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           echo "  tag:      $tag"
           echo "  manifest: $manifest"
           if [ "$clean" != "$manifest" ]; then
-            echo "::error::tag $tag does not match process-monitor/Cargo.toml version $manifest — refusing to release"
+            echo "::error::tag $tag does not match Cargo.toml version $manifest — refusing to release"
             exit 1
           fi
 

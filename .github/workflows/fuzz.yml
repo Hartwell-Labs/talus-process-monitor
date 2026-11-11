@@ -6,8 +6,8 @@ on:
   pull_request:
     paths:
       - "fuzz/**"
-      - "process-monitor/src/memlp.rs"
-      - "process-monitor/src/monitor.rs"
+      - "src/memlp.rs"
+      - "src/monitor.rs"
   schedule:
     - cron: "0 4 * * 1"
 

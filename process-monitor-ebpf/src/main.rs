@@ -63,13 +63,30 @@ unsafe fn raw_copy(dst: *mut u8, src: *const u8, len: usize) {
     }
 }
 
+/// eBPF-safe zero fill — avoids LLVM memset builtin.
+#[inline(always)]
+unsafe fn zero_bytes(dst: *mut u8, len: usize) {
+    let mut i = 0;
+    while i < len {
+        *dst.add(i) = 0;
+        i += 1;
+    }
+}
+
 fn emit_event(ctx: &TracePointContext, event_type: u8, filename_arg: u32) -> u32 {
     let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
     let uid = bpf_get_current_uid_gid() as u32;
 
-    // Use MaybeUninit to avoid LLVM memset builtin on struct init.
-    // BPF stack is zeroed by the kernel, so this is safe in practice.
+    // The BPF stack is NOT zero-initialised. Build the record with
+    // MaybeUninit to avoid a memset builtin, then explicitly clear the byte
+    // buffers: uninitialised padding would otherwise be copied into the perf
+    // ring and could leak stale kernel stack bytes to userspace.
     let mut event: ProcessEvent = unsafe { core::mem::MaybeUninit::uninit().assume_init() };
+    unsafe {
+        zero_bytes(event.comm.as_mut_ptr(), EVENT_COMM_LEN);
+        zero_bytes(event.filename.as_mut_ptr(), EVENT_FILENAME_LEN);
+        zero_bytes(event.argv.as_mut_ptr(), EVENT_ARGV_LEN);
+    }
     event.event_type = event_type;
     event.pid = pid;
     event.uid = uid;

@@ -32,11 +32,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
-          manifest="$(grep -m1 '^version' process-monitor/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          manifest="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           echo "  tag:     v$tag"
           echo "  manifest: $manifest"
           if [ "$tag" != "$manifest" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match process-monitor/Cargo.toml version $manifest"
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $manifest"
             exit 1
           fi
 

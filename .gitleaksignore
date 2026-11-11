@@ -1,3 +1,6 @@
+# Historical (2026-08-30) signing key removed and rotated in 255bc41. It is
+# allowlisted so `gitleaks detect` on full history stays actionable, but it
+# must never be trusted by any build or server. See SECURITY_AUDIT_2026-11-11.
 3023fc53637459734fccb14a6097295348b547d8:license-keygen/license-keys/signing_key.json:generic-api-key:2
 d7e7fa8fbb293f001a2bd3ea16c9c7375381f565:frankentui/doctor_frankentui/src/redact.rs:generic-api-key:504
 d7e7fa8fbb293f001a2bd3ea16c9c7375381f565:frankentui/doctor_frankentui/src/redact.rs:generic-api-key:609

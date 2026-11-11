@@ -58,6 +58,117 @@ pub const TUI_SNAPSHOT_EVENT_CAP: usize = 1000;
 /// aren't evicted before the next poll drains them. 12K × 120 bytes = ~1.4MB.
 const MONITOR_EVENT_RING_CAP: usize = 12_000;
 
+// ── Linux process whitelist ──────────────────────────────────────────────
+
+/// Kernel threads and core system daemons that belong to the OS itself rather
+/// than to a workload.
+///
+/// Names are compared against the kernel `comm`, which is truncated to 15
+/// bytes, so the long entries here are already in their truncated form. This
+/// list only drives *display*: whitelisted comms are hidden from the TUI
+/// process tree and the plain-text stream, but their events are still counted
+/// and a burst from one of them still raises an alert (see the ALERTS panel).
+///
+/// Session and remote-access daemons (`sshd`, `sudo`, `login`, ...) are
+/// deliberately absent: they are rare, security-relevant, and worth seeing.
+pub const SYSTEM_COMMS: &[&str] = &[
+    // ── Init and service management ──
+    "init",
+    "systemd",
+    "systemd-journal", // systemd-journald, truncated by the kernel
+    "systemd-udevd",
+    "systemd-logind",
+    "systemd-resolve", // systemd-resolved
+    "systemd-network", // systemd-networkd
+    "systemd-timesyn", // systemd-timesyncd
+    "systemd-oomd",
+    "systemd-userdbd",
+    "dbus-daemon",
+    "dbus-broker",
+    // ── Kernel threads (fixed names; per-CPU ones use prefixes below) ──
+    "kthreadd",
+    "rcu_sched",
+    "rcu_preempt",
+    "rcu_gp",
+    "rcu_par_gp",
+    "rcu_tasks_kthre",
+    "kswapd0",
+    "khungtaskd",
+    "khugepaged",
+    "kauditd",
+    "kdevtmpfs",
+    "netns",
+    "oom_reaper",
+    "writeback",
+    "kintegrityd",
+    "bioset",
+    "crypto",
+    "ata_sff",
+    "dm_bufio_cache",
+    "ext4-rsv-conver",
+    // ── Logging, audit and power ──
+    "rsyslogd",
+    "syslog-ng",
+    "auditd",
+    "polkitd",
+    "rtkit-daemon",
+    "irqbalance",
+    "thermald",
+    "upowerd",
+    "chronyd",
+    "ntpd",
+    "crond",
+    "atd",
+    "anacron",
+    // ── Core networking and hardware daemons ──
+    "NetworkManager",
+    "wpa_supplicant",
+    "avahi-daemon",
+    "cupsd",
+    "snapd",
+    "packagekitd",
+    "accounts-daemon",
+    "unattended-upgr", // unattended-upgrades, truncated by the kernel
+    // ── Display managers and desktop sessions ──
+    "gdm",
+    "sddm",
+    "lightdm",
+    "Xorg",
+    "gnome-shell",
+    "kwin_wayland",
+    "plasmashell",
+];
+
+/// Prefixes of kernel threads that carry a CPU, queue or device suffix in
+/// `comm` (`kworker/0:1`, `ksoftirqd/3`, `jbd2/sda1-8`, `scsi_eh_0`, ...).
+const SYSTEM_COMM_PREFIXES: &[&str] = &[
+    "kworker/",
+    "ksoftirqd/",
+    "migration/",
+    "watchdog/",
+    "cpuhp/",
+    "jbd2/",
+    "kdmflush",
+    "kblockd",
+    "kcompactd",
+    "scsi_eh_",
+    "irq/",
+    "rcu_",
+    "xfs-",
+];
+
+/// Whether `comm` names a Linux kernel thread or a core system daemon.
+///
+/// `comm` is at most 15 bytes, so callers pass the value the kernel reports,
+/// not the full command line. Mixed case is preserved because some daemons
+/// (`NetworkManager`, `Xorg`) do.
+pub fn is_system_comm(comm: &str) -> bool {
+    SYSTEM_COMMS.contains(&comm)
+        || SYSTEM_COMM_PREFIXES
+            .iter()
+            .any(|prefix| comm.starts_with(prefix))
+}
+
 // ── eBPF event record (must match kernel-side #[repr(C)]) ────────────────
 
 #[repr(C)]
@@ -1468,9 +1579,14 @@ fn spawn_reader(
                     // of a second at 300K evt/s but prevents the reader from
                     // spinning the core and starving poll/render. See
                     // `READER_HIGH_RATE_SLEEP` for why this is mandatory.
-                    crate::watchdog::heartbeat();
                     thread::sleep(READER_HIGH_RATE_SLEEP);
                 }
+                // The watchdog checks that this loop is alive, not that the
+                // host is busy. Heartbeating only in the high-rate branch made
+                // any quiet period (>10s without a 32-event sweep) look like a
+                // dead pipeline: `[watchdog] ALARM: no heartbeat` while events
+                // were still flowing. Heartbeat every sweep, idle or not.
+                crate::watchdog::heartbeat();
             }
         })
         .context("failed to spawn reader thread")
@@ -2290,6 +2406,27 @@ mod tests {
         assert_eq!(shown.len(), 1, "ignored comm returns with --show-ignored");
         assert_eq!(shown[0].pid, 4242);
         assert_eq!(shown[0].comm, "hyprctl");
+    }
+
+    #[test]
+    fn system_comm_whitelist_matches_kernel_threads_and_daemons() {
+        // Exact names, including the 15-byte truncation the kernel applies.
+        assert!(is_system_comm("systemd"));
+        assert!(is_system_comm("systemd-journal"));
+        assert!(is_system_comm("NetworkManager"));
+        assert!(is_system_comm("unattended-upgr"));
+        // Per-CPU / per-device kernel threads carry a suffix.
+        assert!(is_system_comm("kworker/3:1"));
+        assert!(is_system_comm("ksoftirqd/0"));
+        assert!(is_system_comm("migration/2"));
+        assert!(is_system_comm("jbd2/sda1-8"));
+        assert!(is_system_comm("scsi_eh_0"));
+        // Workloads and session daemons must stay visible.
+        assert!(!is_system_comm("nginx"));
+        assert!(!is_system_comm("postgres"));
+        assert!(!is_system_comm("sshd"));
+        assert!(!is_system_comm("sudo"));
+        assert!(!is_system_comm("kworker")); // bare name is not a kernel thread
     }
 
     #[test]

@@ -11,7 +11,6 @@ import type {
 
 const MAX_EVENTS = 500;
 const MAX_NET = 200;
-const MAX_RATES = 120;
 
 export interface TalusState {
   connected: boolean;

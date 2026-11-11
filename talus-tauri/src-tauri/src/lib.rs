@@ -36,6 +36,24 @@ fn get_status(state: tauri::State<'_, Arc<MonitorState>>) -> MonitorStatus {
     }
 }
 
+/// Validate a value that becomes a `talus` argument.
+///
+/// The webview should not be able to turn a broker/topic string into an extra
+/// command-line flag (or shell-ish content) in a process started through sudo.
+fn safe_arg(value: &str, what: &str) -> Result<String, String> {
+    let ok = !value.is_empty()
+        && value.len() <= 1024
+        && !value.starts_with('-')
+        && value.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_' | ',' | '/' | '=')
+        });
+    if ok {
+        Ok(value.to_string())
+    } else {
+        Err(format!("invalid {what}: {value}"))
+    }
+}
+
 #[tauri::command]
 fn start_monitor(
     state: tauri::State<'_, Arc<MonitorState>>,
@@ -64,11 +82,11 @@ fn start_monitor(
     }
     if let Some(ref brokers) = kafka_brokers {
         args.push("--kafka-brokers".into());
-        args.push(brokers.clone());
+        args.push(safe_arg(brokers, "kafka brokers")?);
     }
     if let Some(ref topic) = kafka_topic {
         args.push("--kafka-topic".into());
-        args.push(topic.clone());
+        args.push(safe_arg(topic, "kafka topic")?);
     }
     if clickhouse {
         args.push("--clickhouse".into());

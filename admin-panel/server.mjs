@@ -105,8 +105,37 @@ async function proxy(req, res, pathname) {
   }
 }
 
+// ── Request origin guard ─────────────────────────────────────────────────
+//
+// The proxy adds the admin token itself, so a page on the internet must not be
+// able to POST here (CSRF) and a DNS-rebinding host must not be served. Only
+// the loopback names this panel binds to are accepted.
+function requestAllowed(req) {
+  const allowed = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`]);
+  const host = (req.headers.host ?? '').toLowerCase();
+  if (!allowed.has(host)) return false;
+  if (req.headers['sec-fetch-site'] === 'cross-site') return false;
+  const origin = req.headers.origin;
+  if (!origin) return true; // curl / CLI
+  try {
+    return allowed.has(new URL(origin).host.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 // ── Server ────────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
+  if (!requestAllowed(req)) {
+    res.writeHead(403, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ success: false, message: 'forbidden' }));
+    return;
+  }
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.writeHead(405, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ success: false, message: 'method not allowed' }));
+    return;
+  }
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname.startsWith('/api/')) {
     return proxy(req, res, url.pathname);

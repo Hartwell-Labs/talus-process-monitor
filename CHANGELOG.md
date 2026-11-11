@@ -4,6 +4,25 @@ All notable changes to talus-process-monitor will be documented in this file.
 
 ## [0.8.2] - unreleased
 
+### Security
+- License keys: production Worker no longer trusts the `test` key ID and rejects
+  it on `/activate` and `/download-grant`. v1 is verification-only and keys
+  issued after 2026-10-29 are refused locally. Key lookup now pairs each `kid`
+  with its parsed key instead of indexing a filtered list.
+- `update --install` now requires a cosign signature and verifies the Fulcio
+  certificate against this repository's GitHub Actions workflow; a missing
+  signature or missing `cosign` refuses the install.
+- PyPI wrapper verifies `checksums-sha256.txt` before replacing the binary.
+- Sandbox drops the effective/permitted capability sets with `capset`, not just
+  the bounding set, and keeps only `CAP_BPF`, `CAP_PERFMON`, `CAP_KILL`.
+- eBPF events zero `comm`/`filename`/`argv` before submission instead of
+  copying uninitialised stack bytes into the perf ring.
+- Tauri: restrictive CSP; broker/topic arguments validated before spawning
+  `sudo`/`systemctl`. Dashboard binds to loopback by default.
+- License Worker and trial portal: per-IP rate limits and bounded request
+  bodies; admin panel rejects cross-site requests; Go dashboard enforces
+  same-origin WebSockets and escapes rendered fields.
+
 ### Changed
 - Version 0.8.2 unified across Cargo.toml, CHANGELOG.md, and the v0.8.2 tag.
 - TUI: 70/30 split (event stream | telemetry + detail panel), first-run gateway
@@ -17,6 +36,12 @@ All notable changes to talus-process-monitor will be documented in this file.
   is unchanged (version 1), so existing checkpoints still load.
 
 ### Added
+- Detection data: the ransomware-extension table now covers the 2024–2026 families
+  (BlackCat/ALPHV, BlackSuit, BianLian, Cactus, Chaos, NightSpire, Avaddon, Nefilim,
+  Makop, Phobos, Mallox, 8Base, Trigona, and others).
+- One Linux process whitelist: `monitor::SYSTEM_COMMS` + `is_system_comm` replaced the
+  duplicated TUI/CLI arrays and covers kernel threads (`kworker/3:1`, `jbd2/sda1-8`, ...)
+  plus core daemons; session daemons such as `sshd` stay visible.
 - `talus-monitor update` — opt-in release check; `--install` downloads, verifies the
   SHA-256 from `checksums-sha256.txt` and replaces the binary (keeps `<exe>.prev`).
   Never runs automatically; the monitor itself makes no network calls.

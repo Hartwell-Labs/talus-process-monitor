@@ -12,9 +12,8 @@
 //!
 //! The checksum file is published in the same release as the binary, so it
 //! detects corruption and truncated downloads. Releases are also signed with
-//! cosign; `update --install` verifies the blob automatically when the
-//! `cosign` binary is available, and otherwise points at the release-notes
-//! command. SHA-256 remains the mandatory integrity gate.
+//! cosign; `update --install` requires both the checksum and the signature,
+//! and refuses to install when `cosign` is unavailable or verification fails.
 
 use std::fs;
 use std::io::{self, Write};
@@ -157,14 +156,13 @@ fn find_asset<'a>(release: &'a Release, repo: &str, name: &str) -> Result<&'a As
     Ok(asset)
 }
 
-/// Best-effort supply-chain check for the release signature.
+/// Mandatory supply-chain check for the release signature.
 ///
-/// If the release publishes cosign artifacts (`{asset}.sig` + `{asset}.bundle`)
-/// AND the `cosign` binary is on PATH, the downloaded blob is verified with
-/// `cosign verify-blob` and a failure aborts the install. When `cosign` is not
-/// installed, or the release omits signing artifacts, a warning is printed and
-/// installation proceeds on the SHA-256 gate already checked above — this never
-/// silently downgrades integrity, it only adds an *additional* signature check.
+/// Every release publishes `{asset}.sig` from cosign keyless signing. A
+/// binary without a signature is refused: the SHA-256 in `checksums-sha256.txt`
+/// comes from the same release and cannot defend against a compromised
+/// repository or release. `cosign` verifies the Fulcio certificate against the
+/// GitHub Actions OIDC issuer and this repository's workflow path.
 fn verify_with_cosign(
     client: &reqwest::blocking::Client,
     release: &Release,
@@ -173,23 +171,19 @@ fn verify_with_cosign(
     asset: &str,
 ) -> Result<()> {
     let prefix = format!("https://github.com/{repo}/releases/download/");
+    let sig = release
+        .assets
+        .iter()
+        .find(|a| a.name == format!("{asset}.sig") && a.browser_download_url.starts_with(&prefix))
+        .with_context(|| {
+            format!(
+                "release {} has no {asset}.sig; refusing to install an unsigned binary",
+                release.tag_name
+            )
+        })?;
 
-    let (Some(sig), Some(bundle)) = (
-        release.assets.iter().find(|a| {
-            a.name == format!("{asset}.sig") && a.browser_download_url.starts_with(&prefix)
-        }),
-        release.assets.iter().find(|a| {
-            a.name == format!("{asset}.bundle") && a.browser_download_url.starts_with(&prefix)
-        }),
-    ) else {
-        eprintln!(
-            "[talus] ⚠ cosign artifacts ({asset}.sig/.bundle) not in release {}; verified via SHA-256 only. Run: cosign verify-blob {asset} --signature {asset}.sig --bundle {asset}.bundle",
-            release.tag_name
-        );
-        return Ok(());
-    };
-
-    // `cosign` missing? warn + continue (SHA-256 already gated) — never silent.
+    // cosign is required, not optional: without it the signature is a file we
+    // downloaded but never checked.
     if std::process::Command::new("cosign")
         .arg("--version")
         .stdout(std::process::Stdio::null())
@@ -197,32 +191,52 @@ fn verify_with_cosign(
         .status()
         .is_err()
     {
-        eprintln!("[talus] ⚠ `cosign` not installed; signature not verified. Install cosign and re-run `update --install`. SHA-256 integrity gate passed.");
-        return Ok(());
+        bail!(
+            "cosign is required to verify {asset}; install it from \
+             https://docs.sigstore.dev/cosign/installation/ and re-run"
+        );
     }
 
     let sig_data = download(client, &sig.browser_download_url)?;
-    let bundle_data = download(client, &bundle.browser_download_url)?;
     let dir = std::env::temp_dir();
-    let blob = dir.join(format!(".talus-{asset}.blob"));
-    let sig_path = dir.join(format!(".talus-{asset}.sig"));
-    let bundle_path = dir.join(format!(".talus-{asset}.bundle"));
-    std::fs::write(&blob, data)?;
-    std::fs::write(&sig_path, &sig_data)?;
-    std::fs::write(&bundle_path, &bundle_data)?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let base = format!(".talus-verify-{}-{nonce}", std::process::id());
+    let blob = dir.join(format!("{base}.blob"));
+    let sig_path = dir.join(format!("{base}.sig"));
+
+    let write = |path: &std::path::Path, bytes: &[u8]| -> std::io::Result<()> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(bytes)
+    };
+    if let Err(e) = write(&blob, data).and_then(|_| write(&sig_path, &sig_data)) {
+        let _ = std::fs::remove_file(&blob);
+        let _ = std::fs::remove_file(&sig_path);
+        bail!("cannot stage signature verification files: {e}");
+    }
 
     let status = std::process::Command::new("cosign")
         .arg("verify-blob")
         .arg(&blob)
         .arg("--signature")
         .arg(&sig_path)
-        .arg("--bundle")
-        .arg(&bundle_path)
-        .status()?;
+        .arg("--certificate-identity-regexp")
+        .arg(format!("^https://github.com/{repo}/.github/workflows/"))
+        .arg("--certificate-oidc-issuer")
+        .arg("https://token.actions.githubusercontent.com")
+        .status();
     let _ = std::fs::remove_file(&blob);
     let _ = std::fs::remove_file(&sig_path);
-    let _ = std::fs::remove_file(&bundle_path);
 
+    let status = status.context("failed to run cosign")?;
     if !status.success() {
         bail!(
             "cosign signature verification FAILED for {asset} - release is not authentic; nothing installed"

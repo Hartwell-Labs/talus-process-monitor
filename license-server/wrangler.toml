@@ -53,7 +53,12 @@ enabled = false
 #
 #   v1 — original key, verification-only (backward compat)
 #   v2 — active since 2026-10-30, used for all new licenses
-LICENSE_PUBLIC_KEYS = "v1:850e6bbdc5b5d66ae24973cef9e6e5baf887b2c775a2e17cd1b6cd2d8ae76845,v2:e1e98f159d34f54b4c51f23e53a49c658c87deecf5ac5218e04ed644f6901306,test:ba134de9c6fc6dbc4dd5e5312211c2e877c8927bd08862277e33c4941775111e"
+# SECURITY: never add a `test:` key here. The matching test private key is
+# public in the repository, so trusting it would let anyone mint an
+# enterprise license at this endpoint. Tests run against a local Worker.
+# Server-side code also rejects `kid=test` explicitly.
+# v1 is the same key the binary embeds (src/license.rs PUBKEY_V1).
+LICENSE_PUBLIC_KEYS = "v1:f9b0ec274c44a7833e6047588843f0f2269fad3ac3836f468b582bb96a993b31,v2:e1e98f159d34f54b4c51f23e53a49c658c87deecf5ac5218e04ed644f6901306"
 TURSO_DATABASE_URL = "https://talus-licenses-bartoszosiej.aws-eu-west-1.turso.io"
 
 # GitHub PAT for private repo downloads (enterprise tier) — stored as a
