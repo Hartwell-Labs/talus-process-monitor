@@ -458,7 +458,9 @@ async function landing_page(env, ctx) {
   const response = new Response(html, {
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'public, max-age=300',
+      // Short enough that a manifest backfill or a manual publish becomes
+      // visible without waiting for a deployment.
+      'cache-control': 'public, max-age=60',
       'x-content-type-options': 'nosniff',
     },
   });
