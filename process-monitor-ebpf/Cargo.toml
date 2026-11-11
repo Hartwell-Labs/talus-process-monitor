@@ -11,3 +11,18 @@ aya-ebpf-macros = "0.2.0"
 [[bin]]
 name = "process-monitor-ebpf"
 path = "src/main.rs"
+
+# BPF profile: avoids memset/memcpy intrinsics that the BPF LLVM backend
+# cannot lower. No LTO with a reduced opt-level stops LLVM from turning
+# byte-by-byte loops into builtins the backend rejects.
+#
+# This lives here rather than in the repository root because this crate is
+# built standalone: it is not a workspace member, so a profile in the root
+# manifest would be ignored.
+[profile.bpf]
+inherits = "release"
+lto = false
+opt-level = 2
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
