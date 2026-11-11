@@ -240,6 +240,21 @@ const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 export default {
   async fetch(request, env, ctx) {
     try {
+      const url = new URL(request.url);
+      const { pathname } = url;
+
+      // Artifact downloads are routed first, before any database work: the MIT
+      // line needs no DB at all, and a cache hit should not touch one either.
+      // The hostname shares this Worker (and its secrets) but has its own
+      // routing surface: public MIT artifacts and license-gated Enterprise
+      // artifacts.
+      if (
+        url.hostname === 'download.hartwell-labs.pl' ||
+        env.DOWNLOAD_DEV_ALLOW_ANY === '1'
+      ) {
+        return handle_download_request(request, env, ctx);
+      }
+
       // Attach the storage adapter once per request: native D1 if the binding
       // exists, otherwise a Turso-backed D1-compatible shim (failover mode).
       env = { ...env, DB: createDB(env) };
@@ -248,16 +263,6 @@ export default {
       // migration runner can reach the Stripe columns this Worker writes.
       // Applied here instead: memoised per isolate, additive, idempotent.
       await ensure_stripe_schema(env.DB);
-
-      const url = new URL(request.url);
-      const { pathname } = url;
-
-      // The download hostname shares this Worker (and its secrets) but has its
-      // own routing surface: public MIT artifacts and license-gated Enterprise
-      // artifacts. It must run before the JSON API's method guard.
-      if (url.hostname === 'download.hartwell-labs.pl') {
-        return handle_download_request(request, env, ctx);
-      }
 
       // Restrict methods per route family; everything else → 405.
       if (request.method !== 'GET' && request.method !== 'POST') {

@@ -57,18 +57,20 @@ function filename_of(key) {
 }
 
 async function authorize(env, raw_key) {
-  if (!env.DB) return { ok: false, status: 500, message: 'server misconfigured: missing DB' };
-  if (!env.LICENSE_PUBLIC_KEYS) {
-    return { ok: false, status: 500, message: 'server misconfigured: missing LICENSE_PUBLIC_KEYS' };
-  }
+  // Cheap rejection first: a missing or oversized header must not touch the
+  // database, and it must not report a server error just because DB is absent.
   if (!raw_key || raw_key.length > MAX_LICENSE_LEN) {
     return { ok: false, status: 401, message: 'missing or oversized X-Talus-License' };
+  }
+  if (!env.LICENSE_PUBLIC_KEYS) {
+    return { ok: false, status: 500, message: 'server misconfigured: missing LICENSE_PUBLIC_KEYS' };
   }
 
   // Same key formats as activation: short store keys resolve to the canonical
   // signed form, native Talus keys are already canonical.
   let effective = raw_key.trim();
   if (!is_canonical(effective) && !is_pretty(effective)) {
+    if (!env.DB) return { ok: false, status: 500, message: 'server misconfigured: missing DB' };
     const resolved = await resolve_key(env, effective);
     if (resolved.kind === 'unknown') {
       return { ok: false, status: 404, message: 'license not found' };
@@ -137,6 +139,7 @@ async function authorize(env, raw_key) {
 
   // "Exists" is a database fact, not just a valid signature: a refunded or
   // never-issued key must not download the licensed binary.
+  if (!env.DB) return { ok: false, status: 500, message: 'server misconfigured: missing DB' };
   const row = await env.DB.prepare(
     'SELECT license_id, tier, revoked, expires_at FROM licenses WHERE license_id = ?1',
   )
@@ -177,7 +180,10 @@ export async function handle_download_request(request, env, ctx) {
   }
 
   const url = new URL(request.url);
-  if (url.hostname !== DOWNLOAD_HOST) return not_found();
+  // `wrangler dev` rewrites the request URL to localhost, so local smoke tests
+  // opt in explicitly. Production never sets this variable.
+  const host_ok = url.hostname === DOWNLOAD_HOST || env.DOWNLOAD_DEV_ALLOW_ANY === '1';
+  if (!host_ok) return not_found();
 
   const parts = url.pathname.split('/').filter(Boolean);
   if (parts.length < 2) return not_found();
