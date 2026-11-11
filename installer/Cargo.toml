@@ -1,0 +1,51 @@
+[package]
+repository = "https://github.com/Hartwell-Labs/talus-process-monitor"
+name = "talus-installer"
+version = "0.8.2"
+edition = "2021"
+description = "TUI installer for Talus Enterprise — guided license activation and system service setup"
+license = "MIT"
+homepage = "https://hartwell-labs.pl/talus-process-monitor/"
+keywords = ["installer", "tui", "license", "systemd"]
+categories = ["command-line-utilities", "installation"]
+
+[[bin]]
+name = "talus-installer"
+path = "src/main.rs"
+
+[dependencies]
+# ── UI: same FrankenTUI stack as talus-monitor ──
+ftui = { version = "0.6", features = ["crossterm"] }
+
+# ── License system: re-use exact same code as the agent binary ──
+talus-process-monitor = { path = ".." }
+
+# ── Utilities ──
+anyhow = "1"
+crossterm = "0.29"
+dirs = "7"
+libc = "0.2"
+whoami = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[features]
+default = []
+# Test-only license generation. NEVER enabled in release builds.
+# CI asserts: `cargo build --release` must NOT contain this feature.
+test-license = ["talus-process-monitor/test-license"]
+
+[dev-dependencies]
+base64 = "0.23"
+ed25519-dalek = "3.0"
+chrono = "0.4"
+serde_json = "1"
+serde = "1"
+hex = "0.4"
+
+[[example]]
+name = "mock-license"
+path = "examples/mock-license.rs"
+required-features = ["test-license"]
