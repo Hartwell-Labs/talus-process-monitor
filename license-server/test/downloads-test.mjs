@@ -53,7 +53,7 @@ function fake_env(license = null, pub_hex = '00') {
           return JSON.stringify({
             line: 'mit',
             versions: [
-              { version: '0.8.4', files: [{ name: 'talus-monitor', size: 9190248 }] },
+              { version: '0.8.4', notes: 'Security: Burst detection now skips /proc, /sys, /dev; per-PID state evicted after 10 min TTL.', files: [{ name: 'talus-monitor', size: 9190248 }] },
             ],
           });
         },
@@ -69,6 +69,7 @@ function fake_env(license = null, pub_hex = '00') {
               {
                 version: '0.8.3',
                 published_at: '2026-10-01T00:00:00Z',
+                notes: 'Enterprise licensing system with Ed25519-signed binary, signature verification, and SBOM inclusion.',
                 files: [{ name: 'talus-monitor-enterprise', size: 24900000 }],
               },
               {

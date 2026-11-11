@@ -139,6 +139,7 @@ function release_list(line, manifest) {
     .map((entry, index) => {
       const date = release_date(entry);
       const latest = index === 0 ? '<span class="badge info">Latest</span>' : '';
+      const notes = entry.notes ? `<p class="release-notes">${escape_html(entry.notes)}</p>` : '';
       return `<div class="release" data-release-version="${escape_html(entry.version)}"${
         index === 0 ? '' : ' hidden'
       }>
@@ -147,6 +148,7 @@ function release_list(line, manifest) {
           ${date ? `<time datetime="${date}">${date}</time>` : ''}
         </div>
         ${file_rows(line, entry)}
+        ${notes}
       </div>`;
     })
     .join('');
