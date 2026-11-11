@@ -236,6 +236,9 @@ test('landing page lists both lines with the latest versions', async () => {
   assert.ok(html.indexOf('v0.8.4') < html.indexOf('v0.8.3'));
   assert.match(html, /button class="dl" type="button" data-version="0\.8\.4"/);
   assert.match(html, /Latest/);
+  // A dropdown selects the release; only the newest is visible initially.
+  assert.match(html, /<select id="release-enterprise"[^>]*>/);
+  assert.match(html, /data-release-version="0\.8\.3" hidden/);
 
   // The inline downloader must at least parse: a broken script would leave
   // the Enterprise buttons doing nothing in the browser.

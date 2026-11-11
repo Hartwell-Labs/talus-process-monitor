@@ -47,8 +47,8 @@ enabled = false
 #     downloads do not reach R2 (no Class B).
 #   • Enterprise objects are no-store: one Class B per download, by design.
 #   • Only uploads are Class A. Nothing on the read path lists the bucket.
-#   • Keep two versions per line (see scripts/r2-publish.sh) to stay far under
-#     10 GB: the Enterprise binary is ~25 MB.
+#   • Keep five versions per line (see scripts/r2-publish.sh) to stay far
+#     under 10 GB: the Enterprise binary is ~25 MB.
 [[r2_buckets]]
 binding = "DOWNLOADS"
 bucket_name = "talus-downloads"

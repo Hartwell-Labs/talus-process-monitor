@@ -115,16 +115,26 @@ function release_date(entry) {
 /// are already gone from storage once retention prunes them, so this list is
 /// intentionally limited to what the manifest still holds.
 function release_list(line, manifest) {
-  const versions = manifest?.versions || [];
+  const versions = (manifest?.versions || []).slice().reverse();
   if (!versions.length) return '<p class="empty">No releases published yet.</p>';
 
-  return `<div class="releases">${versions
-    .slice()
-    .reverse()
+  const options = versions
+    .map((entry, index) => {
+      const date = release_date(entry);
+      const suffix = index === 0 ? ' — latest' : '';
+      return `<option value="${escape_html(entry.version)}"${
+        index === 0 ? ' selected' : ''
+      }>v${escape_html(entry.version)}${date ? ` · ${date}` : ''}${suffix}</option>`;
+    })
+    .join('');
+
+  const releases = versions
     .map((entry, index) => {
       const date = release_date(entry);
       const latest = index === 0 ? '<span class="badge info">Latest</span>' : '';
-      return `<div class="release">
+      return `<div class="release" data-release-version="${escape_html(entry.version)}"${
+        index === 0 ? '' : ' hidden'
+      }>
         <div class="release-head">
           <span class="ver">v${escape_html(entry.version)}</span>${latest}
           ${date ? `<time datetime="${date}">${date}</time>` : ''}
@@ -132,7 +142,13 @@ function release_list(line, manifest) {
         ${file_rows(line, entry)}
       </div>`;
     })
-    .join('')}</div>`;
+    .join('');
+
+  return `<div class="release-picker">
+      <label for="release-${line}">Release</label>
+      <select id="release-${line}" class="release-select" data-line="${line}">${options}</select>
+    </div>
+    <div class="releases" data-releases="${line}">${releases}</div>`;
 }
 
 async function landing_page(env, ctx) {
@@ -214,8 +230,13 @@ async function landing_page(env, ctx) {
   .prod .note code { background:var(--bg-subtle); border:1px solid var(--border); border-radius:5px; padding:1px 5px; font-size:12px; color:var(--txt); }
   .prod .btn { margin-top:16px; height:38px; padding:0 16px; font-size:13.5px; }
 
-  .releases { margin-top:16px; border-top:1px solid var(--border); }
-  .release { padding:13px 0; border-bottom:1px solid var(--border); }
+  .release-picker { display:flex; align-items:center; gap:10px; margin-top:16px; }
+  .release-picker label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--txt-3); }
+  .release-select { flex:1; height:38px; border:1px solid var(--border-strong); border-radius:8px; padding:0 10px; background:var(--bg); color:var(--txt); font:500 13.5px "Inter",sans-serif; cursor:pointer; }
+  .release-select:focus { outline:2px solid var(--accent-soft); border-color:var(--accent); }
+  .releases { margin-top:10px; border-top:1px solid var(--border); }
+  .release { padding:13px 0 0; }
+  .release[hidden] { display:none; }
   .release:last-child { border-bottom:0; padding-bottom:0; }
   .release-head { display:flex; align-items:center; gap:10px; }
   .release-head .ver { font-weight:700; font-size:14.5px; letter-spacing:-.01em; }
@@ -409,6 +430,19 @@ async function landing_page(env, ctx) {
     button.addEventListener('click', function () {
       download(button.dataset.version, button.dataset.file, button);
     });
+  });
+
+  // One visible release per line; the select is the release list.
+  document.querySelectorAll('select.release-select').forEach(function (select) {
+    var list = document.querySelector('[data-releases="' + select.dataset.line + '"]');
+    if (!list) return;
+    function show_selected() {
+      list.querySelectorAll('.release').forEach(function (release) {
+        release.hidden = release.dataset.releaseVersion !== select.value;
+      });
+    }
+    select.addEventListener('change', show_selected);
+    show_selected();
   });
 
   input.addEventListener('keydown', function (event) {
