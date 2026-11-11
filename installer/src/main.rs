@@ -869,7 +869,7 @@ fn verify_installation() -> Result<()> {
         bail!("talus-monitor.service is not active (state: {state})");
     }
     if verify_dashboard() {
-        eprintln!("[talus] dashboard reachable at http://127.0.0.1:8080/");
+        eprintln!("[talus] dashboard reachable at https://127.0.0.1:8080/ (self-signed certificate)");
     } else {
         eprintln!("[talus] warning: service is active but the dashboard did not answer yet");
     }
@@ -1284,12 +1284,12 @@ fn render_complete(f: &mut Frame, area: Rect, app: &Installer) {
         Line::raw(""),
         Line::from_spans(vec![
             Span::raw("Dashboard   "),
-            Span::styled("http://127.0.0.1:8080/", Style::new().fg(CYAN)),
+            Span::styled("https://127.0.0.1:8080/", Style::new().fg(CYAN)),
         ]),
         Line::from_spans(vec![
             Span::raw("Metrics     "),
             Span::styled(
-                "curl -s http://127.0.0.1:8080/metrics",
+                "curl -sk https://127.0.0.1:8080/metrics",
                 Style::new().fg(CYAN),
             ),
         ]),
@@ -1411,7 +1411,7 @@ fn run_install_non_interactive(
 
     println!();
     println!("Talus Enterprise installed and running.");
-    println!("  Dashboard: http://127.0.0.1:8080/");
+    println!("  Dashboard: https://127.0.0.1:8080/ (self-signed certificate)");
     println!("  Logs:      journalctl -fu talus-monitor");
     println!("  Remove:    sudo talus-installer --uninstall");
     Ok(())
