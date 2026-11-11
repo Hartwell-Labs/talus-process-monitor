@@ -10,7 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-talus-process-monitor = { path = "../process-monitor" }
+talus-process-monitor = { path = ".." }
 
 # Standalone workspace (the root workspace excludes this crate). The root
 # [patch.crates-io] table does not apply here, so it is repeated: without it the
