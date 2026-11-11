@@ -2,6 +2,15 @@
 
 All notable changes to talus-process-monitor will be documented in this file.
 
+## [0.8.4] - 2026-11-11
+
+### Fixed
+- Burst detection no longer counts opens under `/proc`, `/sys` and `/dev` toward
+  `--alert-threshold`. Daemons scanning those trees (`systemd-udevd`, `journald`)
+  could cross the threshold without touching user data. The events are still
+  streamed and included in the total-open counters; only the 1-second window
+  skips them. `/dev/shm` remains counted because it is a real tmpfs.
+
 ## [0.8.2] - unreleased
 
 ### Security
