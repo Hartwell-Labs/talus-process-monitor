@@ -344,6 +344,12 @@ Each PID maintains a **1-second rolling window** of `openat` events. When the co
 PID 2126 ("Cache2 I/O") opened 50 files in 1.0s  →  VERDICT: SUSPICIOUS
 ```
 
+Opens under `/proc`, `/sys` and `/dev` do **not** count towards the burst window:
+they are kernel interfaces and device nodes, not data access, and daemons such
+as `systemd-udevd` and `journald` scan them constantly. Those events still appear
+in the stream and in the total-open counters; only burst detection ignores them.
+`/dev/shm` is a real tmpfs and is still counted.
+
 The threshold is configurable at runtime via the API or CLI:
 
 ```bash

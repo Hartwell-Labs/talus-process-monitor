@@ -963,19 +963,23 @@ impl Monitor {
                     bump_count_capped(&mut self.file_counts, filename, MAX_TRACKED_FILES);
                 }
 
-                let now = Instant::now();
-                let window = self.windows.entry(pid).or_default();
-                let cutoff = now - Duration::from_secs(WINDOW_SECS);
-                while window.front().is_some_and(|t| *t < cutoff) {
-                    window.pop_front();
+                let counts = counts_toward_burst(filename);
+                if counts {
+                    let now = Instant::now();
+                    let window = self.windows.entry(pid).or_default();
+                    let cutoff = now - Duration::from_secs(WINDOW_SECS);
+                    while window.front().is_some_and(|t| *t < cutoff) {
+                        window.pop_front();
+                    }
+                    window.push_back(now);
+                    stats.window_opens = window.len() as u64;
                 }
-                window.push_back(now);
 
                 stats.total_opens += 1;
-                stats.window_opens = window.len() as u64;
                 self.tick_opens += 1;
 
-                if self.threshold > 0
+                if counts
+                    && self.threshold > 0
                     && stats.window_opens == self.threshold
                     && !self
                         .ignore_comms
@@ -1395,6 +1399,33 @@ fn bump_count_capped(map: &mut HashMap<String, u64>, key: &str, cap: usize) {
         return;
     }
     map.insert(key.to_owned(), 1);
+}
+
+/// Whether an open counts towards the per-PID burst window.
+///
+/// `/proc` and `/sys` are kernel interfaces, and `/dev` is device nodes: opening
+/// them is not data access. Daemons such as `systemd-udevd`, `systemd` and
+/// `journald` scan these trees continuously, so counting them lets a busy host
+/// trip `--alert-threshold` without anything touching user data. Such events
+/// still appear in the stream and in the total-open counters; only burst
+/// detection ignores them.
+///
+/// `/dev/shm` is deliberately *not* ignored: it is a real tmpfs and a common
+/// staging area for malware, so writes there should still raise a burst.
+fn counts_toward_burst(path: &str) -> bool {
+    if path == "/proc" || path.starts_with("/proc/") {
+        return false;
+    }
+    if path == "/sys" || path.starts_with("/sys/") {
+        return false;
+    }
+    if path == "/dev/shm" || path.starts_with("/dev/shm/") {
+        return true;
+    }
+    if path == "/dev" || path.starts_with("/dev/") {
+        return false;
+    }
+    true
 }
 
 /// Extract file extension (without the dot). Empty string for dotfiles / no ext.
@@ -1954,6 +1985,53 @@ mod tests {
         let stats = monitor.stats.get(&42).unwrap();
         assert_eq!(stats.alerts, 1);
         assert_eq!(stats.window_opens, 3);
+    }
+
+    #[test]
+    fn pseudo_filesystems_are_excluded_from_burst_counting() {
+        assert!(!counts_toward_burst("/proc"));
+        assert!(!counts_toward_burst("/proc/1234/stat"));
+        assert!(!counts_toward_burst("/sys"));
+        assert!(!counts_toward_burst("/sys/class/net/eth0/mtu"));
+        assert!(!counts_toward_burst("/dev"));
+        assert!(!counts_toward_burst("/dev/null"));
+        assert!(!counts_toward_burst("/dev/disk/by-id/x"));
+        // Real files, and tmpfs malware staging, still count.
+        assert!(counts_toward_burst("/etc/passwd"));
+        assert!(counts_toward_burst("/dev/shm"));
+        assert!(counts_toward_burst("/dev/shm/payload.enc"));
+        // Prefix match must respect the path separator.
+        assert!(counts_toward_burst("/procfs/data"));
+        assert!(counts_toward_burst("/sysroot/file"));
+        assert!(counts_toward_burst("/devices/x"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn pseudo_fs_opens_do_not_trip_the_burst_threshold() {
+        let mut monitor = Monitor::dummy(); // threshold = 3
+        let mut outputs = Vec::new();
+        for _ in 0..10 {
+            monitor.handle_event(&open(30, 0, "/proc/30/status"), &mut outputs);
+            monitor.handle_event(&open(30, 0, "/sys/class/net/eth0/mtu"), &mut outputs);
+            monitor.handle_event(&open(30, 0, "/dev/null"), &mut outputs);
+        }
+        assert!(!outputs.iter().any(|o| matches!(o, Output::Alert(_))));
+        let stats = monitor.stats.get(&30).unwrap();
+        assert_eq!(stats.total_opens, 30, "events are still counted overall");
+        assert_eq!(stats.window_opens, 0, "none enter the burst window");
+        assert_eq!(stats.alerts, 0);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn dev_shm_opens_still_trip_the_burst_threshold() {
+        let mut monitor = Monitor::dummy(); // threshold = 3
+        let mut outputs = Vec::new();
+        for _ in 0..3 {
+            monitor.handle_event(&open(31, 0, "/dev/shm/stage.enc"), &mut outputs);
+        }
+        assert!(outputs.iter().any(|o| matches!(o, Output::Alert(_))));
     }
 
     #[test]

@@ -310,6 +310,8 @@ openat entry   ──► EVENTS map ──► perf buffer ──► Msg::Event �
 - Threshold: CLI flag `--alert-threshold` (default 50).
 - Window length: `WINDOW_SECS` in `monitor.rs`.
 - Trigger semantics: the exact `== threshold` comparison in `handle_event`.
+- Scope: `counts_toward_burst` in `monitor.rs` decides which paths enter the
+  window — `/proc`, `/sys` and `/dev` are excluded, `/dev/shm` is not.
 
 ### Add an output mode
 
