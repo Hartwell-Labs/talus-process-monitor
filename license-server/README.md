@@ -47,9 +47,9 @@ R2 free tier: **10 GB storage, 1M Class A, 10M Class B per month**.
 - Enterprise is deliberately uncached: one Class B per download.
 - Uploads are the only Class A operations; the read path never lists the
   bucket.
-- Publishing keeps **two versions per line** and the Worker refuses to
+- Publishing keeps **five versions per line** and the Worker refuses to
   finalize a manifest above **8 GiB**, leaving 2 GiB headroom. The Enterprise
-  binary is ~25 MB, so the cap is many releases away.
+  binary is ~25 MB, so five releases are under 200 MB.
 - The Worker's own free allowance (100k requests/day) is the real ceiling for
   very high download volume, not R2.
 
@@ -72,7 +72,7 @@ matching `refs/tags/v<version>`. No Cloudflare API token or R2 key is stored in
 GitHub.
 
 After uploading the files, the workflow finalizes the manifest. That is also
-when retention runs: the version that falls out of the two-version window is
+when retention runs: any version that falls out of the five-version window is
 deleted from R2 and the landing page cache is purged.
 
 `scripts/r2-publish.sh` remains as a manual fallback (for example, when

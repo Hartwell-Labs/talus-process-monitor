@@ -11,7 +11,7 @@
 #
 # Free-tier discipline:
 #   • Only PUTs and one manifest GET/PUT — Class A, a handful per release.
-#   • Keeps the current and previous version per line, deleting older objects.
+#   • Keeps the five newest versions per line, deleting older objects.
 #   • Refuses to publish if the recorded total would exceed 8 GiB of the 10 GiB
 #     free storage, leaving headroom for manifests and in-flight uploads.
 #
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 BUCKET="talus-downloads"
-KEEP_VERSIONS=2
+KEEP_VERSIONS=5
 MAX_BYTES=$((8 * 1024 * 1024 * 1024))
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

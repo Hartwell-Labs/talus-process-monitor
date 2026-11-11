@@ -42,6 +42,10 @@ const PUBLISH_REPOS = new Set([
 const OIDC_JWKS_URL = 'https://token.actions.githubusercontent.com/.well-known/jwks';
 const MAX_ARTIFACT_BYTES = 100 * 1024 * 1024; // Workers request body ceiling
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+$/;
+// Five releases per line is still under 200 MB of R2, well inside the 10 GB
+// free tier, and gives the landing page a real release history instead of a
+// single row.
+const RETENTION_VERSIONS = 5;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -92,9 +96,43 @@ function file_rows(line, entry) {
           file.name,
         )}">${name}</a><span class="size">${mb} MB</span></li>`;
       }
-      return `<li><span class="file">${name}</span><span class="size">${mb} MB</span></li>`;
+      // The licensed binary needs a header, so a plain link cannot work. The
+      // page fetches it with the key and hands the browser a blob instead.
+      return `<li><span class="file">${name}</span><span class="size">${mb} MB</span><button class="dl" type="button" data-version="${escape_html(
+        entry.version,
+      )}" data-file="${name}">Download</button></li>`;
     })
     .join('')}</ul>`;
+}
+
+function release_date(entry) {
+  const raw = entry.published_at || entry.uploaded_at;
+  const date = raw ? new Date(raw) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : '';
+}
+
+/// Release history for one line, newest first. The binaries for older versions
+/// are already gone from storage once retention prunes them, so this list is
+/// intentionally limited to what the manifest still holds.
+function release_list(line, manifest) {
+  const versions = manifest?.versions || [];
+  if (!versions.length) return '<p class="empty">No releases published yet.</p>';
+
+  return `<div class="releases">${versions
+    .slice()
+    .reverse()
+    .map((entry, index) => {
+      const date = release_date(entry);
+      const latest = index === 0 ? '<span class="badge info">Latest</span>' : '';
+      return `<div class="release">
+        <div class="release-head">
+          <span class="ver">v${escape_html(entry.version)}</span>${latest}
+          ${date ? `<time datetime="${date}">${date}</time>` : ''}
+        </div>
+        ${file_rows(line, entry)}
+      </div>`;
+    })
+    .join('')}</div>`;
 }
 
 async function landing_page(env, ctx) {
@@ -176,6 +214,28 @@ async function landing_page(env, ctx) {
   .prod .note code { background:var(--bg-subtle); border:1px solid var(--border); border-radius:5px; padding:1px 5px; font-size:12px; color:var(--txt); }
   .prod .btn { margin-top:16px; height:38px; padding:0 16px; font-size:13.5px; }
 
+  .releases { margin-top:16px; border-top:1px solid var(--border); }
+  .release { padding:13px 0; border-bottom:1px solid var(--border); }
+  .release:last-child { border-bottom:0; padding-bottom:0; }
+  .release-head { display:flex; align-items:center; gap:10px; }
+  .release-head .ver { font-weight:700; font-size:14.5px; letter-spacing:-.01em; }
+  .release-head time { margin-left:auto; font-size:12.5px; color:var(--txt-3); }
+  .badge { display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; border-radius:5px; padding:2px 7px; }
+  .badge.info { background:var(--accent-soft); color:var(--accent); }
+  .release .files { margin-top:8px; border-top:0; }
+  .release .files li { padding:5px 0; border-bottom:0; font-size:13.5px; }
+  .dl { font:600 11.5px/1 "Inter",sans-serif; color:var(--accent); background:var(--accent-soft); border:1px solid #c7d2fe; border-radius:6px; padding:5px 9px; cursor:pointer; }
+  .dl:hover { background:#e0e7ff; }
+  .dl:disabled { opacity:.55; cursor:wait; }
+
+  .license { margin-top:16px; background:var(--bg-subtle); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .license label { display:block; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--txt-3); margin-bottom:8px; }
+  .license-row { display:flex; gap:8px; }
+  .license input { width:100%; height:38px; border:1px solid var(--border-strong); border-radius:8px; padding:0 10px; font:13px "JetBrains Mono",monospace; background:var(--bg); color:var(--txt); }
+  .license input:focus { outline:2px solid var(--accent-soft); border-color:var(--accent); }
+  .license .hint { margin-top:8px; font-size:12px; line-height:1.5; color:var(--txt-3); }
+  .license .hint.err { color:#dc2626; }
+
   pre.block { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:15px 17px; font-size:12.5px; line-height:1.75; overflow-x:auto; margin-top:14px; }
 
   footer { border-top:1px solid var(--border); padding:40px 0 46px; background:var(--bg-subtle); }
@@ -228,7 +288,7 @@ async function landing_page(env, ctx) {
       </div>
       <h2>Community edition${mit_latest ? ` · v${escape_html(mit_latest.version)}` : ''}</h2>
       <p>Immutable artifacts, served from Cloudflare's edge. Repeat downloads do not touch storage.</p>
-      ${file_rows('mit', mit_latest)}
+      ${release_list('mit', mit)}
       <a class="btn btn-secondary" href="https://github.com/Hartwell-Labs/talus-process-monitor">Source ↗</a>
     </div>
 
@@ -238,8 +298,15 @@ async function landing_page(env, ctx) {
         <span class="lang">Licensed</span>
       </div>
       <h2>Licensed edition${enterprise_latest ? ` · v${escape_html(enterprise_latest.version)}` : ''}</h2>
-      <p>Signed binary and verification material. Send your key in the <code class="inline">X-Talus-License</code> header; it must exist in the license database, be unrevoked and unexpired, with <code class="inline">tier = enterprise</code>.</p>
-      ${file_rows('enterprise', enterprise_latest)}
+      <p>Signed binary and verification material. The key must exist in the license database, be unrevoked and unexpired, with <code class="inline">tier = enterprise</code>.</p>
+      <div class="license">
+        <label for="license">License key</label>
+        <div class="license-row">
+          <input id="license" type="password" autocomplete="off" spellcheck="false" placeholder="TALUS-…">
+        </div>
+        <p class="hint" id="lic-err" role="status">Paste your key, then pick a file below. It is sent only to this host in the <code class="inline">X-Talus-License</code> header.</p>
+      </div>
+      ${release_list('enterprise', enterprise)}
       <pre class="block">curl -fLO \\
   -H "X-Talus-License: $TALUS_LICENSE" \\
   https://download.hartwell-labs.pl/enterprise/${
@@ -286,6 +353,71 @@ async function landing_page(env, ctx) {
     <span>Szczecin, Poland</span>
   </div>
 </footer>
+<script>
+(function () {
+  var input = document.getElementById('license');
+  var err = document.getElementById('lic-err');
+  var defaultHint = err.textContent;
+
+  function download(version, name, button) {
+    var key = input.value.trim();
+    err.classList.remove('err');
+    if (!key) {
+      err.textContent = 'Enter your license key first.';
+      err.classList.add('err');
+      input.focus();
+      return;
+    }
+    var original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Fetching…';
+
+    fetch('/enterprise/' + encodeURIComponent(version) + '/' + encodeURIComponent(name), {
+      headers: { 'X-Talus-License': key }
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (body) {
+            throw new Error(body.message || ('HTTP ' + res.status));
+          });
+        }
+        return res.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = name;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        err.textContent = 'Downloaded ' + name + '.';
+        err.classList.remove('err');
+      })
+      .catch(function (error) {
+        err.textContent = error.message;
+        err.classList.add('err');
+      })
+      .finally(function () {
+        button.disabled = false;
+        button.textContent = original;
+      });
+  }
+
+  document.querySelectorAll('button.dl').forEach(function (button) {
+    button.addEventListener('click', function () {
+      download(button.dataset.version, button.dataset.file, button);
+    });
+  });
+
+  input.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter') return;
+    var first = document.querySelector('button.dl');
+    if (first) download(first.dataset.version, first.dataset.file, first);
+  });
+})();
+</script>
 </body>
 </html>`;
 
@@ -679,7 +811,7 @@ async function finalize_release(env, line, version, request) {
   versions.push({ version, published_at: new Date().toISOString(), files });
 
   // Retention keeps storage inside the free tier (and bounds the landing page).
-  while (versions.length > 2) {
+  while (versions.length > RETENTION_VERSIONS) {
     const pruned = versions.shift();
     for (const file of pruned.files || []) {
       await env.DOWNLOADS.delete(`${line}/${pruned.version}/${file.name}`);

@@ -67,7 +67,13 @@ function fake_env(license = null, pub_hex = '00') {
             line: 'enterprise',
             versions: [
               {
+                version: '0.8.3',
+                published_at: '2026-10-01T00:00:00Z',
+                files: [{ name: 'talus-monitor-enterprise', size: 24900000 }],
+              },
+              {
                 version: '0.8.4',
+                published_at: '2026-11-11T00:00:00Z',
                 files: [{ name: 'talus-monitor-enterprise', size: 24912840 }],
               },
             ],
@@ -226,6 +232,16 @@ test('landing page lists both lines with the latest versions', async () => {
   assert.match(html, /talus-monitor-enterprise/);
   // The licensed binary is described, never linked without a license header.
   assert.doesNotMatch(html, /href="\/enterprise\//);
+  // The history is newest first and licensed files use the key-aware button.
+  assert.ok(html.indexOf('v0.8.4') < html.indexOf('v0.8.3'));
+  assert.match(html, /button class="dl" type="button" data-version="0\.8\.4"/);
+  assert.match(html, /Latest/);
+
+  // The inline downloader must at least parse: a broken script would leave
+  // the Enterprise buttons doing nothing in the browser.
+  const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
+  assert.ok(script);
+  assert.doesNotThrow(() => new Function(script));
 });
 
 test('publishing requires a GitHub OIDC bearer token', async () => {
