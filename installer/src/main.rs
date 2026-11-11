@@ -732,8 +732,26 @@ fn perform_install(
 
     let src = step!(
         0,
-        binary_source(binary_override, false, &None)
-            .context("could not locate talus-monitor-enterprise binary")
+        match binary_source(binary_override, false, &None) {
+            Ok(path) => Ok(path),
+            Err(not_found) => {
+                let cache = license::LicenseCache::load()?.filter(|_| !skip_license);
+                match cache {
+                    Some(cache) => {
+                        let tier = match cache.payload.tier {
+                            license::LicenseTier::Community => "community",
+                            license::LicenseTier::Enterprise => "enterprise",
+                        };
+                        license::download_artifact(tier, None, false)
+                            .map(|(path, _)| path)
+                            .with_context(|| {
+                                format!("{not_found:#}; license-server download failed")
+                            })
+                    }
+                    None => Err(not_found),
+                }
+            }
+        }
     );
 
     let dest = std::path::Path::new("/usr/local/bin/talus-monitor-enterprise").to_path_buf();

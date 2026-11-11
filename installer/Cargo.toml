@@ -1,7 +1,7 @@
 [package]
 repository = "https://github.com/Hartwell-Labs/talus-process-monitor"
 name = "talus-installer"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 description = "TUI installer for Talus Enterprise — guided license activation and system service setup"
 license = "MIT"
