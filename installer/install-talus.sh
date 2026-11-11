@@ -30,7 +30,8 @@ detect_asset() {
 
 latest_tag() {
     curl -fsSL "${GITHUB_API}/repos/${REPO}/releases/latest" |
-        python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])'
+        grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' |
+        head -n1 | cut -d'"' -f4
 }
 
 sha256_of() {
@@ -44,9 +45,7 @@ sha256_of() {
 main() {
     [ "$(id -u)" -eq 0 ] || die "must run as root (use sudo)"
 
-    for cmd in curl python3; do
-        command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required"
-    done
+    command -v curl >/dev/null 2>&1 || die "curl is required"
 
     local tag="${TALUS_INSTALLER_TAG:-}"
     [ -n "$tag" ] || tag="$(latest_tag)"
