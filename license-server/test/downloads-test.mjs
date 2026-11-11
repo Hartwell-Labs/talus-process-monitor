@@ -46,6 +46,35 @@ function fake_env(license = null, pub_hex = '00') {
         },
       },
     ],
+    [
+      'mit/index.json',
+      {
+        async text() {
+          return JSON.stringify({
+            line: 'mit',
+            versions: [
+              { version: '0.8.4', files: [{ name: 'talus-monitor', size: 9190248 }] },
+            ],
+          });
+        },
+      },
+    ],
+    [
+      'enterprise/index.json',
+      {
+        async text() {
+          return JSON.stringify({
+            line: 'enterprise',
+            versions: [
+              {
+                version: '0.8.4',
+                files: [{ name: 'talus-monitor-enterprise', size: 24912840 }],
+              },
+            ],
+          });
+        },
+      },
+    ],
   ]);
   return {
     DOWNLOADS: {
@@ -185,6 +214,43 @@ test('a valid key with no database row is not a license', async () => {
     env,
   );
   assert.equal(res.status, 200);
+});
+
+test('landing page lists both lines with the latest versions', async () => {
+  const res = await handle_download_request(new Request(`${base}/`), fake_env());
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /Line 1 — MIT/);
+  assert.match(html, /Line 2 — Enterprise/);
+  assert.match(html, /\/mit\/0\.8\.4\/talus-monitor/);
+  assert.match(html, /talus-monitor-enterprise/);
+  // The licensed binary is described, never linked without a license header.
+  assert.doesNotMatch(html, /href="\/enterprise\//);
+});
+
+test('publishing requires a GitHub OIDC bearer token', async () => {
+  const put = await handle_download_request(
+    new Request(`${base}/publish/mit/0.8.4/talus-monitor`, { method: 'PUT', body: 'x' }),
+    fake_env(),
+  );
+  assert.equal(put.status, 401);
+
+  const finalize = await handle_download_request(
+    new Request(`${base}/publish/mit/0.8.4/finalize`, { method: 'POST', body: '{}' }),
+    fake_env(),
+  );
+  assert.equal(finalize.status, 401);
+
+  // A forged token must not be treated as a valid workflow identity.
+  const forged = await handle_download_request(
+    new Request(`${base}/publish/mit/0.8.4/talus-monitor`, {
+      method: 'PUT',
+      body: 'x',
+      headers: { authorization: 'Bearer a.b.c' },
+    }),
+    fake_env(),
+  );
+  assert.equal(forged.status, 401);
 });
 
 test('unknown host and non-GET methods are refused', async () => {

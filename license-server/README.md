@@ -26,6 +26,7 @@ The same Worker serves the private R2 bucket at the download hostname:
 
 | Path | Access | Cache |
 |---|---|---|
+| `/` | public | landing page, 5 min — lists both lines from the manifests |
 | `/mit/<version>/<file>` | public | `public, immutable` — repeat downloads never reach R2 |
 | `/enterprise/<version>/<file>` | `X-Talus-License: <key>` | `private, no-store` |
 
@@ -46,9 +47,9 @@ R2 free tier: **10 GB storage, 1M Class A, 10M Class B per month**.
 - Enterprise is deliberately uncached: one Class B per download.
 - Uploads are the only Class A operations; the read path never lists the
   bucket.
-- `scripts/r2-publish.sh` keeps **two versions per line** and refuses to
-  publish if recorded storage would exceed **8 GiB**, leaving 2 GiB headroom.
-  The Enterprise binary is ~25 MB, so the cap is many releases away.
+- Publishing keeps **two versions per line** and the Worker refuses to
+  finalize a manifest above **8 GiB**, leaving 2 GiB headroom. The Enterprise
+  binary is ~25 MB, so the cap is many releases away.
 - The Worker's own free allowance (100k requests/day) is the real ceiling for
   very high download volume, not R2.
 
@@ -59,10 +60,23 @@ R2 free tier: **10 GB storage, 1M Class A, 10M Class B per month**.
 npx wrangler r2 bucket create talus-downloads
 # 2. Deploy the Worker with the download route + R2 binding
 npx wrangler deploy
-# 3. Publish artifacts
-scripts/r2-publish.sh mit 0.8.4 ../../target/release/talus-monitor
-scripts/r2-publish.sh enterprise 0.8.4 ./talus-monitor-enterprise
 ```
+
+### Release publishing (automatic)
+
+Both release workflows publish at the end of a tag build. The Worker exposes
+`PUT /publish/<line>/<version>/<file>` and `POST /publish/<line>/<version>/finalize`,
+but only accepts a GitHub Actions OIDC token whose audience is `talus-downloads`,
+whose `repository` is one of the two Talus repositories, and whose `ref` is the
+matching `refs/tags/v<version>`. No Cloudflare API token or R2 key is stored in
+GitHub.
+
+After uploading the files, the workflow finalizes the manifest. That is also
+when retention runs: the version that falls out of the two-version window is
+deleted from R2 and the landing page cache is purged.
+
+`scripts/r2-publish.sh` remains as a manual fallback (for example, when
+restoring an old release), using the same manifest format.
 
 Smoke test:
 

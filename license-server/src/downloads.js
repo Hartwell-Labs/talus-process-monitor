@@ -3,6 +3,7 @@
 // Served on the custom domain download.hartwell-labs.pl by the same Worker as
 // the license API, so both lines share one deployment and one secret store.
 //
+//   GET /                              landing page with both lines
 //   GET /mit/<version>/<file>          public, cacheable, no license
 //   GET /enterprise/<version>/<file>   requires X-Talus-License
 //
@@ -29,6 +30,19 @@ const MAX_KEY_LEN = 256;
 // 8 GiB, leaving 2 GiB of 10 GiB headroom for manifests and in-flight uploads.
 const MAX_STORAGE_BYTES = 8 * 1024 * 1024 * 1024;
 
+// ── Release publishing (GitHub Actions OIDC) ──────────────────────────────
+// Uploads are authenticated by the workflow's short-lived OIDC token, not by
+// a Cloudflare API token stored in GitHub. That keeps R2 write credentials out
+// of every repository and lets the release workflow publish as itself.
+const PUBLISH_AUDIENCE = 'talus-downloads';
+const PUBLISH_REPOS = new Set([
+  'Hartwell-Labs/talus-process-monitor',
+  'Hartwell-Labs/talus-enterprise',
+]);
+const OIDC_JWKS_URL = 'https://token.actions.githubusercontent.com/.well-known/jwks';
+const MAX_ARTIFACT_BYTES = 100 * 1024 * 1024; // Workers request body ceiling
+const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+$/;
+
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -42,6 +56,126 @@ function json(body, status = 200) {
 
 function not_found() {
   return json({ success: false, message: 'not found' }, 404);
+}
+
+async function read_manifest(env, line) {
+  const object = await env.DOWNLOADS.get(`${line}/index.json`);
+  if (!object) return null;
+  try {
+    return JSON.parse(await object.text());
+  } catch {
+    return null;
+  }
+}
+
+function escape_html(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function latest_version(manifest) {
+  const versions = manifest?.versions || [];
+  return versions.length ? versions[versions.length - 1] : null;
+}
+
+function file_rows(line, entry) {
+  if (!entry?.files?.length) return '<p class="empty">No artifacts published yet.</p>';
+  return `<ul>${entry.files
+    .map((file) => {
+      const name = escape_html(file.name);
+      const mb = (file.size / 1024 / 1024).toFixed(1);
+      if (line === 'mit') {
+        return `<li><a href="/mit/${encodeURIComponent(entry.version)}/${encodeURIComponent(
+          file.name,
+        )}">${name}</a> <span>${mb} MB</span></li>`;
+      }
+      return `<li><span class="file">${name}</span> <span>${mb} MB</span></li>`;
+    })
+    .join('')}</ul>`;
+}
+
+async function landing_page(env, ctx) {
+  const [mit, enterprise] = await Promise.all([
+    read_manifest(env, 'mit'),
+    read_manifest(env, 'enterprise'),
+  ]);
+  const mit_latest = latest_version(mit);
+  const enterprise_latest = latest_version(enterprise);
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Talus downloads — MIT and Enterprise</title>
+<style>
+  :root { color-scheme: light dark; --bg:#0b1120; --card:#111c33; --text:#e6edf7; --dim:#94a3b8; --line:#1e2d4a; --accent:#7dd3fc; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 72px; }
+  h1 { font-size: 30px; letter-spacing:-.02em; margin:0 0 6px; }
+  p.lead { color:var(--dim); margin:0 0 32px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 22px 18px; margin:0 0 18px; }
+  h2 { font-size:19px; margin:0 0 4px; }
+  .tag { display:inline-block; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); margin-bottom:8px; }
+  ul { margin:12px 0 0; padding-left:18px; }
+  li { margin:6px 0; }
+  li span { color:var(--dim); font-size:13px; margin-left:8px; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  code, pre { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; }
+  pre { background:#08101f; border:1px solid var(--line); border-radius:10px; padding:12px 14px; overflow:auto; }
+  .empty { color:var(--dim); }
+  footer { color:var(--dim); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Talus downloads</h1>
+  <p class="lead">Two lines, one private bucket. MIT is public; Enterprise requires a live license.</p>
+
+  <section>
+    <span class="tag">Line 1 — MIT</span>
+    <h2>Community edition${mit_latest ? ` · v${escape_html(mit_latest.version)}` : ''}</h2>
+    <p class="empty">Public, immutable artifacts. Cached at the edge, so repeat downloads do not hit storage.</p>
+    ${file_rows('mit', mit_latest)}
+  </section>
+
+  <section>
+    <span class="tag">Line 2 — Enterprise</span>
+    <h2>Licensed edition${enterprise_latest ? ` · v${escape_html(enterprise_latest.version)}` : ''}</h2>
+    <p class="empty">Send your license in the <code>X-Talus-License</code> header. The key must exist in the license database, be unrevoked, unexpired and <code>tier = enterprise</code>.</p>
+    ${file_rows('enterprise', enterprise_latest)}
+    <pre>curl -fLO -H "X-Talus-License: $TALUS_LICENSE" \\
+  https://download.hartwell-labs.pl/enterprise/${
+    enterprise_latest ? encodeURIComponent(enterprise_latest.version) : '0.8.4'
+  }/talus-monitor-enterprise</pre>
+  </section>
+
+  <footer>
+    Talus is built by Hartwell Labs. MIT detection core ·
+    <a href="https://wiki.hartwell-labs.pl/projects/talus-process-monitor/">documentation</a> ·
+    <a href="https://github.com/Hartwell-Labs/talus-process-monitor">source</a>
+  </footer>
+</main>
+</body>
+</html>`;
+
+  const response = new Response(html, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'public, max-age=300',
+      'x-content-type-options': 'nosniff',
+    },
+  });
+  if (ctx?.waitUntil && typeof caches !== 'undefined') {
+    ctx.waitUntil(caches.default.put(new Request('https://download.hartwell-labs.pl/'), response.clone()));
+  }
+  return response;
 }
 
 /// Object keys are version/file paths. Reject anything that could escape the
@@ -172,9 +306,6 @@ function range_for(request) {
 }
 
 export async function handle_download_request(request, env, ctx) {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return json({ success: false, message: 'method not allowed' }, 405);
-  }
   if (!env.DOWNLOADS) {
     return json({ success: false, message: 'server misconfigured: missing DOWNLOADS' }, 500);
   }
@@ -184,6 +315,18 @@ export async function handle_download_request(request, env, ctx) {
   // opt in explicitly. Production never sets this variable.
   const host_ok = url.hostname === DOWNLOAD_HOST || env.DOWNLOAD_DEV_ALLOW_ANY === '1';
   if (!host_ok) return not_found();
+
+  if (url.pathname.startsWith('/publish/')) {
+    return handle_publish(request, env, url);
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return json({ success: false, message: 'method not allowed' }, 405);
+  }
+
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    return landing_page(env, ctx);
+  }
 
   const parts = url.pathname.split('/').filter(Boolean);
   if (parts.length < 2) return not_found();
@@ -257,6 +400,195 @@ export async function handle_download_request(request, env, ctx) {
     ctx.waitUntil(cache.put(request, response.clone()));
   }
   return response;
+}
+
+// ── Release publishing ────────────────────────────────────────────────────
+
+function base64url_decode(s) {
+  let b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4 !== 0) b64 += '=';
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+let jwks_cache = { at: 0, keys: null };
+
+async function github_jwks() {
+  if (jwks_cache.keys && Date.now() - jwks_cache.at < 60 * 60 * 1000) return jwks_cache.keys;
+  const res = await fetch(OIDC_JWKS_URL);
+  if (!res.ok) throw new Error(`jwks ${res.status}`);
+  const body = await res.json();
+  jwks_cache = { at: Date.now(), keys: body.keys || [] };
+  return jwks_cache.keys;
+}
+
+/// Verifies a GitHub Actions OIDC token and returns the claims, or null.
+/// The repository, tag ref and audience checks below are the actual
+/// authorization: a token from any other repo or branch cannot publish.
+async function github_oidc_claims(request, version) {
+  const auth = request.headers.get('authorization') || '';
+  const match = /^Bearer\s+(.+)$/i.exec(auth);
+  if (!match) return null;
+  const parts = match[1].split('.');
+  if (parts.length !== 3) return null;
+
+  let header;
+  let payload;
+  try {
+    header = JSON.parse(new TextDecoder().decode(base64url_decode(parts[0])));
+    payload = JSON.parse(new TextDecoder().decode(base64url_decode(parts[1])));
+  } catch {
+    return null;
+  }
+  if (header.alg !== 'RS256' || !header.kid) return null;
+
+  let jwk;
+  try {
+    jwk = (await github_jwks()).find((k) => k.kid === header.kid);
+  } catch {
+    return null;
+  }
+  if (!jwk) return null;
+
+  let ok = false;
+  try {
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    );
+    ok = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      key,
+      base64url_decode(parts[2]),
+      new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+    );
+  } catch {
+    return null;
+  }
+  if (!ok) return null;
+
+  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!aud.includes(PUBLISH_AUDIENCE)) return null;
+  if (!PUBLISH_REPOS.has(payload.repository)) return null;
+  if (payload.event_name !== 'release' && payload.event_name !== 'push') return null;
+  // Only a tag matching the version being published may write that version.
+  if (payload.ref !== `refs/tags/v${version}`) return null;
+  if (typeof payload.exp !== 'number' || payload.exp * 1000 <= Date.now()) return null;
+
+  return payload;
+}
+
+async function handle_publish(request, env, url) {
+  // /publish/<line>/<version>/<file>   PUT one artifact
+  // /publish/<line>/<version>/finalize POST publish the manifest
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts.length < 4 || parts[0] !== 'publish') return not_found();
+
+  const line = parts[1];
+  const version = parts[2];
+  const rest = parts.slice(3).join('/');
+  if (!ALLOWED_LINES.has(line) || !VERSION_RE.test(version)) return not_found();
+
+  const claims = await github_oidc_claims(request, version);
+  if (!claims) return json({ success: false, message: 'unauthorized publisher' }, 401);
+
+  if (rest === 'finalize') {
+    if (request.method !== 'POST') return json({ success: false, message: 'method not allowed' }, 405);
+    return finalize_release(env, line, version, request);
+  }
+
+  if (request.method !== 'PUT') return json({ success: false, message: 'method not allowed' }, 405);
+  if (!safe_key(rest) || rest.includes('/')) return not_found();
+
+  const declared = Number(request.headers.get('content-length') || 0);
+  if (!request.body) return json({ success: false, message: 'empty body' }, 400);
+  if (declared > MAX_ARTIFACT_BYTES) {
+    return json({ success: false, message: 'artifact too large' }, 413);
+  }
+
+  try {
+    await env.DOWNLOADS.put(`${line}/${version}/${rest}`, request.body, {
+      httpMetadata: { contentType: 'application/octet-stream' },
+      customMetadata: { repository: claims.repository, release: `v${version}` },
+    });
+  } catch (err) {
+    return json({ success: false, message: `storage write failed: ${err.message}` }, 503);
+  }
+
+  return json({ success: true, line, version, file: rest });
+}
+
+async function finalize_release(env, line, version, request) {
+  let body;
+  try {
+    body = await request_json_limited(request);
+  } catch {
+    return json({ success: false, message: 'invalid finalize payload' }, 400);
+  }
+
+  const names = Array.isArray(body?.files) ? body.files : [];
+  if (!names.length || names.length > 32) {
+    return json({ success: false, message: 'files[] required' }, 400);
+  }
+
+  const files = [];
+  for (const item of names) {
+    const name = typeof item === 'string' ? item : item?.name;
+    if (typeof name !== 'string' || !safe_key(name) || name.includes('/')) {
+      return json({ success: false, message: 'invalid file name' }, 400);
+    }
+    const object = await env.DOWNLOADS.head(`${line}/${version}/${name}`);
+    if (!object) return json({ success: false, message: `missing upload: ${name}` }, 400);
+    const entry = { name, size: object.size };
+    const sha256 = typeof item?.sha256 === 'string' ? item.sha256 : '';
+    if (/^[0-9a-f]{64}$/.test(sha256)) entry.sha256 = sha256;
+    files.push(entry);
+  }
+
+  const manifest = (await read_manifest(env, line)) || { line, versions: [] };
+  const versions = (manifest.versions || []).filter((v) => v.version !== version);
+  versions.push({ version, published_at: new Date().toISOString(), files });
+
+  // Retention keeps storage inside the free tier (and bounds the landing page).
+  while (versions.length > 2) {
+    const pruned = versions.shift();
+    for (const file of pruned.files || []) {
+      await env.DOWNLOADS.delete(`${line}/${pruned.version}/${file.name}`);
+    }
+  }
+
+  const total = versions.reduce(
+    (n, v) => n + (v.files || []).reduce((m, f) => m + (f.size || 0), 0),
+    0,
+  );
+  if (total > MAX_STORAGE_BYTES) {
+    return json({ success: false, message: 'storage budget exceeded' }, 507);
+  }
+
+  await env.DOWNLOADS.put(
+    `${line}/index.json`,
+    JSON.stringify({ line, versions }, null, 2),
+    { httpMetadata: { contentType: 'application/json' } },
+  );
+
+  // The landing page is edge-cached for a few minutes; drop it on publish so
+  // the new version is visible immediately.
+  if (typeof caches !== 'undefined') {
+    await caches.default.delete(new Request('https://download.hartwell-labs.pl/'));
+  }
+
+  return json({ success: true, line, version, versions: versions.map((v) => v.version) });
+}
+
+async function request_json_limited(request) {
+  const text = await request.text();
+  if (text.length > 16 * 1024) throw new Error('too large');
+  return JSON.parse(text);
 }
 
 // ── Minimal verification helpers ──────────────────────────────────────────
@@ -360,4 +692,11 @@ function sha256_hex_sync(bytes) {
 }
 
 // Exported for the local tests; not part of the Worker API.
-export const __test = { handle_download_request, authorize, safe_key, range_for, MAX_STORAGE_BYTES };
+export const __test = {
+  handle_download_request,
+  handle_publish,
+  authorize,
+  safe_key,
+  range_for,
+  MAX_STORAGE_BYTES,
+};
