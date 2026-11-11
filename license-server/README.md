@@ -20,6 +20,58 @@ with a D1 database on the **free tier (no credit card required)**.
 | `/api/v1/admin/activations` | POST | Bearer / session | List activations for a license |
 | `/api/v1/admin/free-seat` | POST | Bearer / session | Release one machine's seat |
 
+## Artifact downloads (`download.hartwell-labs.pl`)
+
+The same Worker serves the private R2 bucket at the download hostname:
+
+| Path | Access | Cache |
+|---|---|---|
+| `/mit/<version>/<file>` | public | `public, immutable` — repeat downloads never reach R2 |
+| `/enterprise/<version>/<file>` | `X-Talus-License: <key>` | `private, no-store` |
+
+Enterprise gating verifies the Ed25519 signature **and** requires a row in
+`licenses` that is not revoked or expired and has `tier = enterprise`. A signed
+key that was never issued, was refunded, or is community therefore cannot
+download the licensed binary. License keys travel in a header, never a URL.
+
+The bucket has **no public domain and no r2.dev URL**. The Worker owns the
+hostname, which is what makes the Enterprise line enforceable.
+
+### Free-tier budget
+
+R2 free tier: **10 GB storage, 1M Class A, 10M Class B per month**.
+
+- MIT objects are immutable and edge-cached: a repeat download is served from
+  Cloudflare's cache and costs **0 Class B** operations.
+- Enterprise is deliberately uncached: one Class B per download.
+- Uploads are the only Class A operations; the read path never lists the
+  bucket.
+- `scripts/r2-publish.sh` keeps **two versions per line** and refuses to
+  publish if recorded storage would exceed **8 GiB**, leaving 2 GiB headroom.
+  The Enterprise binary is ~25 MB, so the cap is many releases away.
+- The Worker's own free allowance (100k requests/day) is the real ceiling for
+  very high download volume, not R2.
+
+### One-time setup
+
+```bash
+# 1. Enable R2 once in the dashboard (free tier, no card), then:
+npx wrangler r2 bucket create talus-downloads
+# 2. Deploy the Worker with the download route + R2 binding
+npx wrangler deploy
+# 3. Publish artifacts
+scripts/r2-publish.sh mit 0.8.4 ../../target/release/talus-monitor
+scripts/r2-publish.sh enterprise 0.8.4 ./talus-monitor-enterprise
+```
+
+Smoke test:
+
+```bash
+curl -fI https://download.hartwell-labs.pl/mit/0.8.4/talus-monitor
+curl -fI -H "X-Talus-License: $TALUS_LICENSE" \
+  https://download.hartwell-labs.pl/enterprise/0.8.4/talus-monitor-enterprise
+```
+
 ## Client contract (from `process-monitor/src/license.rs`)
 
 ```json

@@ -18,6 +18,10 @@ compatibility_date = "2026-09-01"
 # to a third party as a stable integration endpoint.
 routes = [
   { pattern = "lic.hartwell-labs.pl", custom_domain = true },
+  # Artifact distribution. The Worker owns the hostname (not the bucket), so
+  # /enterprise/* can be gated while /mit/* is served from the same private
+  # bucket. The bucket itself has no public domain — that is the enforcement.
+  { pattern = "download.hartwell-labs.pl", custom_domain = true },
 ]
 
 # Kept on deliberately: admin-panel/server.mjs and the ops runbook default to
@@ -33,6 +37,21 @@ rules = [
 
 [observability]
 enabled = false
+
+# ── Artifact storage (R2) ─────────────────────────────────────────────────
+# Private bucket: no public bucket domain, no r2.dev URL. Every byte is served
+# by src/downloads.js on download.hartwell-labs.pl.
+#
+# Free-tier budget (10 GB storage, 1M Class A, 10M Class B per month):
+#   • MIT objects are served immutable and cached at the edge, so repeat
+#     downloads do not reach R2 (no Class B).
+#   • Enterprise objects are no-store: one Class B per download, by design.
+#   • Only uploads are Class A. Nothing on the read path lists the bucket.
+#   • Keep two versions per line (see scripts/r2-publish.sh) to stay far under
+#     10 GB: the Enterprise binary is ~25 MB.
+[[r2_buckets]]
+binding = "DOWNLOADS"
+bucket_name = "talus-downloads"
 
 # D1 binding REMOVED 2026-09-18: storage moved to shared Turso (libSQL) so
 # primary and failover serve the SAME state (true failover). The D1 database

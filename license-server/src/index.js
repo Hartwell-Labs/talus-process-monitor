@@ -76,6 +76,10 @@ import {
 // HTTP (shared storage for the failover deployment). Same surface either way.
 import { createDB } from './db.js';
 
+// Artifact distribution on download.hartwell-labs.pl, backed by the private
+// R2 bucket. MIT is cacheable and public; Enterprise requires a live license.
+import { handle_download_request } from './downloads.js';
+
 // Key-format codec: customers get short keys (TALUS-XXXXX-…) with the
 // signed JWT bound server-side; the server verifies signatures on the
 // canonical "payload.signature" form underneath.
@@ -234,7 +238,7 @@ const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 // ── Router ────────────────────────────────────────────────────────────────
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       // Attach the storage adapter once per request: native D1 if the binding
       // exists, otherwise a Turso-backed D1-compatible shim (failover mode).
@@ -247,6 +251,13 @@ export default {
 
       const url = new URL(request.url);
       const { pathname } = url;
+
+      // The download hostname shares this Worker (and its secrets) but has its
+      // own routing surface: public MIT artifacts and license-gated Enterprise
+      // artifacts. It must run before the JSON API's method guard.
+      if (url.hostname === 'download.hartwell-labs.pl') {
+        return handle_download_request(request, env, ctx);
+      }
 
       // Restrict methods per route family; everything else → 405.
       if (request.method !== 'GET' && request.method !== 'POST') {
