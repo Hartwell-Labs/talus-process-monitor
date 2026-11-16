@@ -236,6 +236,8 @@ jobs:
       contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
+      # The subjects must be supplied or the generator has nothing to attest.
+      base64-subjects: "${{ needs.build.outputs.hashes }}"
       # provenance-name, not base-name: SLSA v2 renamed it and does not declare
       # base-name at all. With compile and base-name both undeclared, GitHub
       # rejected every tagged run at startup without a message.
