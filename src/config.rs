@@ -16,7 +16,7 @@
 //! ```text
 //! # Written by `talus-config`
 //! background = navy
-//! alert_threshold = 50
+//! alert_threshold = 200
 //! ignore_comm = rsync, cc1plus
 //! ```
 //!

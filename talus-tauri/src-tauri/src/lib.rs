@@ -76,7 +76,7 @@ fn start_monitor(
     if auto_kill {
         args.push("--auto-kill".into());
     }
-    if threshold != 50 {
+    if threshold != 200 {
         args.push("--alert-threshold".into());
         args.push(threshold.to_string());
     }

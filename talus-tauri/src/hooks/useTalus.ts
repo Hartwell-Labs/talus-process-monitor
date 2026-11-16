@@ -29,7 +29,7 @@ const defaultStats: Stats = {
   total_lost: 0,
   uptime_secs: 0,
   active_pids: 0,
-  threshold: 50,
+  threshold: 200,
 };
 
 export function useTalus(baseUrl: string) {

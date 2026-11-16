@@ -53,12 +53,10 @@
 //! * Checkpoints are validated structurally on load (shapes, widths,
 //!   finiteness) — a corrupt or tampered file is rejected instead of
 //!   panicking inside the agent.
-//! * Ransomware-extension matching is case-insensitive (`.LOCKED`).
+//! * Ransomware-extension matching is case-insensitive (`.LOCKBIT3`).
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -134,207 +132,6 @@ pub struct PidFeatures {
     file_bits: [u64; 4],
 }
 
-/// File extensions treated as ransomware markers when a process opens many
-/// of them in a short window. Matching is case-insensitive.
-///
-/// Sources: CISA #StopRansomware advisories (2024–2026), MITRE ATT&CK,
-/// ransomware_behaviors.csv, and community lists (nextcloud, gotsponce gist).
-pub const RANSOMWARE_EXTS: &[&str] = &[
-    // ── Classic / legacy crypto-ransomware ───────────
-    "enc",
-    "crypt",
-    "cryptz",
-    "crypted",
-    "locked",
-    "encrypted",
-    "encryptedrsa",
-    "encripted",
-    "crypt1",
-    "crypt38",
-    "crypte",
-    "crypter",
-    "encrypt",
-    "onion",
-    "wncry",
-    "crypz",
-    "ryk",
-    // ── Locky / Cerber / Jigsaw family ────────────────
-    "locky",
-    "cerber",
-    "cerber2",
-    "cerber3",
-    "diablo6",
-    // ── REvil / Sodinokibi ────────────────────────────
-    "revil",
-    "sse",
-    "sodinokibi",
-    // ── LockBit family ────────────────────────────────
-    "lockbit",
-    "lockbit3",
-    "lockbitblack",
-    // ── Akira (CISA AA24-109A, updated Nov 2025) ──────
-    "akira",
-    "powerranges", // Akira Megazord (Rust encryptor, Aug 2023+)
-    "akiranew",    // Akira_v2 variant
-    "aki",         // Akira_v2 short form
-    // ── Hive (Linux, Golang) ──────────────────────────
-    "hive",
-    // ── Babuk (Linux, targets /vmfs/volumes) ─────────
-    "babuk",
-    // ── Clop (MOVEit/Linux) ──────────────────────────
-    "clop",
-    // ── ESXiArgs / BlackBasta (VM metadata) ──────────
-    "vmdk",
-    "vmsn",
-    "vmem",
-    "vmss",
-    "vmx",
-    "vmxf",
-    "vswp",
-    "nvram",
-    "vmtx",
-    // ── Checkmate ────────────────────────────────────
-    "checkmate",
-    // ── RansomEXX ────────────────────────────────────
-    "ransomexx",
-    // ── IceFire (Linux) ──────────────────────────────
-    "ifire",
-    // ── Gonnacry (Linux) ─────────────────────────────
-    "gonnacry",
-    // ── Erebus (Linux, web dirs) ─────────────────────
-    "erebus",
-    // ── Qilin (Linux/ESXi) ───────────────────────────
-    "qilin",
-    // ── BlackBasta (ESXi, VM-targeting) ──────────────
-    "blackbasta",
-    "basta",
-    // ── Lorenz ────────────────────────────────────────
-    "lorenz",
-    // ── Conti ────────────────────────────────────────
-    "conti",
-    "c0rtez",
-    // ── Maze ──────────────────────────────────────────
-    "maze",
-    // ── NetWalker ────────────────────────────────────
-    "netwalker",
-    // ── No-Koyawa ────────────────────────────────────
-    "nokoyawa",
-    // ── Royal ────────────────────────────────────────
-    "royal",
-    // ── Rhysida ──────────────────────────────────────
-    "rhysida",
-    // ── DarkSide / BlackMatter ───────────────────────
-    "darkside",
-    "blackmatter",
-    // ── HelloKitty ───────────────────────────────────
-    "hellokitty",
-    // ── Knight ransomware ──────────────────────────────
-    "knight_l",
-    // ── Interlock (CISA AA25-203A, Jul 2025) ──────────
-    "interlock",
-    "1nt3rlock",
-    // ── Gunra (CISA AA26-222A, Aug 2026) ──────────────
-    "encrt",
-    // ── Play (CISA AA23-352A, 2023+) ──────────────────
-    "play",
-    // ── Medusa (CISA AA25-071A, Mar 2025) ─────────────
-    "medusa",
-    // ── SafePay (CISA AA26-293A, Oct 2026) ────────────
-    // NOTE: 'safe' omitted — too generic, causes false positives.
-    // ── BTCWare ──────────────────────────────────────
-    "btcware",
-    "btc",
-    // ── Dharma / Scarlet ─────────────────────────────
-    "dharma",
-    // ── CryptoLocker legacy ───────────────────────────
-    "cryptolocker",
-    "keepcalm",
-    "wallet",
-    "restore",
-    // ── Misc behavioural markers (community lists) ───
-    "bleep",
-    "vault",
-    "devil",
-    "bitstak",
-    "silent",
-    "blocatto",
-    "crinf",
-    "damage",
-    "domino",
-    "evillock",
-    "exotic",
-    "fantom",
-    "comrade",
-    "firecrypt",
-    "madebyadam",
-    "fs0ciety",
-    "purge",
-    "lovewindows",
-    "crime",
-    "hush",
-    "killedxxx",
-    "mamai10",
-    // ── Old-school extensions ─────────────────────────
-    "zzz",
-    "odin",
-    "thor",
-    "shit",
-    "aesir",
-    "zzzzz",
-    "xtbl",
-    "ccc",
-    "vvv",
-    "r5a",
-    "rmd",
-    "lesli",
-    "rdmk",
-    "scl",
-    "locklock",
-    "loki",
-    "pizda",
-    "cryptowall",
-    "x3m",
-    "ransom",
-    // ── BlackCat / ALPHV / BlackSuit ─────────────────
-    "blackcat",
-    "alphv",
-    "blacksuit",
-    "hydra",
-    // ── BianLian (CISA AA23-136A) ────────────────────
-    "bianlian",
-    // ── Cactus ───────────────────────────────────────
-    "cactus",
-    // ── Chaos RaaS (Linux/ESXi/NAS, Feb 2025) ────────
-    "chaos",
-    // ── NightSpire (Mar 2025) ────────────────────────
-    "nspire",
-    // ── Avaddon / Egregor / Nefilim ──────────────────
-    "avaddon",
-    "avdn",
-    "egregor",
-    "nefilim",
-    "nephilim",
-    // ── Other families still seen in incidents ───────
-    "cont",
-    "makop",
-    "phobos",
-    "mallox",
-    "newbot",
-    "abyss",
-    "8base",
-    "trigona",
-    "cuba",
-    "ragnar",
-    "suncrypt",
-    "vice",
-    "blackbyte",
-    "quantum",
-    // ── Intentionally excluded (false positives) ─────
-    // `.zip`, `.tar`, `.gz` — legitimate archives
-    // `.bak` — legitimate backup files
-    // `.safe` — legitimate encrypted archive format (SafeWallet etc.)
-];
-
 /// Path fragments treated as autostart / persistence locations.
 pub const PERSISTENCE_PATHS: &[&str] = &[
     "/etc/cron",
@@ -362,30 +159,15 @@ pub const PERSISTENCE_PATHS: &[&str] = &[
     "/.ssh/authorized_keys",
 ];
 
-/// O(1) membership for the always-on detector. The table is static and small,
-/// but it is consulted for every counted file open, so a linear scan over
-/// ~180 entries would show up in the hot path.
-static RANSOMWARE_EXT_SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
-
 /// Whether `ext` is a known ransomware marker (case-insensitive).
 ///
-/// The monitor lowercases extensions before calling this, so the common path
-/// is a hash lookup plus a binary search in the Externum marker artifact. The
-/// family-specific artifact is std-only and adds no new dependency.
+/// The Externum artifact (`knowledge.markers`) is the single source of truth:
+/// one family-specific list, one lookup. A second hard-coded table is how
+/// generic extensions (`.locked`, `.encrypted`, `.enc`, `.crypt`) and
+/// legitimate VMware disk suffixes (`.vmdk`, `.vmx`, ...) once crept back in
+/// after being removed from the database — each one a false positive on a
+/// normal backup or VM host. Family names only; ESXiArgs is caught by `.args`.
 pub(crate) fn is_ransomware_extension(ext: &str) -> bool {
-    if ext.is_empty() {
-        return false;
-    }
-    let set = RANSOMWARE_EXT_SET.get_or_init(|| RANSOMWARE_EXTS.iter().copied().collect());
-    if set.contains(ext) {
-        return true;
-    }
-    if ext.bytes().any(|b| b.is_ascii_uppercase()) {
-        let lower = ext.to_ascii_lowercase();
-        if set.contains(lower.as_str()) {
-            return true;
-        }
-    }
     crate::knowledge::is_ransomware_extension(ext)
 }
 
@@ -1684,7 +1466,7 @@ mod tests {
     fn pid_features_flags_ransomware_and_persistence_shapes() {
         let mut pf = PidFeatures::default();
         for i in 0..50 {
-            pf.observe_open(&format!("/home/u/docs/f{i}.locked"), Some("locked"), 0.9);
+            pf.observe_open(&format!("/home/u/docs/f{i}.lockbit"), Some("lockbit"), 0.9);
         }
         pf.observe_open("/etc/systemd/system/evil.service", Some("service"), 0.4);
         let f = pf.features();
@@ -1725,38 +1507,60 @@ mod tests {
     fn ransomware_extension_match_is_case_insensitive() {
         let mut pf = PidFeatures::default();
         for i in 0..10 {
-            pf.observe_open(&format!("/d/f{i}.LOCKED"), Some("LOCKED"), 0.5);
+            pf.observe_open(&format!("/d/f{i}.LOCKBIT3"), Some("LOCKBIT3"), 0.5);
         }
         assert!(pf.features()[3] > 0.9);
     }
 
     #[test]
     fn always_on_marker_lookup_is_case_insensitive_and_safe() {
-        assert!(is_ransomware_extension("locked"));
-        assert!(is_ransomware_extension("LOCKED"));
+        assert!(is_ransomware_extension("lockbit3"));
+        assert!(is_ransomware_extension("LOCKBIT3"));
         assert!(is_ransomware_extension("LockBit3"));
         assert!(!is_ransomware_extension("pdf"));
         assert!(!is_ransomware_extension(""));
     }
 
     #[test]
-    fn ransomware_extension_table_is_normalised_and_unique() {
-        let mut seen = std::collections::HashSet::new();
-        for ext in RANSOMWARE_EXTS {
-            assert!(!ext.is_empty(), "empty extension entry");
-            assert!(!ext.starts_with('.'), "extension must omit the dot: {ext}");
-            assert!(ext.is_ascii(), "non-ASCII extension: {ext}");
-            assert_eq!(
-                ext,
-                &ext.to_ascii_lowercase(),
-                "extension must be lowercase: {ext}"
-            );
-            assert!(seen.insert(*ext), "duplicate extension: {ext}");
+    fn generic_and_vm_extensions_are_not_markers() {
+        // Regression guard: these are ordinary filesystem/extensions on real
+        // hosts (encryption CLI output, backup formats, VMware disks), and a
+        // marker hit is evidence in the early-verdict path.
+        for ext in [
+            "locked",
+            "encrypted",
+            "enc",
+            "crypt",
+            "onion",
+            "wallet",
+            "restore",
+            "vault",
+            "vmdk",
+            "vmsn",
+            "vmem",
+            "vmss",
+            "vmx",
+            "vmxf",
+            "vswp",
+            "nvram",
+            "vmtx",
+        ] {
+            assert!(!is_ransomware_extension(ext), "{ext} must not be a marker");
         }
+        let mut pf = PidFeatures::default();
+        for i in 0..20 {
+            pf.observe_open(&format!("/vms/disk{i}.vmdk"), Some("vmdk"), 0.3);
+            pf.observe_open(&format!("/backup/f{i}.enc"), Some("enc"), 0.3);
+        }
+        assert_eq!(
+            pf.features()[3],
+            0.0,
+            "generic extensions must not inflate the marker fraction"
+        );
     }
 
     #[test]
-    fn recent_families_are_covered_by_the_extension_table() {
+    fn recent_families_are_covered_by_the_marker_artifact() {
         // Families added from the 2024–2026 CISA advisories and vendor
         // reports; losing one of these silently weakens feature 3.
         for ext in [
@@ -1773,7 +1577,7 @@ mod tests {
             "8base",
         ] {
             assert!(
-                RANSOMWARE_EXTS.contains(&ext),
+                is_ransomware_extension(ext),
                 "missing ransomware extension: {ext}"
             );
         }

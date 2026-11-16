@@ -20,7 +20,14 @@ use aya_ebpf::{
 };
 
 pub const EVENT_EXECVE: u8 = 0;
+/// An open that can modify the file (write/read-write/create/truncate).
 pub const EVENT_OPENAT: u8 = 1;
+/// A read-only open. Same payload as `EVENT_OPENAT`, but userspace records it
+/// without counting it as encryption evidence: a scan or indexer opens
+/// thousands of files for reading, an encryptor writes them. Older userspace
+/// builds map this type to `Kind::Unknown`, so the record format stays
+/// backward compatible.
+pub const EVENT_OPEN_READ: u8 = 11;
 pub const EVENT_FILENAME_LEN: usize = 64;
 pub const EVENT_COMM_LEN: usize = 16;
 pub const EVENT_ARGV_LEN: usize = 128;
@@ -48,21 +55,73 @@ pub fn sys_enter_execve(ctx: TracePointContext) -> u32 {
     emit_event(&ctx, EVENT_EXECVE, 0)
 }
 
+/// `open(2)` flag bits that mean the file may be modified.
+const O_WRITE_INTENT: i32 = 0o1 | 0o2 | 0o100 | 0o1000; // WRONLY|RDWR|CREAT|TRUNC
+/// `O_DIRECTORY` — pure directory traversal, never a file access.
+const O_DIRECTORY: i32 = 0o200000;
+/// `O_TMPFILE` is `__O_TMPFILE | O_DIRECTORY`, used for anonymous temp files.
+const O_TMPFILE: i32 = 0o20200000;
+
+/// Decide which event type an open should carry.
+///
+/// `None` means drop the event: directory traversal (`openat(fd, ".")`) says
+/// nothing about which files a process touches, and a directory walk emits
+/// millions of them. Unreadable flags fall back to the counted type so a
+/// kernel layout change can never hide a write.
+#[inline(always)]
+fn classify_open(flags: Option<i32>) -> Option<u8> {
+    let Some(f) = flags else {
+        return Some(EVENT_OPENAT);
+    };
+    if (f & O_TMPFILE) == O_TMPFILE {
+        // Anonymous temp file: no path to encrypt, but still a writer.
+        Some(EVENT_OPENAT)
+    } else if f & O_DIRECTORY != 0 {
+        None
+    } else if f & O_WRITE_INTENT != 0 {
+        Some(EVENT_OPENAT)
+    } else {
+        Some(EVENT_OPEN_READ)
+    }
+}
+
 #[tracepoint(name = "sys_enter_openat", category = "syscalls")]
 pub fn sys_enter_openat(ctx: TracePointContext) -> u32 {
-    emit_event(&ctx, EVENT_OPENAT, 1)
+    // Tracepoint args: dfd@16, filename@24, flags@32.
+    match classify_open(unsafe { ctx.read_at::<i32>(32).ok() }) {
+        Some(t) => emit_event(&ctx, t, 1),
+        None => 0,
+    }
 }
 
 /// Legacy `open` — direct-syscall malware sometimes avoids `openat`.
 #[tracepoint(name = "sys_enter_open", category = "syscalls")]
 pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
-    emit_event(&ctx, EVENT_OPENAT, 0)
+    // Tracepoint args: filename@16, flags@24.
+    match classify_open(unsafe { ctx.read_at::<i32>(24).ok() }) {
+        Some(t) => emit_event(&ctx, t, 0),
+        None => 0,
+    }
 }
 
 /// `openat2` — newer kernels and newer malware can use this variant.
+/// The flags live in the userspace `struct open_how` pointed to by arg 3.
 #[tracepoint(name = "sys_enter_openat2", category = "syscalls")]
 pub fn sys_enter_openat2(ctx: TracePointContext) -> u32 {
-    emit_event(&ctx, EVENT_OPENAT, 1)
+    let flags = unsafe { ctx.read_at::<*const u64>(32) }
+        .ok()
+        .and_then(|how| {
+            if how.is_null() {
+                return None;
+            }
+            unsafe { bpf_probe_read_user::<u64>(how) }
+                .ok()
+                .map(|f| (f as u32) as i32)
+        });
+    match classify_open(flags) {
+        Some(t) => emit_event(&ctx, t, 1),
+        None => 0,
+    }
 }
 
 /// eBPF-safe byte copy — avoids LLVM memcpy builtin.
@@ -160,7 +219,7 @@ fn emit_event(ctx: &TracePointContext, event_type: u8, filename_arg: u32) -> u32
     //
     // Filtered:  /proc  /sys  /dev  /run  /usr  /var  /etc/ld.so
     // Kept:      /home  /root  /opt  /tmp  /mnt  /srv  /etc/* (config)  /etc/ld.so.preload
-    if event_type == EVENT_OPENAT {
+    if event_type == EVENT_OPENAT || event_type == EVENT_OPEN_READ {
         let f = &event.filename;
         // Determine if this is kernel-introspection noise. Absolute prefixes
         // (/proc /sys /dev /run /usr /var /etc/ld.so.cache) and bare relative

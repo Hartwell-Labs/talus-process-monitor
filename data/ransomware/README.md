@@ -36,6 +36,9 @@ Commit the `.ext` source and all regenerated artifacts (`.json`, `.markers`,
 3. Regenerate both artifacts.
 4. Run `cargo test` and `cargo clippy --all-targets -- -D warnings`.
 
-Leave `extensions` empty when no stable family-specific marker is known. The
-generic marker table and behavioural scoring still apply; a guessed extension
-would create false positives.
+Leave `extensions` empty when no stable family-specific marker is known —
+Hunters and BadRabbit already lost `.locked` and `.encrypted` this way. This
+table is the only marker list the detector consults; behavioural scoring
+(burst rate, destructive activity, ransom notes) still applies, and a guessed
+or generic extension such as `.enc`, `.vmdk` or `.locked` only creates false
+positives on backups, encryption jobs and VM hosts.

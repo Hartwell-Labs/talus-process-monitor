@@ -670,9 +670,9 @@ F_DEVMAN: Any = {
 
 F_HUNTERS: Any = {
     "aliases": ["Hunters", "Hunters International"],
-    "description": "Group linked to former Hive affiliates; uses generic .locked markers, so family attribution is weak from extension alone.",
+    "description": "Group linked to former Hive affiliates; extension-only attribution is weak without additional evidence.",
     "double_extortion": True,
-    "extensions": ["locked"],
+    "extensions": [],
     "first_seen": 2023,
     "id": "hunters",
     "initial_access": ["VPN", "RDP", "valid accounts"],
@@ -1282,9 +1282,9 @@ F_NOTPETYA: Any = {
 
 F_BADRABBIT: Any = {
     "aliases": ["BadRabbit"],
-    "description": "Worm-like encryptor that spread through fake updates and network shares.",
+    "description": "Worm-like encryptor that spread through fake updates and network shares; uses a generic extension, so marker-only attribution is weak.",
     "double_extortion": False,
-    "extensions": ["encrypted"],
+    "extensions": [],
     "first_seen": 2017,
     "id": "badrabbit",
     "initial_access": ["fake Flash update", "credential theft", "SMB"],

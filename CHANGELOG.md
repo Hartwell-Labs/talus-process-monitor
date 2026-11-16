@@ -2,7 +2,7 @@
 
 All notable changes to talus-process-monitor will be documented in this file.
 
-## [Unreleased]
+## [0.8.6] - 2026-11-16
 
 ### Changed
 - A threshold burst is no longer a verdict on its own. A plain 200 writes/s

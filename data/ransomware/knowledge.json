@@ -271,9 +271,6 @@
     "encrt": [
       "gunra"
     ],
-    "encrypted": [
-      "badrabbit"
-    ],
     "erebus": [
       "erebus"
     ],
@@ -318,9 +315,6 @@
     ],
     "lockbitblack": [
       "lockbit"
-    ],
-    "locked": [
-      "hunters"
     ],
     "locky": [
       "locky"
@@ -1969,11 +1963,9 @@
         "Hunters",
         "Hunters International"
       ],
-      "description": "Group linked to former Hive affiliates; uses generic .locked markers, so family attribution is weak from extension alone.",
+      "description": "Group linked to former Hive affiliates; extension-only attribution is weak without additional evidence.",
       "double_extortion": true,
-      "extensions": [
-        "locked"
-      ],
+      "extensions": [],
       "first_seen": 2023,
       "id": "hunters",
       "initial_access": [
@@ -3305,11 +3297,9 @@
       "aliases": [
         "BadRabbit"
       ],
-      "description": "Worm-like encryptor that spread through fake updates and network shares.",
+      "description": "Worm-like encryptor that spread through fake updates and network shares; uses a generic extension, so marker-only attribution is weak.",
       "double_extortion": false,
-      "extensions": [
-        "encrypted"
-      ],
+      "extensions": [],
       "first_seen": 2017,
       "id": "badrabbit",
       "initial_access": [
@@ -3544,8 +3534,8 @@
     "Talus field observations and detection engineering notes"
   ],
   "stats": {
-    "extension_count": 82,
-    "families_with_extensions": 64,
+    "extension_count": 80,
+    "families_with_extensions": 62,
     "family_count": 76
   },
   "updated": "2026-11-16"

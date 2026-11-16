@@ -75,13 +75,25 @@
   <h1>Talus <span>changelog</span></h1>
   <p class="sub">Every release, honestly documented. The full technical detail lives in the <a style="color:var(--blue);text-decoration:none" href="https://github.com/BartoszOsiej/talus-process-monitor/blob/master/CHANGELOG.md">CHANGELOG.md</a> in the repository.</p>
 
+  <h2>0.8.6 — fewer false positives, stable license integrity</h2>
+  <div class="date">2026-11-16</div>
+  <div class="entry">
+    <h3>Verdicts now need evidence, not just rate <span class="badge">detection</span></h3>
+    <ul>
+      <li><b>Evidence-gated bursts:</b> a plain 200 writes/s window with no corroborating evidence (<span class="mono">score: 0</span>, empty reasons) is counted but no longer alerted — backups, archive extraction, installs and generators stop tripping false positives</li>
+      <li><b>Corroboration threshold:</b> a plain burst now needs a composite score of at least 35 (marker extension, ransom note plus spread, or destructive activity plus spread); early verdicts are unchanged</li>
+      <li><b>Per-PID cooldown:</b> repeat plain-burst verdicts from the same process are collapsed for 60 s, while early verdicts (score ≥ 65 with a marker or note) are never rate-limited</li>
+      <li><b>Stable license integrity:</b> the integrity snapshot hashes only <span class="mono">license.dat</span> (v2), is migrated once and refreshed on save/clear, so trial lifecycle rewrites no longer trigger spurious <span class="mono">CONFIG_TAMPERED</span></li>
+    </ul>
+  </div>
+
   <h2>0.8.5 — trained MeMLP and Externum knowledge</h2>
   <div class="date">2026-11-16</div>
   <div class="entry">
     <h3>Trained detection instead of a heuristic pre-fit <span class="badge">detection</span></h3>
     <ul>
       <li><b>Shipped MeMLP checkpoint:</b> 1,031 parameters trained on 48,040 family-labelled windows from seven ransomware families plus goodware; held-out AUC 0.9965, ransomware recall 90.3%, benign class-2 false positives 0.0%, and 11/11 behavioural anchors correct</li>
-      <li><b>Ransomware knowledge in Externum:</b> 76 families and 82 family-specific marker extensions; only the compact marker and ransom-note sets are embedded, using std-only binary search</li>
+      <li><b>Ransomware knowledge in Externum:</b> 76 families and 80 family-specific marker extensions; only the compact marker and ransom-note sets are embedded, using std-only binary search</li>
       <li><b>Persistent configurator:</b> <span class="mono">talus-config</span> / <span class="mono">talus config</span> saves monitor flags and TUI background, with command-line flags still winning for that run</li>
       <li><b>Wider eBPF coverage:</b> legacy <span class="mono">unlink</span>, <span class="mono">chmod</span>, <span class="mono">open</span>, <span class="mono">rename*</span>, <span class="mono">openat2</span> and <span class="mono">truncate</span>, so direct syscalls cannot bypass destructive/open detection</li>
       <li><b>Composite verdicts:</b> score, early-verdict flag and reasons are exposed in JSON, plain text and the TUI; alert-time MeMLP verdicts now run on every alert</li>
