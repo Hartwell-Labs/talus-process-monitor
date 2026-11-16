@@ -37,7 +37,7 @@
     {
       "@type": "Question",
       "name": "What threshold should I set for Talus alerts?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Talus alerts when a process opens N or more files within 1 second (default --alert-threshold 50). Keep 50 on typical web/API hosts, raise it above the observed rate of legitimate write-heavy jobs like backups (e.g. --alert-threshold 400), or lower it to 20 in paranoid mode for tiny document sets. Run monitor --benchmark 30 to measure what normal looks like on your host first." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Talus alerts when a process writes to N or more files within 1 second (default --alert-threshold 200); read-only opens never count, so scans and indexers cannot trip it. Keep 200 on typical web/API hosts, raise it above the observed rate of legitimate write-heavy jobs like backups (e.g. --alert-threshold 500), or lower it on quiet document servers where nothing bulk-writes (e.g. --alert-threshold 100). Run monitor --benchmark 30 to measure what normal looks like on your host first." }
     },
     {
       "@type": "Question",
@@ -118,11 +118,11 @@ sudo process-monitor monitor --diagnose</code></pre>
   <p>If <code>--diagnose</code> completes cleanly, the pipeline works end-to-end on your kernel. If it fails: check you are root (or CAP_BPF/CAP_SYS_ADMIN, as in the Docker example), and that BTF is available (<code>ls /sys/kernel/btf/vmlinux</code>).</p>
 
   <h2>3. Tuning the one knob that matters: the threshold</h2>
-  <p>Talus alerts when a process opens <b>N or more files within 1 second</b> (default <code>--alert-threshold 50</code>). That single number is your false-positive dial:</p>
+  <p>Talus treats a process that <b>writes to N or more files within 1 second</b> as a candidate (default <code>--alert-threshold 200</code>), but only alerts when independent evidence in the same window reaches a composite score of 35 — a ransomware-marker extension, a ransom note, or destructive activity plus spread. A plain burst with no evidence (backup, archive extraction, package install) is counted but not alerted, and repeats from one process are collapsed for 60 s. Only opens that can modify the file count — <code>O_WRONLY</code>, <code>O_RDWR</code>, <code>O_CREAT</code>, <code>O_TRUNC</code>, <code>O_TMPFILE</code>. A read-only scan, file indexer or antivirus sweep opens files but writes none, so it never reaches the window. The threshold is still your false-positive dial:</p>
   <ul>
-    <li><b>Backups, sync jobs, media encoding</b> — these legitimately touch hundreds of files per second. Run during a real backup window; if Talus flags the backup process, raise the threshold above the observed rate (e.g. <code>--alert-threshold 400</code>).</li>
-    <li><b>Typical web/API hosts</b> — the default 50 rarely fires on legitimate traffic. Keep it.</li>
-    <li><b>Paranoid mode</b> (tiny document sets, archives) — <code>--alert-threshold 20</code>. Expect noise; tune or accept.</li>
+    <li><b>Backups, sync jobs, media encoding</b> — these legitimately touch hundreds of files per second. Run during a real backup window; if Talus flags the backup process, raise the threshold above the observed rate (e.g. <code>--alert-threshold 500</code>) or add <code>--ignore-comm</code> for that job.</li>
+    <li><b>Typical web/API hosts</b> — the default 200 sits above normal request traffic and below an encryptor's rate. Keep it.</li>
+    <li><b>Paranoid mode</b> (quiet document servers where nothing bulk-writes) — <code>--alert-threshold 100</code>. Expect noise on hosts that compile or back up.</li>
   </ul>
   <pre><code># Measure what normal looks like on this host:
 sudo process-monitor monitor --benchmark 30      # throughput + hot processes
@@ -197,7 +197,7 @@ sudo process-monitor monitor --auto-kill \
   </details>
   <details>
     <summary>What threshold should I set for Talus alerts?</summary>
-    <p>Talus alerts when a process opens N or more files within 1 second (default <code>--alert-threshold 50</code>). Keep 50 on typical web/API hosts, raise it above the observed rate of legitimate write-heavy jobs like backups (e.g. <code>--alert-threshold 400</code>), or lower it to 20 in paranoid mode for tiny document sets. Run <code>monitor --benchmark 30</code> to measure what normal looks like on your host first.</p>
+    <p>Talus alerts when a process writes to N or more files within 1 second (default <code>--alert-threshold 200</code>); read-only opens never count. Keep 200 on typical web/API hosts, raise it above the observed rate of legitimate write-heavy jobs like backups (e.g. <code>--alert-threshold 500</code>), or lower it on quiet document servers where nothing bulk-writes (e.g. <code>--alert-threshold 100</code>). Run <code>monitor --benchmark 30</code> to measure what normal looks like on your host first.</p>
   </details>
   <details>
     <summary>What Linux kernels does Talus support?</summary>

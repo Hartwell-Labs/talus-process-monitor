@@ -491,6 +491,9 @@ impl LicenseCache {
             .context("failed to write license cache")?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
             .context("failed to set license file permissions")?;
+        // The license file just changed; refresh the snapshot now so the next
+        // start does not report a stale HMAC as tampering.
+        let _ = save_config_integrity();
         Ok(())
     }
 
@@ -504,6 +507,7 @@ impl LicenseCache {
             let trial_file = dir.join("talus").join(".trial.dat");
             let _ = fs::remove_file(trial_file);
         }
+        let _ = save_config_integrity();
         Ok(())
     }
 
@@ -1768,7 +1772,30 @@ fn config_integrity_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("talus").join(".integrity.hmac"))
 }
 
-/// Save HMAC of all config files for integrity checking.
+/// HMAC over the mutable-file-free part of the license state.
+///
+/// Deliberately hashes `license.dat` only; `.trial.dat` is excluded (see
+/// [`save_config_integrity`]).
+fn config_integrity_hmac(config_dir: &Path) -> String {
+    let mut files_hash = Vec::new();
+    if let Ok(data) = fs::read(config_dir.join("license.dat")) {
+        files_hash.extend_from_slice(sha256_hex(&data).as_bytes());
+    }
+    let key = derive_obfuscation_key();
+    sha256_hex(&[&key[..], &files_hash].concat())
+}
+
+/// Save the HMAC snapshot used to detect a tampered license cache.
+///
+/// Only `license.dat` is hashed. `.trial.dat` is deliberately excluded: it
+/// carries its own machine-bound checksum (`compute_trial_checksum`) and is
+/// created, refreshed and deleted by the trial lifecycle. Hashing it here made
+/// each trial start or expiry invalidate the snapshot, so the next startup
+/// logged `CONFIG_TAMPERED` and refused the license — a false positive that
+/// could never repair itself because the snapshot is only refreshed after a
+/// successful verification. The written value is prefixed with the format
+/// version so an old snapshot can be migrated once instead of read as
+/// tampering.
 pub fn save_config_integrity() -> Result<()> {
     let hmac_path = match config_integrity_path() {
         Some(p) => p,
@@ -1779,25 +1806,12 @@ pub fn save_config_integrity() -> Result<()> {
         None => return Ok(()),
     };
 
-    let mut files_hash = Vec::new();
-    // Hash license file
-    let license_path = config_dir.join("license.dat");
-    if let Ok(data) = fs::read(&license_path) {
-        files_hash.extend_from_slice(sha256_hex(&data).as_bytes());
-    }
-    // Hash trial file
-    let trial_path = config_dir.join(".trial.dat");
-    if let Ok(data) = fs::read(&trial_path) {
-        files_hash.extend_from_slice(sha256_hex(&data).as_bytes());
-    }
-
-    let key = derive_obfuscation_key();
-    let hmac = sha256_hex(&[&key[..], &files_hash].concat());
+    let hmac = config_integrity_hmac(&config_dir);
 
     if let Some(parent) = hmac_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(&hmac_path, &hmac);
+    let _ = fs::write(&hmac_path, format!("v2:{hmac}"));
     let _ = fs::set_permissions(&hmac_path, fs::Permissions::from_mode(0o600));
     Ok(())
 }
@@ -1811,25 +1825,21 @@ pub fn verify_config_integrity() -> Result<bool> {
     if !hmac_path.exists() {
         return Ok(true); // No integrity file = first run
     }
-    let stored_hmac = fs::read_to_string(&hmac_path).context("failed to read integrity file")?;
+    let stored = fs::read_to_string(&hmac_path).context("failed to read integrity file")?;
+    // A snapshot written before the format version hashed the mutable trial
+    // marker too, so it cannot be compared any more. Re-snapshot once and
+    // accept: a missing integrity file is already treated as a first run, so
+    // this does not widen the trust boundary. The signed license key and the
+    // trial checksum remain the authoritative checks.
+    let Some(stored_hmac) = stored.trim().strip_prefix("v2:") else {
+        let _ = save_config_integrity();
+        return Ok(true);
+    };
     let config_dir = dirs::config_dir()
         .context("cannot determine config directory")?
         .join("talus");
 
-    let mut files_hash = Vec::new();
-    let license_path = config_dir.join("license.dat");
-    if let Ok(data) = fs::read(&license_path) {
-        files_hash.extend_from_slice(sha256_hex(&data).as_bytes());
-    }
-    let trial_path = config_dir.join(".trial.dat");
-    if let Ok(data) = fs::read(&trial_path) {
-        files_hash.extend_from_slice(sha256_hex(&data).as_bytes());
-    }
-
-    let key = derive_obfuscation_key();
-    let expected = sha256_hex(&[&key[..], &files_hash].concat());
-
-    Ok(stored_hmac.trim() == expected)
+    Ok(stored_hmac == config_integrity_hmac(&config_dir))
 }
 
 /// Check if a 30-day trial is active.
@@ -2367,6 +2377,36 @@ mod tests {
     fn key_integrity_check() {
         // The real key should pass
         assert!(verify_key_integrity());
+    }
+
+    #[test]
+    fn integrity_snapshot_ignores_the_trial_file() {
+        // Regression: the trial lifecycle rewrites .trial.dat, so hashing it
+        // made the next startup report CONFIG_TAMPERED and refuse a valid
+        // license. Only license.dat may move the snapshot.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("talus-integrity-{stamp}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("license.dat"), b"license-v1").unwrap();
+        let base = config_integrity_hmac(&dir);
+
+        fs::write(dir.join(".trial.dat"), b"trial-record").unwrap();
+        assert_eq!(
+            base,
+            config_integrity_hmac(&dir),
+            "the mutable trial marker must not invalidate the snapshot"
+        );
+
+        fs::write(dir.join("license.dat"), b"license-v2").unwrap();
+        assert_ne!(
+            base,
+            config_integrity_hmac(&dir),
+            "a license edit must still change the snapshot"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

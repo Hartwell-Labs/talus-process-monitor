@@ -99,8 +99,13 @@ pub struct ProcessEvent {
 > perf buffering cheap — no allocation, no variable-length encoding in kernel
 > context.
 
-`event_type` distinguishes `execve` from `openat`; the userspace side maps it
-to the `Kind::{Exec, Open}` enum.
+`event_type` distinguishes `execve` from `openat`, and `openat` from a
+read-only open (type `11`, `EVENT_OPEN_READ`); the userspace side maps all of
+them to the `Kind::{Exec, Open}` enum. The kernel classifies an open from the
+syscall flags (`O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_TMPFILE` means the file can be
+modified) and drops directory traversal (`O_DIRECTORY`) outright. Read-only
+opens keep the same 85-byte payload, so an older userspace build that does not
+know type 11 still parses them.
 
 ### 2.3 Map
 
@@ -220,17 +225,32 @@ Signal handling (`install_signal_handler`) sets an atomic `QUIT` flag on
 
 The ransomware heuristic is deliberately simple and observable:
 
-> **For every PID, keep a 1-second sliding window of `openat` calls. If the
-> window contains ≥ N opens (default 50), emit an alert.**
+> **For every PID, keep a 1-second sliding window of opens that can modify
+> the file. A window with ≥ N writes (default 200) is a candidate; emit a
+> verdict only when independent evidence in that window scores ≥ 35.**
 
 Design decisions:
 
-- **Sliding window, not a rate counter** — a burst of 50 opens in 100 ms is
-  just as alarming as 50 opens spread over a full second, and the window
+- **Write intent, not raw syscalls** — a scan, indexer, archive reader or
+  antivirus sweep opens files `O_RDONLY` and can never encrypt them; only
+  `O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_TRUNC`/`O_TMPFILE` opens count. This is the
+  single largest source of false positives removed, and it costs no detection:
+  every encryptor has to write what it encrypts.
+- **Sliding window, not a rate counter** — a burst of 200 writes in 100 ms is
+  just as alarming as 200 writes spread over a full second, and the window
   captures both without hysteresis or smoothing artifacts.
-- **Per-process isolation** — `Cache2 I/O` hammering the Firefox cache does
-  not alert because of what the browser is doing; it alerts on its *own* rate
-  crossing the threshold.
+- **Evidence, not rate alone** — a threshold hit is a measurement. A plain
+  burst with `score: 0` (one directory, one extension, no deletes, no marker)
+  is what a backup, archive extraction or package install looks like, so it is
+  counted and shown but not alerted. Marker extensions (35–40), a ransom note
+  plus spread (35), or destructive activity plus spread (35) make it a verdict.
+- **Per-process isolation** — a browser's cache thread does not alert because
+  of what the browser is doing; it alerts on its *own* rate crossing the
+  threshold.
+- **Cooldown per process** — a long bulk write that pauses for a second starts
+  a fresh window; plain-burst verdicts for the same PID are collapsed for 60 s
+  so one job alerts once. Early verdicts (score ≥ 65 plus a marker or note)
+  are never rate-limited.
 - **Threshold `0` disables** the heuristic entirely for quiet deployments.
 - **Fixed 1 s window** keeps memory bounded: each tracked PID holds at most a
   handful of `Instant`s, and eviction is amortized O(1).
@@ -318,7 +338,7 @@ openat entry   ──► EVENTS map ──► perf buffer ──► Msg::Event �
 
 ### Change the alert heuristic
 
-- Threshold: CLI flag `--alert-threshold` (default 50).
+- Threshold: CLI flag `--alert-threshold` (default 200).
 - Window length: `WINDOW_SECS` in `monitor.rs`.
 - Trigger semantics: the exact `== threshold` comparison in `handle_event`.
 - Scope: `counts_toward_burst` in `monitor.rs` decides which paths enter the

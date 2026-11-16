@@ -217,8 +217,8 @@ pub struct MonitorArgs {
     #[arg(short, long, value_name = "PATH")]
     bpf: Option<PathBuf>,
 
-    /// Alert when a process opens N+ files within 1 second (0 disables alerts)
-    #[arg(long, default_value_t = 50, value_name = "N")]
+    /// Alert at N+ writes/s when evidence confirms (score >= 35; 0 disables alerts)
+    #[arg(long, default_value_t = 200, value_name = "N")]
     alert_threshold: u64,
 
     /// Newline-delimited JSON output (no TUI)
@@ -424,7 +424,7 @@ impl Default for MonitorArgs {
     fn default() -> Self {
         Self {
             bpf: None,
-            alert_threshold: 50,
+            alert_threshold: 200,
             json: false,
             plain: false,
             tui: false,

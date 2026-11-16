@@ -21,6 +21,12 @@ pub const EVENT_MKDIR: u8 = 6;
 pub const EVENT_UNLINK: u8 = 7;
 pub const EVENT_KILL: u8 = 8;
 pub const EVENT_CHMOD: u8 = 9;
+/// Read-only open (`O_RDONLY`, no create/truncate). The kernel marks it
+/// separately so a scan, indexer or antivirus sweep — which opens thousands
+/// of files per second but never modifies them — cannot be mistaken for mass
+/// encryption. Recorded for the live view and audit trail, never counted as
+/// burst, marker or note evidence.
+pub const EVENT_OPEN_READ: u8 = 11;
 
 const EVENT_COMM_LEN: usize = 16;
 const EVENT_FILENAME_LEN: usize = 64;
@@ -33,6 +39,22 @@ const WINDOW_SECS: u64 = 1;
 const EARLY_MIN_OPENS: u64 = 12;
 /// Minimum composite risk score (0–100) for an early verdict.
 const EARLY_SCORE: u8 = 65;
+/// Minimum composite risk score for a plain threshold burst to become a
+/// verdict. The threshold is a trigger, not evidence: without this gate a
+/// process that legitimately writes 200 files in one second (`tar -x`,
+/// `npm install`, a backup, a dataset generator) produced an alert with
+/// `score: 0` and `reasons: []` — the false-positive class that filled the
+/// field logs. 35 keeps a marker-extension burst (35–40), a ransom note plus
+/// any spread (35), or destructive activity plus spread (35), and drops the
+/// generic directory/extension spread a compiler or package install yields
+/// on its own.
+const BURST_MIN_SCORE: u8 = 35;
+/// Repeat plain-burst verdicts for the same PID are collapsed within this
+/// window. A long extraction that pauses for a second starts a fresh 1 s
+/// window and otherwise re-alerts on every burst. High-confidence `early`
+/// verdicts are exempt: they carry their own evidence and are never
+/// rate-limited.
+const ALERT_COOLDOWN_SECS: u64 = 60;
 /// A PID with no events for this long is forgotten (stats, window, parent link,
 /// behavioural features). It is re-created on its next event.
 const IDLE_PID_TTL_SECS: u64 = 600;
@@ -261,6 +283,7 @@ impl From<u8> for Kind {
             7 => Kind::Unlink,
             8 => Kind::Kill,
             9 => Kind::Chmod,
+            11 => Kind::Open,
             _ => Kind::Unknown,
         }
     }
@@ -298,8 +321,9 @@ pub struct Alert {
     /// True when the alert fired before the configured burst threshold because
     /// several independent behaviours agreed. Still a verdict, not a hint.
     pub early: bool,
-    /// Human-readable reasons behind [`Alert::score`]. Empty for a plain
-    /// burst that has no additional evidence (the old behaviour).
+    /// Human-readable reasons behind [`Alert::score`]. Never empty: a plain
+    /// threshold burst without independent evidence is counted but does not
+    /// become a verdict.
     pub reasons: Vec<&'static str>,
     /// MeMLP neural verdicts for this process (None when `--memlp` is off).
     pub memlp: Option<crate::memlp::Assessment>,
@@ -333,6 +357,10 @@ pub struct ProcStats {
     pub ext_bits: u64,
     /// At most one verdict per active window, so an early alert cannot spam.
     pub alerted: bool,
+    /// When this PID last raised a plain-burst verdict. Anchors the cooldown
+    /// that stops a long, legitimate bulk write from re-alerting every time
+    /// its 1 s window empties.
+    pub last_alert: Option<Instant>,
 }
 
 impl ProcStats {
@@ -1087,7 +1115,10 @@ impl Monitor {
                     bump_count_capped(&mut self.file_counts, filename, MAX_TRACKED_FILES);
                 }
 
-                let counts = counts_toward_burst(filename);
+                // Read-only opens are recorded and shown, but only opens that
+                // can modify the file feed the burst window and the risk
+                // signals. Ransomware writes; scanners and indexers read.
+                let counts = raw.event_type != EVENT_OPEN_READ && counts_toward_burst(filename);
                 if counts {
                     let now = Instant::now();
                     let (window_opens, restarted) = {
@@ -1141,15 +1172,25 @@ impl Monitor {
                     && !burst
                     && !stats.alerted
                     && stats.window_opens >= EARLY_MIN_OPENS
-                    && score >= EARLY_SCORE;
+                    && score >= EARLY_SCORE
+                    && (stats.marker_opens > 0 || stats.note_hits > 0);
+                // Hitting the threshold is a measurement, not a verdict. A
+                // plain burst has to be corroborated by independent evidence
+                // in the same window, and repeats for the same PID are
+                // collapsed so one legitimate bulk write alerts once.
+                let cooldown_ok = stats
+                    .last_alert
+                    .is_none_or(|t| t.elapsed().as_secs() >= ALERT_COOLDOWN_SECS);
+                let burst_verdict = burst && score >= BURST_MIN_SCORE && cooldown_ok;
                 let ignored = self
                     .ignore_comms
                     .iter()
                     .any(|ic| ic.as_bytes() == raw.comm_bytes());
 
-                if counts && !stats.alerted && (burst || early) && !ignored {
+                if counts && !stats.alerted && (burst_verdict || early) && !ignored {
                     stats.alerts += 1;
                     stats.alerted = true;
+                    stats.last_alert = Some(Instant::now());
                     self.tick_alerts += 1;
                     // ── MeMLP: verdict on every alert, throttled training ─
                     // The training counter is global. A per-PID counter would
@@ -1619,8 +1660,8 @@ fn risk_signals(stats: &ProcStats) -> [Option<(u8, &'static str)>; 7] {
     signals[2] = (stats.persistence_hits > 0).then_some((20, "write to persistence path"));
     signals[3] = (stats.network_events > 0).then_some((10, "network activity during file burst"));
     signals[4] =
-        (stats.dir_bits.count_ones() >= 3).then_some((10, "activity across multiple directories"));
-    signals[5] = (stats.ext_bits.count_ones() >= 5).then_some((10, "many file extensions touched"));
+        (stats.dir_bits.count_ones() >= 8).then_some((10, "activity across multiple directories"));
+    signals[5] = (stats.ext_bits.count_ones() >= 8).then_some((10, "many file extensions touched"));
     signals[6] = (stats.note_hits > 0).then_some((25, "distinctive ransom-note filename"));
     signals
 }
@@ -1913,7 +1954,7 @@ fn to_recorded(raw: &ProcessEvent) -> RecordedEvent {
             argv: argv_opt,
             bytes: None,
         },
-        EVENT_OPENAT => {
+        EVENT_OPENAT | EVENT_OPEN_READ => {
             let filename = raw.filename_str();
             let ext = extract_extension(&filename);
             RecordedEvent {
@@ -2142,6 +2183,10 @@ mod tests {
         make_event(EVENT_OPENAT, pid, uid, "probe", file)
     }
 
+    fn open_read(pid: u32, uid: u32, file: &str) -> ProcessEvent {
+        make_event(EVENT_OPEN_READ, pid, uid, "probe", file)
+    }
+
     #[test]
     fn cstr_to_string_stops_at_nul() {
         let mut buf = [b'a'; EVENT_FILENAME_LEN];
@@ -2214,7 +2259,7 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(&open(42, 1000, "/tmp/x"), &mut outputs);
+            monitor.handle_event(&open(42, 1000, "/tmp/x.lockbit"), &mut outputs);
         }
         monitor.drain_display_events(&mut outputs);
         let alerts: Vec<_> = outputs
@@ -2225,6 +2270,10 @@ mod tests {
         if let Output::Alert(a) = &outputs[0] {
             assert_eq!(a.pid, 42);
             assert_eq!(a.opens, 3);
+            assert!(
+                a.score >= BURST_MIN_SCORE,
+                "a threshold verdict carries evidence"
+            );
         } else {
             panic!("first output must be the alert");
         }
@@ -2241,7 +2290,7 @@ mod tests {
 
         for pid in [101, 102] {
             for _ in 0..3 {
-                monitor.handle_event(&open(pid, 1000, "/tmp/report.txt"), &mut outputs);
+                monitor.handle_event(&open(pid, 1000, "/tmp/report.lockbit"), &mut outputs);
             }
         }
         let alerts: Vec<_> = outputs
@@ -2267,7 +2316,7 @@ mod tests {
         // on none of them; the global counter trains on the 1st and 11th.
         for pid in 200..211 {
             for _ in 0..3 {
-                monitor.handle_event(&open(pid, 1000, "/tmp/report.txt"), &mut outputs);
+                monitor.handle_event(&open(pid, 1000, "/tmp/report.lockbit"), &mut outputs);
             }
         }
         let (samples, _) = monitor.memlp_stats().unwrap();
@@ -2325,11 +2374,11 @@ mod tests {
         monitor.threshold = 50;
         let mut outputs = Vec::new();
 
-        // Five encrypted-looking files are deleted, then the process keeps
+        // Five ransomware-marked files are deleted, then the process keeps
         // opening marker-extension files. At 12 opens the marker burst and the
         // destructive burst agree, so the composite verdict fires early.
         for i in 0..5 {
-            monitor.handle_event(&open(7, 0, &format!("/tmp/doc{i}.locked")), &mut outputs);
+            monitor.handle_event(&open(7, 0, &format!("/tmp/doc{i}.lockbit")), &mut outputs);
         }
         for i in 0..5 {
             monitor.handle_event(
@@ -2338,13 +2387,13 @@ mod tests {
                     7,
                     0,
                     "encryptor",
-                    &format!("/tmp/doc{i}.locked"),
+                    &format!("/tmp/doc{i}.lockbit"),
                 ),
                 &mut outputs,
             );
         }
         for i in 5..12 {
-            monitor.handle_event(&open(7, 0, &format!("/tmp/doc{i}.locked")), &mut outputs);
+            monitor.handle_event(&open(7, 0, &format!("/tmp/doc{i}.lockbit")), &mut outputs);
         }
 
         let alerts: Vec<_> = outputs
@@ -2373,7 +2422,7 @@ mod tests {
         monitor.threshold = 50;
         let mut outputs = Vec::new();
         for i in 0..20 {
-            monitor.handle_event(&open(8, 0, &format!("/tmp/file{i}.locked")), &mut outputs);
+            monitor.handle_event(&open(8, 0, &format!("/tmp/file{i}.lockbit")), &mut outputs);
         }
         assert!(!outputs.iter().any(|o| matches!(o, Output::Alert(_))));
         assert_eq!(monitor.stats.get(&8).unwrap().window_opens, 20);
@@ -2381,24 +2430,86 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
-    fn plain_burst_still_alerts_at_the_threshold_without_extra_evidence() {
+    fn plain_burst_without_evidence_is_counted_but_does_not_alert() {
         let mut monitor = Monitor::dummy();
         monitor.threshold = 5;
         let mut outputs = Vec::new();
         for i in 0..5 {
             monitor.handle_event(&open(9, 0, &format!("/tmp/report{i}.pdf")), &mut outputs);
         }
-        let alert = outputs
-            .iter()
-            .find_map(|o| match o {
-                Output::Alert(a) => Some(a),
-                _ => None,
-            })
-            .expect("burst alert");
-        assert!(!alert.early);
-        assert_eq!(alert.opens, 5);
-        assert_eq!(alert.score, 0);
-        assert!(alert.reasons.is_empty());
+        assert!(
+            !outputs.iter().any(|o| matches!(o, Output::Alert(_))),
+            "a threshold burst with score 0 is a legitimate bulk write, not a verdict"
+        );
+        let stats = monitor.stats.get(&9).unwrap();
+        assert_eq!(stats.window_opens, 5, "the window still counts the writes");
+        assert_eq!(stats.alerts, 0);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn generic_spread_evidence_alone_does_not_alert() {
+        let mut monitor = Monitor::dummy();
+        monitor.threshold = 64;
+        let mut outputs = Vec::new();
+        // 64 files across 8 directories and 8 extensions: a normal build or
+        // package install. Directory + extension spread is only 20 points.
+        for dir in 0..8 {
+            for ext in 0..8 {
+                monitor.handle_event(
+                    &open(21, 0, &format!("/tmp/d{dir}/file.{ext}")),
+                    &mut outputs,
+                );
+            }
+        }
+        let stats = monitor.stats.get(&21).unwrap();
+        assert_eq!(stats.window_opens, 64);
+        assert!(risk_score(stats) < BURST_MIN_SCORE);
+        assert!(
+            !outputs.iter().any(|o| matches!(o, Output::Alert(_))),
+            "generic spread below the evidence bar must not alert"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn repeat_burst_within_cooldown_does_not_alert_again() {
+        let mut monitor = Monitor::dummy(); // threshold = 3
+        let mut outputs = Vec::new();
+        let burst = |monitor: &mut Monitor, tag: &str, outputs: &mut Vec<Output>| {
+            for _ in 0..3 {
+                monitor.handle_event(&open(50, 0, &format!("/data/{tag}.lockbit")), outputs);
+            }
+        };
+        let alert_count = |outputs: &[Output]| {
+            outputs
+                .iter()
+                .filter(|o| matches!(o, Output::Alert(_)))
+                .count()
+        };
+        burst(&mut monitor, "a", &mut outputs);
+        assert_eq!(alert_count(&outputs), 1);
+
+        // Let the 1 s window empty: the next writes start a fresh window, but
+        // the cooldown must still collapse the repeat.
+        if let Some(window) = monitor.windows.get_mut(&50) {
+            for ts in window.iter_mut() {
+                *ts -= Duration::from_secs(2);
+            }
+        }
+        burst(&mut monitor, "b", &mut outputs);
+        assert_eq!(alert_count(&outputs), 1, "cooldown collapsed the repeat");
+
+        // Once the cooldown expires, the same process can alert again.
+        monitor.stats.get_mut(&50).unwrap().last_alert =
+            Some(Instant::now() - Duration::from_secs(ALERT_COOLDOWN_SECS + 1));
+        if let Some(window) = monitor.windows.get_mut(&50) {
+            for ts in window.iter_mut() {
+                *ts -= Duration::from_secs(2);
+            }
+        }
+        burst(&mut monitor, "c", &mut outputs);
+        assert_eq!(alert_count(&outputs), 2, "cooldown expires");
     }
 
     #[test]
@@ -2419,7 +2530,7 @@ mod tests {
         let diverse = ProcStats {
             window_opens: 12,
             marker_opens: 4,
-            ext_bits: 0b1_1111,
+            ext_bits: 0xff_u64,
             ..Default::default()
         };
         assert!(risk_score(&diverse) > risk_score(&weak));
@@ -2485,9 +2596,52 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(&open(31, 0, "/dev/shm/stage.enc"), &mut outputs);
+            monitor.handle_event(&open(31, 0, "/dev/shm/stage.lockbit"), &mut outputs);
         }
         assert!(outputs.iter().any(|o| matches!(o, Output::Alert(_))));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn read_only_opens_never_trip_the_burst_threshold() {
+        let mut monitor = Monitor::dummy(); // threshold = 3
+        let mut outputs = Vec::new();
+        for i in 0..200 {
+            monitor.handle_event(
+                &open_read(32, 0, &format!("/home/u/file{i}.pdf")),
+                &mut outputs,
+            );
+        }
+        assert!(
+            !outputs.iter().any(|o| matches!(o, Output::Alert(_))),
+            "a read-only scan must not alert"
+        );
+        let stats = monitor.stats.get(&32).unwrap();
+        assert_eq!(stats.total_opens, 200, "reads stay visible in the totals");
+        assert_eq!(stats.window_opens, 0, "reads never enter the burst window");
+        assert_eq!(stats.alerts, 0);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn read_only_marker_open_is_not_evidence() {
+        let mut monitor = Monitor::dummy();
+        let mut outputs = Vec::new();
+        for _ in 0..12 {
+            monitor.handle_event(&open_read(33, 0, "/data/report.lockbit"), &mut outputs);
+        }
+        monitor.handle_event(
+            &open_read(33, 0, "/data/Restore-My-Files.txt"),
+            &mut outputs,
+        );
+        let stats = monitor.stats.get(&33).unwrap();
+        assert_eq!(
+            stats.marker_opens, 0,
+            "reading a marker file is not a marker write"
+        );
+        assert_eq!(stats.note_hits, 0, "reading a note is not note creation");
+        assert_eq!(stats.window_opens, 0);
+        assert_eq!(stats.alerts, 0);
     }
 
     #[test]
@@ -2496,7 +2650,7 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..5 {
-            monitor.handle_event(&open(42, 1000, "/tmp/x"), &mut outputs);
+            monitor.handle_event(&open(42, 1000, "/tmp/x.lockbit"), &mut outputs);
         }
         let alerts = outputs
             .iter()
@@ -2802,7 +2956,7 @@ mod tests {
         monitor.auto_kill = true;
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(&open(99, 1000, "/tmp/evil"), &mut outputs);
+            monitor.handle_event(&open(99, 1000, "/tmp/evil.lockbit"), &mut outputs);
         }
         monitor.drain_display_events(&mut outputs);
         let actions: Vec<_> = outputs
@@ -2827,7 +2981,7 @@ mod tests {
         monitor.auto_kill = true;
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(&open(4242, 1000, "/tmp/evil"), &mut outputs);
+            monitor.handle_event(&open(4242, 1000, "/tmp/evil.lockbit"), &mut outputs);
         }
         match outputs.iter().find_map(|o| match o {
             Output::Action(a) => Some(a),
@@ -2868,7 +3022,7 @@ mod tests {
         monitor.auto_kill = true;
         let mut outputs = Vec::new();
         for _ in 0..3 {
-            monitor.handle_event(&open(77, 1000, "/tmp/evil"), &mut outputs);
+            monitor.handle_event(&open(77, 1000, "/tmp/evil.lockbit"), &mut outputs);
         }
         assert_eq!(hits.load(Ordering::SeqCst), 1, "responder called once");
         let action = outputs
@@ -3079,7 +3233,7 @@ mod tests {
         let mut monitor = Monitor::dummy(); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..4 {
-            monitor.handle_event(&open(20, 0, "/a.txt"), &mut outputs);
+            monitor.handle_event(&open(20, 0, "/a.lockbit"), &mut outputs);
             let exec = make_event(EVENT_EXECVE, 20, 0, "probe", "");
             monitor.handle_event(&exec, &mut outputs);
         }
@@ -3121,13 +3275,13 @@ mod tests {
         let mut monitor = Monitor::dummy().with_ignored_comms(["probe"]); // threshold = 3
         let mut outputs = Vec::new();
         for _ in 0..10 {
-            monitor.handle_event(&open(5, 0, "/tmp/x"), &mut outputs);
+            monitor.handle_event(&open(5, 0, "/tmp/x.lockbit"), &mut outputs);
         }
         assert!(!outputs.iter().any(|o| matches!(o, Output::Alert(_))));
         assert_eq!(monitor.stats.get(&5).unwrap().total_opens, 10);
         assert_eq!(monitor.stats.get(&5).unwrap().alerts, 0);
         // A different process name is unaffected.
-        let other = make_event(EVENT_OPENAT, 6, 0, "evil", "/tmp/y");
+        let other = make_event(EVENT_OPENAT, 6, 0, "evil", "/tmp/y.lockbit");
         for _ in 0..3 {
             monitor.handle_event(&other, &mut outputs);
         }

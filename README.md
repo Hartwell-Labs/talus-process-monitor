@@ -338,11 +338,27 @@ This runs in the kernel with **zero userspace round-trips** — addresses are re
 
 ### Detection: sliding-window heuristic
 
-Each PID maintains a **1-second rolling window** of `openat` events. When the count hits the threshold (default: 50 opens/s), a verdict fires:
+Each PID maintains a **1-second rolling window** of opens that can modify the
+file (`O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_TRUNC`, `O_TMPFILE`). Hitting the
+threshold (default: 200 writes/s) makes the process a *candidate*, not a
+verdict: the alert fires only when independent evidence in the same window
+reaches a composite score of 35 (see [Composite early verdict](#composite-early-verdict-always-on)).
+A plain threshold hit with no evidence — a backup, archive extraction, package
+install or dataset generator — is counted and shown but does not alert. Repeat
+bursts from the same PID inside 60 s are collapsed, so one long job alerts once:
 
 ```
-PID 2126 ("Cache2 I/O") opened 50 files in 1.0s  →  VERDICT: SUSPICIOUS
+PID 2126 ("encryptor") wrote 200 files in 1.0s, 160 with a ransomware marker  →  VERDICT: SUSPICIOUS
 ```
+
+Read-only opens (`O_RDONLY`, `O_PATH`) are traced, displayed and counted in the
+totals, but they never enter the window (the `opens` field of an alert is that
+write-only window count): a recursive scan, indexer, archive
+reader or antivirus sweep opens hundreds of thousands of files per second and
+modifies none of them, while an encryptor writes every file it touches. Opening
+a directory (`O_DIRECTORY`) is dropped in the kernel, because it identifies no
+file at all. The flags are read from the syscall arguments in the eBPF program —
+the intent is never guessed from a path.
 
 Opens under `/proc`, `/sys` and `/dev` do **not** count towards the burst window:
 they are kernel interfaces and device nodes, not data access, and daemons such
@@ -376,7 +392,9 @@ would not be alerted on.
 The open-rate window is the trigger, not the whole detector. Every active 1-second
 window also accumulates independent evidence:
 
-- known ransomware-marker extensions (`.locked`, `.enc`, `.akira`, …),
+- known ransomware-marker extensions (`.lockbit`, `.akira`, `.conti`, …),
+  family-specific only — generic suffixes such as `.locked`, `.enc` or `.vmdk`
+  belong to ordinary backups, encryption CLI output and VM disks,
 - distinctive ransom-note filenames from the Externum database,
 - `unlink`/`chmod`/`rename`/`truncate` activity (the delete-and-replace half
   of encryption),
@@ -388,18 +406,24 @@ The filesystem probes cover both modern and legacy entry points: `openat`,
 `open`, `openat2`, `unlinkat`, `unlink`, `fchmodat` and `chmod`. A direct
 syscall or a libc wrapper that picks the older variant is not a blind spot.
 
-These signals produce a transparent 0–100 score. A process can receive an
-**early verdict** after 12 opens/s instead of the configured 50 only when the
-score reaches 65, which requires several strong signals at once — for example
-a marker-extension burst plus a destructive burst. A clean file scan still
-waits for the open-rate threshold. The alert carries its score and reasons in
-JSON (`score`, `early`, `reasons`), plain-text output and the TUI, so an
-operator can audit the verdict instead of trusting an opaque number.
+These signals produce a transparent 0–100 score. A plain threshold burst needs
+a score of at least 35: a marker extension alone (35–40), a ransom note plus
+any spread (35), or destructive activity plus spread (35) qualify, while the
+directory/extension spread of a normal build or package install (20) does not.
+A process can receive an **early verdict** after 12 opens/s instead of the
+configured 200 only when the score reaches 65 *and* the window contains at
+least one family-specific marker extension or ransom note, which requires
+several strong signals at once — for example a marker-extension burst plus a
+destructive burst. Plain-burst verdicts are rate-limited to one per process
+per 60 s; early verdicts are exempt. A clean read-only scan never enters the
+window at all, so it needs no allowlisting. The alert carries its score and
+reasons in JSON (`score`, `early`, `reasons`), plain-text output and the TUI,
+so an operator can audit the verdict instead of trusting an opaque number.
 
 This logic lives in the shared monitor core: it applies identically to the MIT
 and Enterprise builds, whether or not `--memlp` is enabled. The family-specific
 marker set comes from [the Externum knowledge base](data/ransomware/knowledge.ext)
-(76 families, 82 family-specific extensions). Externum exports a 635-byte
+(76 families, 80 family-specific extensions). Externum exports a 618-byte
 sorted marker artifact and a 303-byte ransom-note artifact, which the shared
 core embeds and binary-searches using only `std`; the full JSON stays outside
 the binary. Production needs neither an Externum runtime nor a JSON parser for
@@ -422,7 +446,7 @@ With `--auto-kill`, Talus sends `SIGKILL` to the offending process immediately o
 
 ```bash
 # EDR mode: detect + respond
-sudo talus-monitor monitor --alert-threshold 50 --auto-kill
+sudo talus-monitor monitor --auto-kill
 ```
 
 ```rust
@@ -533,7 +557,7 @@ sudo talus-monitor monitor --diagnose
 | Flag | Default | Description |
 |---|---|---|
 | `-b, --bpf <PATH>` | auto | Path to compiled eBPF object |
-| `--alert-threshold <N>` | `50` | Alert when N+ files opened within 1s |
+| `--alert-threshold <N>` | `200` | Candidate at N+ writes/s; an alert also needs evidence (score ≥ 35) |
 | `--auto-kill` | off | **Send SIGKILL to processes that trigger alerts** |
 | `--filter-ext <EXT>` | all | Filter by file extension |
 | `--top-files <N>` | `8` | Top files in TUI |

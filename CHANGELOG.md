@@ -4,6 +4,49 @@ All notable changes to talus-process-monitor will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- A threshold burst is no longer a verdict on its own. A plain 200 writes/s
+  with no independent evidence (`score: 0`, empty `reasons`) — a backup,
+  archive extraction, `npm install` or dataset generator — is counted and
+  shown but does not alert. A plain burst now needs a composite score of at
+  least 35: a marker extension (35–40), a ransom note plus any spread (35), or
+  destructive activity plus spread (35). Early verdicts are unchanged.
+- Plain-burst verdicts for one PID are collapsed for 60 s, so a long job that
+  pauses for a second and starts a fresh 1 s window no longer re-alerts on
+  every burst. Early verdicts (score ≥ 65 plus marker or note) are exempt.
+- `.trial.dat` is no longer part of the license integrity HMAC. The trial
+  record has its own machine-bound checksum and is rewritten by the trial
+  lifecycle, so hashing it here made the next startup log a bogus
+  `CONFIG_TAMPERED` and refuse a valid license. The snapshot is now versioned
+  (`v2:`), migrated once, and refreshed whenever `license.dat` is written or
+  cleared.
+- Only opens that can modify a file count towards the 1-second burst window.
+  The eBPF program now reads the syscall flags and tags a plain `O_RDONLY`
+  open as a separate event type (11, `EVENT_OPEN_READ`); the payload is
+  unchanged, so an older userspace still parses it. Recursive scans, indexers,
+  archive readers and antivirus sweeps open hundreds of thousands of files per
+  second and write none, so they can no longer reach the threshold, while an
+  encryptor still writes everything it encrypts. Directory traversal
+  (`O_DIRECTORY`) is dropped in the kernel. Read-only events stay visible in
+  the stream, the totals and the audit trail.
+- Fewer false positives, same coverage. The marker list now has a single source
+  of truth: the Externum artifact. The stale hard-coded table in `memlp.rs`
+  kept matching `.locked`, `.encrypted`, `.enc`, `.crypt`, `.onion` and the
+  VMware disk suffixes (`.vmdk`, `.vmx`, ...) long after they were dropped
+  from the database; it is gone, so a legitimate encryption job, backup or VM
+  host no longer reads as a family hit. 80 family-specific markers remain.
+  Extensions that existed only in the deleted table (legacy Cerber, Nokoyawa
+  and misc community lists) lose extension-only attribution; they are still
+  covered by the burst, destructive-burst and ransom-note signals, and can be
+  restored through `knowledge.ext`/Externum.
+- An early verdict needs a marker extension or ransom note in the window on
+  top of the score of 65, so a destructive burst alone cannot produce one.
+  `.locked` and `.encrypted` are no longer markers at all: both were generic
+  defaults (Hunters, BadRabbit) that collided with ordinary files.
+- Default `--alert-threshold` is 200 opens/s (was 50), and the
+  directory/extension-spread signals need 8 distinct values (were 3 and 5).
+  Backups, indexers and compilers no longer trip a verdict on a normal pass.
+
 ## [0.8.5] - 2026-11-16
 
 ### Added
@@ -17,10 +60,10 @@ All notable changes to talus-process-monitor will be documented in this file.
   The reproducible pipeline, manifest, held-out report, feature mapping and
   licence caveat live in `data/training/`; no raw corpus is committed.
 - Embedded ransomware knowledge base written in Externum at
-  `data/ransomware/knowledge.ext`. It covers 76 families and 82
+  `data/ransomware/knowledge.ext`. It covers 76 families and 80
   family-specific marker extensions, with aliases, platforms, first-seen dates,
   ransom notes, initial access, ATT&CK techniques, targets and references.
-  `generate.sh` exports deterministic JSON plus a 635-byte sorted marker set;
+  `generate.sh` exports deterministic JSON plus a 618-byte sorted marker set;
   only the marker set is embedded, using a std-only binary search. The full
   JSON stays outside the binary. This keeps MIT and Enterprise small, adds no
   dependency, and needs no Externum or JSON parser in production.
