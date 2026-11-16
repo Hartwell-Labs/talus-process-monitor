@@ -43,11 +43,15 @@
 
 pub mod audit;
 pub mod cli;
+pub mod config;
+pub mod config_tui;
+pub mod knowledge;
 pub mod license;
 pub mod memlp;
 pub mod monitor;
 pub mod sandbox;
 pub mod storage;
+pub mod theme;
 pub mod tui;
 pub mod update;
 pub mod watchdog;

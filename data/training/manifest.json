@@ -1,0 +1,116 @@
+{
+  "dataset": "CSU-Ransomware-Data (drift-aware behavioural windows)",
+  "source_url": "https://github.com/CSCRC-SCREED/CSU-Ransomware-Data",
+  "license": "unknown (repository metadata has no licence)",
+  "warning": "Derived features only. Verify redistribution/training rights with the dataset authors before shipping this file or a model trained on it.",
+  "feature_names": [
+    "open_rate",
+    "exec_network_rate",
+    "name_entropy",
+    "marker_ext_ratio",
+    "artefact_diversity",
+    "fs_event_rate",
+    "destructive_ratio",
+    "file_diversity",
+    "persistence_ratio",
+    "network_ratio"
+  ],
+  "feature_mapping": "19 ETW columns -> 10 live MeMLP features (proxy)",
+  "split_strategy": "temporal drift: phase1/2/3a train, phase3b val, phase3c test",
+  "seed": 2026,
+  "output": {
+    "file": "csu-windows.jsonl",
+    "bytes": 14164575,
+    "sha256": "239c1c9f3ca85fa42325d3281ef3c720d4eb7228c63dfa32f86ca845ea70ec33",
+    "records": 48040
+  },
+  "sources": [
+    {
+      "file": "drift_phase1.csv",
+      "sha256": "1fb5092332252ff039e9f7f7ac5f76b52f6eff7ecf91d6c47a0dbac4cb710d9d",
+      "bytes": 12680108,
+      "rows": 112777,
+      "families": 27,
+      "split": "train"
+    },
+    {
+      "file": "drift_phase2.csv",
+      "sha256": "5b7063d0ab8b902f7e576fecf62c88c4dac75f722196edd9b0e2c964d1b11cf3",
+      "bytes": 10775774,
+      "rows": 95972,
+      "families": 35,
+      "split": "train"
+    },
+    {
+      "file": "drift_phase3a.csv",
+      "sha256": "47444e5dadcbce796c45991d49d9454db61dcf44bd0fd97a73e74fafe0fd4f26",
+      "bytes": 9104879,
+      "rows": 79981,
+      "families": 27,
+      "split": "train"
+    },
+    {
+      "file": "drift_phase3b.csv",
+      "sha256": "6bdfd0b97e1d03785f9dc44b4df6b21f6fd1860a309f58568ba2933f4643d619",
+      "bytes": 9565118,
+      "rows": 85124,
+      "families": 26,
+      "split": "val"
+    },
+    {
+      "file": "drift_phase3c.csv",
+      "sha256": "a5f9d4ef971c4b37ff7247e554fbf41e9d93ac3c6edd8ea417d89eb7010eabd1",
+      "bytes": 12032137,
+      "rows": 107152,
+      "families": 34,
+      "split": "test"
+    }
+  ],
+  "unique_family_names": [
+    "Akira",
+    "BlackBasta",
+    "CyberVolk",
+    "LockBit",
+    "Lynx",
+    "Medusa",
+    "Meow",
+    "goodware"
+  ],
+  "label_counts": {
+    "test/benign": 4413,
+    "test/ransomware": 4665,
+    "test/suspicious": 1202,
+    "train/benign": 13230,
+    "train/ransomware": 12061,
+    "train/suspicious": 3469,
+    "val/benign": 4386,
+    "val/ransomware": 3517,
+    "val/suspicious": 1097
+  },
+  "family_counts": {
+    "test/Akira": 640,
+    "test/BlackBasta": 960,
+    "test/CyberVolk": 800,
+    "test/LockBit": 1600,
+    "test/Lynx": 480,
+    "test/Medusa": 480,
+    "test/Meow": 320,
+    "test/goodware": 5000,
+    "train/Akira": 2400,
+    "train/BlackBasta": 2560,
+    "train/CyberVolk": 1280,
+    "train/LockBit": 4480,
+    "train/Lynx": 1280,
+    "train/Medusa": 1280,
+    "train/Meow": 480,
+    "train/goodware": 15000,
+    "val/Akira": 960,
+    "val/BlackBasta": 640,
+    "val/CyberVolk": 320,
+    "val/LockBit": 1120,
+    "val/Lynx": 320,
+    "val/Medusa": 320,
+    "val/Meow": 320,
+    "val/goodware": 5000
+  }
+}

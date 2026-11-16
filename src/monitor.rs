@@ -26,6 +26,13 @@ const EVENT_COMM_LEN: usize = 16;
 const EVENT_FILENAME_LEN: usize = 64;
 const EVENT_ARGV_LEN: usize = 128;
 const WINDOW_SECS: u64 = 1;
+/// A lower opens/s threshold can fire before the normal burst threshold when
+/// independent evidence agrees. This is deliberately not a "sensitive mode":
+/// it needs multiple strong signals (marker extensions, destructive activity,
+/// persistence or egress), not just a slightly faster file scan.
+const EARLY_MIN_OPENS: u64 = 12;
+/// Minimum composite risk score (0–100) for an early verdict.
+const EARLY_SCORE: u8 = 65;
 /// A PID with no events for this long is forgotten (stats, window, parent link,
 /// behavioural features). It is re-created on its next event.
 const IDLE_PID_TTL_SECS: u64 = 600;
@@ -43,8 +50,18 @@ const DEAD_PID_GRACE_SECS: u64 = 5;
 /// Learning rate for MeMLP online training (conservative — one step per alert).
 const MEMLP_LEARNING_RATE: f32 = 0.03;
 /// Train MeMLP only on every Nth alert to avoid CPU spikes under high event
-/// rates (300K+ evts/s). Assessment (inference) still runs on every alert.
+/// rates (300K+ evts/s). This counter is global, not per PID: a process usually
+/// alerts once, so a per-PID counter would almost never reach the interval.
+/// Assessment (inference) runs on every alert.
 const MEMLP_TRAIN_INTERVAL: u64 = 10;
+/// How many active processes are sampled for background training each second.
+/// Bounded so a host with thousands of PIDs cannot turn online learning into a
+/// CPU sink. The teacher labels are the same transparent heuristics used for
+/// alert-time training.
+const MEMLP_BACKGROUND_SAMPLES: usize = 4;
+/// Lower learning rate for background samples: they are mostly benign, and
+/// should not drown out the high-signal alert-time samples.
+const MEMLP_BACKGROUND_LEARNING_RATE: f32 = 0.01;
 /// Maximum events included in a single TUI snapshot. Beyond this, only the
 /// most recent events are shown (log tail), preventing render stalls at
 /// 30K+ events per 200ms poll cycle. 1000 captures ~40ms of activity at
@@ -276,6 +293,14 @@ pub struct Alert {
     pub uid: u32,
     pub comm: String,
     pub opens: u64,
+    /// Composite risk score (0–100) from the always-on knowledge signals.
+    pub score: u8,
+    /// True when the alert fired before the configured burst threshold because
+    /// several independent behaviours agreed. Still a verdict, not a hint.
+    pub early: bool,
+    /// Human-readable reasons behind [`Alert::score`]. Empty for a plain
+    /// burst that has no additional evidence (the old behaviour).
+    pub reasons: Vec<&'static str>,
     /// MeMLP neural verdicts for this process (None when `--memlp` is off).
     pub memlp: Option<crate::memlp::Assessment>,
 }
@@ -291,6 +316,37 @@ pub struct ProcStats {
     pub total_execs: u64,
     pub alerts: u64,
     pub extensions: HashMap<String, u64>,
+    /// Opens with a known ransomware-marker extension in the current 1 s window.
+    pub marker_opens: u64,
+    /// unlink/chmod events in the current window (delete-and-replace pattern).
+    pub destructive_events: u64,
+    /// Writes/opens under an autostart or persistence path in the window.
+    pub persistence_hits: u64,
+    /// Opens of a distinctive ransomware note filename in the window.
+    pub note_hits: u64,
+    /// Network events observed while the file window is active.
+    pub network_events: u64,
+    /// 64-bit bitmap of distinct parent directories touched (hash collisions
+    /// are acceptable here: this is a diversity signal, not an exact count).
+    pub dir_bits: u64,
+    /// 64-bit bitmap of distinct extensions touched in the window.
+    pub ext_bits: u64,
+    /// At most one verdict per active window, so an early alert cannot spam.
+    pub alerted: bool,
+}
+
+impl ProcStats {
+    /// Start a fresh behavioural window without discarding lifetime counters.
+    fn reset_risk_window(&mut self) {
+        self.marker_opens = 0;
+        self.destructive_events = 0;
+        self.persistence_hits = 0;
+        self.note_hits = 0;
+        self.network_events = 0;
+        self.dir_bits = 0;
+        self.ext_bits = 0;
+        self.alerted = false;
+    }
 }
 
 /// Ranked file access entry for the TUI "Top Files" panel.
@@ -501,6 +557,10 @@ pub struct Monitor {
     memlp_checkpoint: Option<std::path::PathBuf>,
     /// Last MeMLP checkpoint autosave time.
     memlp_last_save: Option<Instant>,
+    /// Global alert counter for throttled alert-time training.
+    memlp_train_tick: u64,
+    /// Round-robin cursor for bounded background training.
+    memlp_sample_cursor: usize,
     _reader: thread::JoinHandle<()>,
     _bpf: Option<Ebpf>,
 }
@@ -649,10 +709,18 @@ impl Monitor {
 
         // Attach filesystem and signal tracepoints (best-effort: kernel may lack some).
         for (name, category, label) in [
+            ("sys_enter_open", "syscalls", "open"),
+            ("sys_enter_openat2", "syscalls", "openat2"),
             ("sys_enter_mkdir", "syscalls", "mkdir"),
             ("sys_enter_unlinkat", "syscalls", "unlinkat"),
+            ("sys_enter_unlink", "syscalls", "unlink"),
+            ("sys_enter_rename", "syscalls", "rename"),
+            ("sys_enter_renameat", "syscalls", "renameat"),
+            ("sys_enter_renameat2", "syscalls", "renameat2"),
+            ("sys_enter_truncate", "syscalls", "truncate"),
             ("sys_enter_kill", "syscalls", "kill"),
             ("sys_enter_fchmodat", "syscalls", "fchmodat"),
+            ("sys_enter_chmod", "syscalls", "chmod"),
         ] {
             if let Some(prog) = bpf.program_mut(name) {
                 let tp: Result<&mut TracePoint, _> = prog.try_into();
@@ -731,13 +799,15 @@ impl Monitor {
             pid_features: HashMap::new(),
             memlp_checkpoint: None,
             memlp_last_save: None,
+            memlp_train_tick: 0,
+            memlp_sample_cursor: 0,
             _reader: reader,
             _bpf: Some(bpf),
         })
     }
 
     /// Enable the MeMLP neural detection engine, loading a checkpoint from
-    /// `checkpoint` when given (a fresh model is created otherwise).
+    /// `checkpoint` when given, or the embedded trained model otherwise.
     ///
     /// # Errors
     ///
@@ -746,19 +816,60 @@ impl Monitor {
     pub fn enable_memlp(&mut self, checkpoint: Option<&Path>) -> Result<()> {
         let model = match checkpoint {
             Some(path) => crate::memlp::MeMLP::load(path)?,
-            None => crate::memlp::MeMLP::new(),
+            None => crate::memlp::MeMLP::pretrained(),
         };
         eprintln!(
             "[talus] MeMLP engine enabled: {} modules, {} parameters (checkpoint: {})",
             3,
             model.param_count(),
-            checkpoint.map_or("in-memory".to_string(), |p| p.display().to_string())
+            checkpoint.map_or("embedded trained".to_string(), |p| p.display().to_string())
         );
         self.memlp = Some(model);
         self.pid_features.clear();
         self.memlp_checkpoint = checkpoint.map(Path::to_path_buf);
         self.memlp_last_save = None;
+        self.memlp_train_tick = 0;
+        self.memlp_sample_cursor = 0;
         Ok(())
+    }
+
+    /// Train on a small, bounded sample of processes that are active right now.
+    ///
+    /// Alert-time samples are rare and heavily biased towards high-activity
+    /// processes. This round-robin pass gives the model ordinary benign
+    /// examples too, while the fixed sample count keeps the cost independent
+    /// of the number of tracked PIDs.
+    fn train_memlp_background(&mut self) {
+        let Monitor {
+            memlp,
+            pid_features,
+            memlp_sample_cursor,
+            ..
+        } = self;
+        let Some(model) = memlp.as_mut() else {
+            return;
+        };
+        let len = pid_features.len();
+        if len == 0 {
+            return;
+        }
+        let start = *memlp_sample_cursor % len;
+        *memlp_sample_cursor = (start + MEMLP_BACKGROUND_SAMPLES) % len;
+
+        let mut samples = [[0.0f32; crate::memlp::N_FEATURES]; MEMLP_BACKGROUND_SAMPLES];
+        let mut count = 0;
+        for features in pid_features.values().skip(start) {
+            if count == MEMLP_BACKGROUND_SAMPLES {
+                break;
+            }
+            if features.is_trainable() {
+                samples[count] = features.features();
+                count += 1;
+            }
+        }
+        for sample in &samples[..count] {
+            model.train_observation(sample, MEMLP_BACKGROUND_LEARNING_RATE);
+        }
     }
 
     pub fn poll(&mut self) -> Vec<Output> {
@@ -827,6 +938,7 @@ impl Monitor {
                     f.decay();
                     f.has_activity()
                 });
+                self.train_memlp_background();
             }
             // ── MeMLP: periodic checkpoint autosave (every 30s) ─────────
             if self.memlp.is_some() && self.memlp_checkpoint.is_some() {
@@ -918,13 +1030,19 @@ impl Monitor {
                 }
                 Kind::Open => {
                     let filename = raw.filename_str();
-                    let ext = extract_extension(&filename);
-                    let entropy = shannon_entropy(&filename);
-                    self.pid_features.entry(pid).or_default().observe_open(
-                        &filename,
-                        Some(&ext),
-                        entropy,
-                    );
+                    // /proc, /sys and /dev are kernel/device traffic, not user
+                    // data; the burst detector already ignores them. Feeding
+                    // them to MeMLP would let a daemon's housekeeping inflate
+                    // its open-rate feature and hide a real data burst.
+                    if counts_toward_burst(&filename) {
+                        let ext = extract_extension(&filename);
+                        let entropy = shannon_entropy(&filename);
+                        self.pid_features.entry(pid).or_default().observe_open(
+                            &filename,
+                            Some(&ext),
+                            entropy,
+                        );
+                    }
                 }
                 Kind::Mkdir => {
                     self.pid_features.entry(pid).or_default().observe_fs(false);
@@ -946,6 +1064,12 @@ impl Monitor {
                 // Network events — count as exec for stats purposes
                 stats.total_execs += 1;
                 self.tick_execs += 1;
+                // Egress during an active file window is a mass-exfiltration
+                // signal. Count only inside the window so a quiet daemon's
+                // background sockets cannot inflate the next verdict.
+                if stats.window_opens > 0 {
+                    stats.network_events += 1;
+                }
             }
             Kind::Open => {
                 // Track file extensions and per-file open count.
@@ -966,44 +1090,86 @@ impl Monitor {
                 let counts = counts_toward_burst(filename);
                 if counts {
                     let now = Instant::now();
-                    let window = self.windows.entry(pid).or_default();
-                    let cutoff = now - Duration::from_secs(WINDOW_SECS);
-                    while window.front().is_some_and(|t| *t < cutoff) {
-                        window.pop_front();
+                    let (window_opens, restarted) = {
+                        let window = self.windows.entry(pid).or_default();
+                        let cutoff = now - Duration::from_secs(WINDOW_SECS);
+                        while window.front().is_some_and(|t| *t < cutoff) {
+                            window.pop_front();
+                        }
+                        let restarted = window.is_empty();
+                        window.push_back(now);
+                        (window.len() as u64, restarted)
+                    };
+                    if restarted {
+                        stats.reset_risk_window();
                     }
-                    window.push_back(now);
-                    stats.window_opens = window.len() as u64;
+                    stats.window_opens = window_opens;
+
+                    // ── Always-on knowledge signals ──────────────────────
+                    // These are cheap enough for the hot path and do not
+                    // depend on --memlp. The marker table is a static hash set;
+                    // persistence matching is one pass over the path; the
+                    // directory bitmap is one FNV hash.
+                    if crate::memlp::is_ransomware_extension(&ext) {
+                        stats.marker_opens += 1;
+                    }
+                    if crate::memlp::is_persistence_path(filename) {
+                        stats.persistence_hits += 1;
+                    }
+                    if crate::knowledge::is_ransom_note(filename) {
+                        stats.note_hits += 1;
+                    }
+                    let dir = filename.rsplit_once('/').map_or("", |(d, _)| d);
+                    let bit = crate::memlp::hash_bytes(dir.as_bytes(), false) >> 58;
+                    stats.dir_bits |= 1u64 << bit;
+                    if !ext.is_empty() {
+                        let bit = crate::memlp::hash_bytes(ext.as_bytes(), true) >> 58;
+                        stats.ext_bits |= 1u64 << bit;
+                    }
                 }
 
                 stats.total_opens += 1;
                 self.tick_opens += 1;
 
-                if counts
-                    && self.threshold > 0
-                    && stats.window_opens == self.threshold
-                    && !self
-                        .ignore_comms
-                        .iter()
-                        .any(|ic| ic.as_bytes() == raw.comm_bytes())
-                {
+                let burst = self.threshold > 0 && stats.window_opens == self.threshold;
+                let score = if self.threshold > 0 && !stats.alerted {
+                    risk_score(stats)
+                } else {
+                    0
+                };
+                let early = self.threshold > 0
+                    && !burst
+                    && !stats.alerted
+                    && stats.window_opens >= EARLY_MIN_OPENS
+                    && score >= EARLY_SCORE;
+                let ignored = self
+                    .ignore_comms
+                    .iter()
+                    .any(|ic| ic.as_bytes() == raw.comm_bytes());
+
+                if counts && !stats.alerted && (burst || early) && !ignored {
                     stats.alerts += 1;
+                    stats.alerted = true;
                     self.tick_alerts += 1;
-                    // ── MeMLP: throttled training + verdict ────────────
+                    // ── MeMLP: verdict on every alert, throttled training ─
+                    // The training counter is global. A per-PID counter would
+                    // almost never reach the interval: a process normally
+                    // alerts once and is then marked `alerted` until its
+                    // window resets.
+                    let memlp_train_tick = self.memlp_train_tick;
                     let memlp_verdict = if let Some(model) = self.memlp.as_mut() {
                         let feats = self.pid_features.entry(pid).or_default().features();
-                        // Train AND assess only on every Nth alert to bound CPU at
-                        // high alert rates (e.g. 300K evts/s thresh=3 → thousands
-                        // of alerts/sec). Most alerts are false positives from
-                        // system scans anyway.
-                        if stats.alerts.is_multiple_of(MEMLP_TRAIN_INTERVAL) {
+                        if memlp_train_tick.is_multiple_of(MEMLP_TRAIN_INTERVAL) {
                             model.train_observation(&feats, MEMLP_LEARNING_RATE);
-                            Some(model.assess(&feats))
-                        } else {
-                            None
                         }
+                        Some(model.assess(&feats))
                     } else {
                         None
                     };
+                    if self.memlp.is_some() {
+                        self.memlp_train_tick = memlp_train_tick.wrapping_add(1);
+                    }
+                    let reasons = risk_reasons(stats);
                     let comm = raw.comm_str();
                     outputs.push(Output::Alert(Alert {
                         ts: format_ktime(ts_ns),
@@ -1011,6 +1177,9 @@ impl Monitor {
                         uid,
                         comm: comm.clone(),
                         opens: stats.window_opens,
+                        score,
+                        early,
+                        reasons,
                         memlp: memlp_verdict,
                     }));
                     // ── Response: act on the verdict ───────────────────────────
@@ -1036,6 +1205,14 @@ impl Monitor {
                 let path = std::str::from_utf8(raw.filename_bytes()).unwrap_or("");
                 if !path.is_empty() {
                     bump_count_capped(&mut self.file_counts, path, MAX_TRACKED_FILES);
+                }
+                if stats.window_opens > 0 {
+                    if matches!(kind, Kind::Unlink | Kind::Chmod) {
+                        stats.destructive_events += 1;
+                    }
+                    if crate::memlp::is_persistence_path(path) {
+                        stats.persistence_hits += 1;
+                    }
                 }
                 self.tick_opens += 1;
             }
@@ -1063,6 +1240,9 @@ impl Monitor {
             }
             if let Some(s) = stats.get_mut(pid) {
                 s.window_opens = w.len() as u64;
+                if w.is_empty() {
+                    s.reset_risk_window();
+                }
             }
             !w.is_empty()
         });
@@ -1399,6 +1579,70 @@ fn bump_count_capped(map: &mut HashMap<String, u64>, key: &str, cap: usize) {
         return;
     }
     map.insert(key.to_owned(), 1);
+}
+
+/// Independent behavioural evidence for the current 1 s window.
+///
+/// Each entry is `(points, human-readable reason)`. The score is deliberately
+/// additive and bounded, so an operator can see *why* an early verdict fired
+/// instead of trusting an opaque number. No single signal is enough on its
+/// own; the early trigger needs at least two strong ones.
+fn risk_signals(stats: &ProcStats) -> [Option<(u8, &'static str)>; 7] {
+    let mut signals = [None; 7];
+    if stats.window_opens == 0 {
+        return signals;
+    }
+    let opens = stats.window_opens as f64;
+    let marker_ratio = stats.marker_opens as f64 / opens;
+    signals[0] = if stats.marker_opens >= 8 && marker_ratio >= 0.6 {
+        Some((40, "ransomware-marker extension burst"))
+    } else if marker_ratio >= 0.5 {
+        Some((35, "ransomware-marker extension burst"))
+    } else if marker_ratio >= 0.2 {
+        Some((20, "ransomware-marker extensions present"))
+    } else if stats.marker_opens > 0 {
+        Some((8, "ransomware-marker extension"))
+    } else {
+        None
+    };
+
+    let destructive_ratio = stats.destructive_events as f64
+        / (stats.window_opens + stats.destructive_events).max(1) as f64;
+    signals[1] = if stats.destructive_events >= 5 && destructive_ratio >= 0.2 {
+        Some((25, "destructive unlink/chmod burst"))
+    } else if stats.destructive_events >= 2 {
+        Some((10, "destructive filesystem activity"))
+    } else {
+        None
+    };
+
+    signals[2] = (stats.persistence_hits > 0).then_some((20, "write to persistence path"));
+    signals[3] = (stats.network_events > 0).then_some((10, "network activity during file burst"));
+    signals[4] =
+        (stats.dir_bits.count_ones() >= 3).then_some((10, "activity across multiple directories"));
+    signals[5] = (stats.ext_bits.count_ones() >= 5).then_some((10, "many file extensions touched"));
+    signals[6] = (stats.note_hits > 0).then_some((25, "distinctive ransom-note filename"));
+    signals
+}
+
+/// Composite 0–100 risk score for the always-on detector.
+fn risk_score(stats: &ProcStats) -> u8 {
+    risk_signals(stats)
+        .iter()
+        .flatten()
+        .map(|(points, _)| u16::from(*points))
+        .sum::<u16>()
+        .min(100) as u8
+}
+
+/// Reasons corresponding to the current score, allocated only when a verdict
+/// is emitted.
+fn risk_reasons(stats: &ProcStats) -> Vec<&'static str> {
+    risk_signals(stats)
+        .iter()
+        .flatten()
+        .map(|(_, reason)| *reason)
+        .collect()
 }
 
 /// Whether an open counts towards the per-PID burst window.
@@ -1864,6 +2108,8 @@ impl Monitor {
             pid_features: HashMap::new(),
             memlp_checkpoint: None,
             memlp_last_save: None,
+            memlp_train_tick: 0,
+            memlp_sample_cursor: 0,
             _reader: handle,
             _bpf: None,
         }
@@ -1985,6 +2231,216 @@ mod tests {
         let stats = monitor.stats.get(&42).unwrap();
         assert_eq!(stats.alerts, 1);
         assert_eq!(stats.window_opens, 3);
+    }
+
+    #[test]
+    fn memlp_verdict_is_attached_to_every_alert() {
+        let mut monitor = Monitor::dummy();
+        monitor.enable_memlp(None).unwrap();
+        let mut outputs = Vec::new();
+
+        for pid in [101, 102] {
+            for _ in 0..3 {
+                monitor.handle_event(&open(pid, 1000, "/tmp/report.txt"), &mut outputs);
+            }
+        }
+        let alerts: Vec<_> = outputs
+            .iter()
+            .filter_map(|o| match o {
+                Output::Alert(a) => Some(a),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(alerts.len(), 2);
+        assert!(
+            alerts.iter().all(|a| a.memlp.is_some()),
+            "every alert must carry the neural verdict, even when its training turn is skipped"
+        );
+    }
+
+    #[test]
+    fn memlp_training_counter_is_global_not_per_pid() {
+        let mut monitor = Monitor::dummy();
+        monitor.enable_memlp(None).unwrap();
+        let mut outputs = Vec::new();
+        // Eleven different PIDs, each alerts once. A per-PID check would train
+        // on none of them; the global counter trains on the 1st and 11th.
+        for pid in 200..211 {
+            for _ in 0..3 {
+                monitor.handle_event(&open(pid, 1000, "/tmp/report.txt"), &mut outputs);
+            }
+        }
+        let (samples, _) = monitor.memlp_stats().unwrap();
+        assert!(
+            samples >= 2,
+            "global training tick should fire twice, got {samples}"
+        );
+    }
+
+    #[test]
+    fn memlp_ignores_kernel_and_device_opens() {
+        let mut monitor = Monitor::dummy();
+        monitor.enable_memlp(None).unwrap();
+        let mut outputs = Vec::new();
+        for _ in 0..5 {
+            monitor.handle_event(&open(301, 0, "/proc/301/status"), &mut outputs);
+        }
+        assert!(
+            !monitor.pid_features.contains_key(&301),
+            "/proc traffic must not create a MeMLP feature window"
+        );
+        for _ in 0..5 {
+            monitor.handle_event(&open(301, 0, "/tmp/data.txt"), &mut outputs);
+        }
+        assert!(
+            monitor
+                .pid_features
+                .get(&301)
+                .is_some_and(|f| f.is_trainable()),
+            "user-data opens must feed the window"
+        );
+    }
+
+    #[test]
+    fn memlp_background_training_is_bounded_and_learns() {
+        let mut monitor = Monitor::dummy();
+        monitor.enable_memlp(None).unwrap();
+        let before = monitor.memlp_stats().unwrap().0;
+        for i in 0..6 {
+            monitor.pid_features.entry(401).or_default().observe_open(
+                &format!("/tmp/f{i}.txt"),
+                Some("txt"),
+                0.2,
+            );
+        }
+        monitor.train_memlp_background();
+        let after = monitor.memlp_stats().unwrap().0;
+        assert!(after > before, "background sample must train the model");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn early_alert_needs_multiple_strong_signals() {
+        let mut monitor = Monitor::dummy();
+        monitor.threshold = 50;
+        let mut outputs = Vec::new();
+
+        // Five encrypted-looking files are deleted, then the process keeps
+        // opening marker-extension files. At 12 opens the marker burst and the
+        // destructive burst agree, so the composite verdict fires early.
+        for i in 0..5 {
+            monitor.handle_event(&open(7, 0, &format!("/tmp/doc{i}.locked")), &mut outputs);
+        }
+        for i in 0..5 {
+            monitor.handle_event(
+                &make_event(
+                    EVENT_UNLINK,
+                    7,
+                    0,
+                    "encryptor",
+                    &format!("/tmp/doc{i}.locked"),
+                ),
+                &mut outputs,
+            );
+        }
+        for i in 5..12 {
+            monitor.handle_event(&open(7, 0, &format!("/tmp/doc{i}.locked")), &mut outputs);
+        }
+
+        let alerts: Vec<_> = outputs
+            .iter()
+            .filter_map(|o| match o {
+                Output::Alert(a) => Some(a),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(alerts.len(), 1, "exactly one early verdict");
+        let alert = alerts[0];
+        assert!(alert.early, "verdict fired before the configured threshold");
+        assert_eq!(alert.opens, 12);
+        assert!(alert.score >= EARLY_SCORE);
+        assert!(
+            alert.reasons.iter().any(|r| r.contains("marker extension")),
+            "the operator must see why it fired: {:?}",
+            alert.reasons
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn marker_extensions_alone_do_not_trigger_an_early_verdict() {
+        let mut monitor = Monitor::dummy();
+        monitor.threshold = 50;
+        let mut outputs = Vec::new();
+        for i in 0..20 {
+            monitor.handle_event(&open(8, 0, &format!("/tmp/file{i}.locked")), &mut outputs);
+        }
+        assert!(!outputs.iter().any(|o| matches!(o, Output::Alert(_))));
+        assert_eq!(monitor.stats.get(&8).unwrap().window_opens, 20);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // calls read_ppid_from_proc → /proc
+    fn plain_burst_still_alerts_at_the_threshold_without_extra_evidence() {
+        let mut monitor = Monitor::dummy();
+        monitor.threshold = 5;
+        let mut outputs = Vec::new();
+        for i in 0..5 {
+            monitor.handle_event(&open(9, 0, &format!("/tmp/report{i}.pdf")), &mut outputs);
+        }
+        let alert = outputs
+            .iter()
+            .find_map(|o| match o {
+                Output::Alert(a) => Some(a),
+                _ => None,
+            })
+            .expect("burst alert");
+        assert!(!alert.early);
+        assert_eq!(alert.opens, 5);
+        assert_eq!(alert.score, 0);
+        assert!(alert.reasons.is_empty());
+    }
+
+    #[test]
+    fn risk_score_rewards_independent_evidence() {
+        let base = ProcStats {
+            window_opens: 12,
+            marker_opens: 12,
+            ..Default::default()
+        };
+        let weak = ProcStats {
+            window_opens: 12,
+            marker_opens: 4,
+            ..Default::default()
+        };
+        assert!(risk_score(&base) > risk_score(&weak));
+        assert!(risk_score(&base) < EARLY_SCORE, "one signal is not enough");
+
+        let diverse = ProcStats {
+            window_opens: 12,
+            marker_opens: 4,
+            ext_bits: 0b1_1111,
+            ..Default::default()
+        };
+        assert!(risk_score(&diverse) > risk_score(&weak));
+
+        let strong = ProcStats {
+            window_opens: 12,
+            marker_opens: 12,
+            destructive_events: 5,
+            ..Default::default()
+        };
+        assert!(risk_score(&strong) >= EARLY_SCORE);
+        assert_eq!(risk_score(&strong), 65);
+
+        let note = ProcStats {
+            window_opens: 12,
+            marker_opens: 12,
+            note_hits: 1,
+            ..Default::default()
+        };
+        assert_eq!(risk_score(&note), 65);
+        assert!(risk_reasons(&note).contains(&"distinctive ransom-note filename"));
     }
 
     #[test]

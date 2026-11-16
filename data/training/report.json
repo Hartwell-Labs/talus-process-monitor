@@ -1,0 +1,183 @@
+{
+  "dataset": "data/training/csu-windows.jsonl",
+  "base": "data/memlp/base-v1.json",
+  "seed": 2026,
+  "epochs": 50,
+  "learning_rate": 0.001,
+  "training_rows": {
+    "csu": 39690,
+    "synthetic": 12000,
+    "anchor_noise": 6000
+  },
+  "metrics": {
+    "train": {
+      "windows": 28760,
+      "auc": 0.9985,
+      "ransomware_recall": 0.9659,
+      "benign_false_positive": 0.0008,
+      "threat_recall": 0.9979,
+      "benign_suspicious_or_worse": 0.0579,
+      "accuracy_3class": 0.947
+    },
+    "val": {
+      "windows": 9000,
+      "auc": 0.9995,
+      "ransomware_recall": 0.9485,
+      "benign_false_positive": 0.0005,
+      "threat_recall": 0.998,
+      "benign_suspicious_or_worse": 0.0048,
+      "accuracy_3class": 0.9474
+    },
+    "test": {
+      "windows": 10280,
+      "auc": 0.9965,
+      "ransomware_recall": 0.9031,
+      "benign_false_positive": 0.0,
+      "threat_recall": 0.9685,
+      "benign_suspicious_or_worse": 0.0789,
+      "accuracy_3class": 0.9059
+    }
+  },
+  "anchors": {
+    "expected": [
+      0,
+      0,
+      1,
+      2,
+      2,
+      2,
+      2,
+      0,
+      1,
+      0,
+      1
+    ],
+    "predicted": [
+      0,
+      0,
+      1,
+      2,
+      2,
+      2,
+      2,
+      0,
+      1,
+      0,
+      1
+    ],
+    "matches": 11,
+    "total": 11
+  },
+  "anchor_noise": {
+    "0.01": {
+      "accuracy": 1.0,
+      "ransomware_recall": 1.0,
+      "benign_precision": 1.0
+    },
+    "0.02": {
+      "accuracy": 1.0,
+      "ransomware_recall": 1.0,
+      "benign_precision": 1.0
+    },
+    "0.05": {
+      "accuracy": 0.9952,
+      "ransomware_recall": 1.0,
+      "benign_precision": 0.9946
+    },
+    "0.1": {
+      "accuracy": 0.9127,
+      "ransomware_recall": 0.9752,
+      "benign_precision": 0.891
+    }
+  },
+  "test_per_family": {
+    "Akira": {
+      "windows": 640,
+      "labels": {
+        "2": 565,
+        "1": 75
+      },
+      "mean_ransomware_probability": 0.7312,
+      "ransomware_recall": 0.9381,
+      "threat_recall": 0.9664,
+      "benign_false_positive": null
+    },
+    "BlackBasta": {
+      "windows": 960,
+      "labels": {
+        "2": 853,
+        "1": 107
+      },
+      "mean_ransomware_probability": 0.6113,
+      "ransomware_recall": 0.7339,
+      "threat_recall": 0.9941,
+      "benign_false_positive": null
+    },
+    "CyberVolk": {
+      "windows": 800,
+      "labels": {
+        "2": 705,
+        "1": 95
+      },
+      "mean_ransomware_probability": 0.7523,
+      "ransomware_recall": 0.966,
+      "threat_recall": 0.9915,
+      "benign_false_positive": null
+    },
+    "LockBit": {
+      "windows": 1600,
+      "labels": {
+        "2": 1421,
+        "1": 179
+      },
+      "mean_ransomware_probability": 0.8134,
+      "ransomware_recall": 0.9909,
+      "threat_recall": 1.0,
+      "benign_false_positive": null
+    },
+    "Lynx": {
+      "windows": 480,
+      "labels": {
+        "1": 52,
+        "2": 428
+      },
+      "mean_ransomware_probability": 0.7991,
+      "ransomware_recall": 0.986,
+      "threat_recall": 1.0,
+      "benign_false_positive": null
+    },
+    "Medusa": {
+      "windows": 480,
+      "labels": {
+        "1": 61,
+        "2": 419
+      },
+      "mean_ransomware_probability": 0.6441,
+      "ransomware_recall": 0.6874,
+      "threat_recall": 0.7208,
+      "benign_false_positive": null
+    },
+    "Meow": {
+      "windows": 320,
+      "labels": {
+        "2": 274,
+        "1": 46
+      },
+      "mean_ransomware_probability": 0.7551,
+      "ransomware_recall": 0.9416,
+      "threat_recall": 1.0,
+      "benign_false_positive": null
+    },
+    "goodware": {
+      "windows": 5000,
+      "labels": {
+        "1": 587,
+        "0": 4413
+      },
+      "mean_ransomware_probability": 0.0261,
+      "ransomware_recall": null,
+      "threat_recall": null,
+      "benign_false_positive": 0.0
+    }
+  }
+}

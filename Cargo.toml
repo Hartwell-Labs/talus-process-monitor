@@ -1,7 +1,7 @@
 [package]
 repository = "https://github.com/Hartwell-Labs/talus-process-monitor"
 name = "talus-process-monitor"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2021"
 description = "eBPF-based real-time process and file operation monitor with TUI"
 license = "MIT"
@@ -18,6 +18,12 @@ path = "src/lib.rs"
 [[bin]]
 name = "talus-monitor"
 path = "src/main.rs"
+
+# Interactive configurator, separate from the monitor so the service binary
+# carries no editor and the configurator can be installed on its own.
+[[bin]]
+name = "talus-config"
+path = "src/bin/talus-config.rs"
 
 [dependencies]
 anyhow = "1"
@@ -69,6 +75,9 @@ criterion = { version = "0.8", features = ["html_reports"] }
 [[bench]]
 name = "event_throughput"
 harness = false
+
+[profile.release]
+strip = true
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

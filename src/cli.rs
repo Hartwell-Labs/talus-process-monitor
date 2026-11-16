@@ -8,7 +8,8 @@
 // The detection engine is a library as well as a binary, so the paid modules can
 // be built from a private crate that depends on this one. `lib.rs` owns the
 // module declarations; `main.rs` only adds what the binary needs.
-use crate::{license, sandbox, storage, watchdog};
+use crate::config::{Config, OutputMode};
+use crate::{license, sandbox, storage, theme, watchdog};
 
 use std::io::{self, IsTerminal, Write};
 use std::net::SocketAddr;
@@ -105,9 +106,49 @@ enum Commands {
     },
     /// Run the eBPF monitor (default command)
     Monitor(MonitorArgs),
+    /// View or change the saved configuration (flags, TUI theme)
+    Config(ConfigArgs),
     /// Check GitHub for a newer release; install it only with --install.
     /// Never runs automatically.
     Update(UpdateArgs),
+}
+
+#[derive(Parser)]
+/// `talus config` — the persistent configurator.
+///
+/// With no subcommand it opens the interactive menu when stdin is a terminal
+/// and prints the saved settings otherwise. Every change is written to the
+/// config file, which the agent reads at start-up, so the configurator does not
+/// need to run at boot.
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    action: Option<ConfigAction>,
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Print the saved configuration and where it lives
+    Show,
+    /// Print the config file path
+    Path,
+    /// Set one or more options, e.g. `talus config set background=black`
+    Set {
+        /// key=value pairs
+        #[arg(value_name = "KEY=VALUE", required = true)]
+        pairs: Vec<String>,
+    },
+    /// Remove options, returning them to Talus defaults
+    Unset {
+        /// Key names
+        #[arg(value_name = "KEY", required = true)]
+        keys: Vec<String>,
+    },
+    /// Delete the config file and return to built-in defaults
+    Reset {
+        /// Do not ask for confirmation
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -191,6 +232,10 @@ pub struct MonitorArgs {
     /// Force the TUI even when stdout is not a terminal
     #[arg(long)]
     tui: bool,
+
+    /// TUI background: black, gray, white or navy
+    #[arg(long, value_name = "NAME", value_parser = theme::parse_background)]
+    theme: Option<theme::Background>,
 
     /// Run a 5-second end-to-end self-diagnostic and exit
     #[arg(long, conflicts_with_all = ["json", "plain", "tui"])]
@@ -354,13 +399,23 @@ pub fn main_with(hooks: Hooks) -> Result<()> {
             },
         },
 
+        // ── Configurator — no root required ───────────────────────────
+        Some(Commands::Config(args)) => run_config(args),
         // ── Monitor — default command (requires root) ─────────────────
-        Some(Commands::Monitor(args)) => run_monitor(args, hooks),
+        Some(Commands::Monitor(mut args)) => {
+            // Saved values sit *under* the flags: a flag typed now wins.
+            apply_saved_config(&mut args)?;
+            run_monitor(args, hooks)
+        }
         // ── Opt-in updater — no root required, never automatic ─────────
         Some(Commands::Update(args)) => {
             crate::update::run(&args.repo, args.install, args.yes, &args.asset)
         }
-        None => run_monitor(MonitorArgs::default(), hooks),
+        None => {
+            let mut args = MonitorArgs::default();
+            apply_saved_config(&mut args)?;
+            run_monitor(args, hooks)
+        }
     }
 }
 
@@ -373,6 +428,7 @@ impl Default for MonitorArgs {
             json: false,
             plain: false,
             tui: false,
+            theme: None,
             diagnose: false,
             benchmark: None,
             filter_ext: None,
@@ -389,6 +445,198 @@ impl Default for MonitorArgs {
             show_ignored: false,
         }
     }
+}
+
+/// Overlay the saved configuration under the flags typed on this command line.
+///
+/// An option is applied only when its flag is absent from argv, so a flag typed
+/// now always wins over the file. That also means the file can hold a baseline
+/// (threshold, ignored comms, dashboard address) while one-off runs override it.
+fn apply_saved_config(args: &mut MonitorArgs) -> Result<()> {
+    let config = Config::load()?;
+    let argv: Vec<String> = std::env::args().collect();
+    let has = |flag: &str| {
+        argv.iter()
+            .any(|a| a == flag || a.starts_with(&format!("{flag}=")))
+    };
+
+    if let Some(threshold) = config.alert_threshold {
+        if !has("--alert-threshold") {
+            args.alert_threshold = threshold;
+        }
+    }
+    if let Some(mode) = config.output {
+        // The three output flags are mutually exclusive; treat any of them as
+        // an explicit choice and leave it untouched.
+        if !has("--json") && !has("--plain") && !has("--tui") {
+            match mode {
+                OutputMode::Tui => args.tui = true,
+                OutputMode::Json => args.json = true,
+                OutputMode::Plain => args.plain = true,
+            }
+        }
+    }
+    if let Some(ext) = config.filter_ext {
+        if !has("--filter-ext") {
+            args.filter_ext = Some(ext);
+        }
+    }
+    if let Some(n) = config.top_files {
+        if !has("--top-files") {
+            args.top_files = n;
+        }
+    }
+    if !config.ignore_comm.is_empty() && !has("--ignore-comm") {
+        args.ignore_comm = config.ignore_comm.clone();
+    }
+    if let Some(show) = config.show_ignored {
+        if !has("--show-ignored") {
+            args.show_ignored = show;
+        }
+    }
+    if let Some(on) = config.memlp {
+        if !has("--memlp") {
+            args.memlp = on;
+        }
+    }
+    if let Some(path) = config.memlp_checkpoint {
+        if !has("--memlp-checkpoint") {
+            args.memlp_checkpoint = Some(path);
+        }
+    }
+    if let Some(path) = config.bpf {
+        if !has("--bpf") && !has("-b") {
+            args.bpf = Some(path);
+        }
+    }
+    if let Some(addr) = config.web {
+        if !has("--web") {
+            args.web = Some(addr);
+        }
+    }
+    if let Some(kill) = config.auto_kill {
+        if !has("--auto-kill") {
+            args.auto_kill = kill;
+        }
+    }
+    if let Some(brokers) = config.kafka_brokers {
+        if !has("--kafka-brokers") {
+            args.kafka_brokers = Some(brokers);
+        }
+    }
+    if let Some(topic) = config.kafka_topic {
+        if !has("--kafka-topic") {
+            args.kafka_topic = Some(topic);
+        }
+    }
+    if let Some(url) = config.clickhouse {
+        if !has("--clickhouse") {
+            args.clickhouse = Some(url);
+        }
+    }
+    if let Some(url) = config.memgraph {
+        if !has("--memgraph") {
+            args.memgraph = Some(url);
+        }
+    }
+    if !has("--theme") {
+        args.theme = Some(config.background);
+    }
+
+    Ok(())
+}
+
+/// `talus config` — view, set or reset the saved configuration.
+fn run_config(args: ConfigArgs) -> Result<()> {
+    match args.action {
+        None => {
+            if crate::config::stdin_is_interactive() {
+                // Same screen `talus-config` opens; `talus config` stays a
+                // working entry point for people who reach for it.
+                crate::config_tui::run()
+            } else {
+                // Piped or scripted: printing beats a menu nobody can answer.
+                Config::load()?.print();
+                Ok(())
+            }
+        }
+        Some(ConfigAction::Show) => {
+            Config::load()?.print();
+            Ok(())
+        }
+        Some(ConfigAction::Path) => {
+            let path = Config::path()
+                .context("cannot determine a config directory (set TALUS_CONFIG_DIR or HOME)")?;
+            println!("{}", path.display());
+            Ok(())
+        }
+        Some(ConfigAction::Set { pairs }) => {
+            let mut config = Config::load()?;
+            for pair in &pairs {
+                let (key, value) = pair
+                    .split_once('=')
+                    .with_context(|| format!("expected `key=value`, got `{pair}`"))?;
+                config.set(key, value)?;
+            }
+            let path = config.save()?;
+            println!(
+                "[talus] ✓ saved {} option(s) to {}",
+                pairs.len(),
+                path.display()
+            );
+            println!("[talus]   restart talus (or the talus service) to apply them");
+            Ok(())
+        }
+        Some(ConfigAction::Unset { keys }) => {
+            let mut config = Config::load()?;
+            for key in &keys {
+                config.unset(key)?;
+            }
+            let path = config.save()?;
+            println!(
+                "[talus] ✓ returned {} option(s) to defaults in {}",
+                keys.len(),
+                path.display()
+            );
+            Ok(())
+        }
+        Some(ConfigAction::Reset { yes }) => {
+            if !yes {
+                if !crate::config::stdin_is_interactive() {
+                    bail!("refusing to delete the config file without confirmation — pass --yes");
+                }
+                if !confirm("Delete the Talus config file and return to built-in defaults? [y/N] ")?
+                {
+                    eprintln!("[talus] cancelled");
+                    return Ok(());
+                }
+            }
+            let removed = Config::remove()?;
+            if removed {
+                match Config::path() {
+                    Some(path) => println!("[talus] ✓ removed {}", path.display()),
+                    None => println!("[talus] ✓ config file removed"),
+                }
+            } else {
+                println!("[talus] no config file to remove");
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Ask a yes/no question on the terminal; anything but `y`/`yes` is a no.
+fn confirm(question: &str) -> Result<bool> {
+    print!("{question}");
+    io::stdout().flush()?;
+    let mut line = String::new();
+    if io::stdin().read_line(&mut line)? == 0 {
+        return Ok(false);
+    }
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 /// Attach, run and shut down the detector.
@@ -542,6 +790,10 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
         "  \x1b[36m║\x1b[0m  Threshold: {:<37} \x1b[36m║\x1b[0m",
         format!("{} opens/s", args.alert_threshold)
     );
+    eprintln!(
+        "  \x1b[36m║\x1b[0m  Theme:    {:<38} \x1b[36m║\x1b[0m",
+        args.theme.unwrap_or_default().label()
+    );
     if args.memlp {
         eprintln!(
             "  \x1b[36m║\x1b[0m  MeMLP:    {:<38} \x1b[36m║\x1b[0m",
@@ -602,7 +854,7 @@ pub fn run_monitor(args: MonitorArgs, hooks: Hooks) -> Result<()> {
         }
     } else if use_tui {
         eprintln!("[talus] TUI mode — q quit, p pause, ? help, Tab switch panel");
-        crate::tui::run(monitor, license_state)?;
+        crate::tui::run(monitor, license_state, args.theme.unwrap_or_default())?;
     } else if args.json {
         run_json(&mut monitor, &pipeline)?;
     } else {
@@ -1081,6 +1333,9 @@ pub fn run_json(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> R
                         "uid": al.uid,
                         "comm": al.comm,
                         "opens_in_1s": al.opens,
+                        "score": al.score,
+                        "early": al.early,
+                        "reasons": al.reasons,
                         "memlp": al.memlp,
                     });
                     writeln!(out, "{value}")?;
@@ -1199,13 +1454,24 @@ pub fn run_plain(monitor: &mut Monitor, pipeline: &storage::StoragePipeline) -> 
                     }
                 }
                 Output::Alert(al) => {
+                    let verdict = if al.early {
+                        "EARLY".yellow().bold()
+                    } else {
+                        "SUSPICIOUS".yellow().bold()
+                    };
+                    let reasons = if al.reasons.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  [score {}: {}]", al.score, al.reasons.join(", "))
+                    };
                     println!(
-                        "{} {} [{}] {} opened {} files in 1s!{}",
+                        "{} {} [{}] {} opened {} files in 1s!{}{}",
                         al.ts,
-                        "SUSPICIOUS".yellow().bold(),
+                        verdict,
                         al.pid,
                         al.comm.bold(),
                         al.opens,
+                        reasons,
                         al.memlp
                             .map(|m| format!("  [MeMLP {}]", m.summary()))
                             .unwrap_or_default()

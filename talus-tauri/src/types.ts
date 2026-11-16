@@ -24,6 +24,9 @@ export interface TalusEvent {
   argv?: string;
   // alert-specific
   opens?: number;
+  score?: number;
+  early?: boolean;
+  reasons?: string[];
   // response-specific
   action?: string;
   success?: boolean;

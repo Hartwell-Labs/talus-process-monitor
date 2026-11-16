@@ -81,9 +81,9 @@ restoring an old release), using the same manifest format.
 Smoke test:
 
 ```bash
-curl -fI https://download.hartwell-labs.pl/mit/0.8.4/talus-monitor
+curl -fI https://download.hartwell-labs.pl/mit/0.8.5/talus-monitor
 curl -fI -H "X-Talus-License: $TALUS_LICENSE" \
-  https://download.hartwell-labs.pl/enterprise/0.8.4/talus-monitor-enterprise
+  https://download.hartwell-labs.pl/enterprise/0.8.5/talus-monitor-enterprise
 ```
 
 ## Client contract (from `process-monitor/src/license.rs`)

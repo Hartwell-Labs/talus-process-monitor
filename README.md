@@ -40,7 +40,7 @@ Behavioral ransomware detection & response for Linux — eBPF-based, ~280k event
 
 > If Talus saves you an evening of worry, helps other admins find it. Practical deployment playbook: [Field Guide](https://hartwell-labs.pl/talus-process-monitor/field-guide.html)
 
-Talus is not a passive monitor. It is a **detect-and-respond** agent: eBPF tracepoints hook syscalls at the kernel level, a per-PID sliding window scores file-open rates in real time, and the response layer **terminates** the offending process (`SIGKILL`) the moment a verdict fires. Measured on a live desktop: **~280,000 events/s sustained with ~7.6% CPU** through per-CPU perf buffers and zero-copy handoff to the userspace detection engine.
+Talus is not a passive monitor. It is a **detect-and-respond** agent: eBPF tracepoints hook syscalls at the kernel level, a per-PID sliding window scores file-open rates in real time, always-on evidence checks marker extensions, destructive activity, persistence and egress, and the response layer **terminates** the offending process (`SIGKILL`) the moment a verdict fires. Measured on a live desktop: **~280,000 events/s sustained with ~7.6% CPU** through per-CPU perf buffers and zero-copy handoff to the userspace detection engine.
 
 ```bash
 # Install via pip (fetches the prebuilt binary from releases):
@@ -92,7 +92,7 @@ sudo talus-monitor run monitor --auto-kill
 | Capability | How |
 |---|---|
 | **Kernel-level tracing** | eBPF tracepoints on `execve`, `openat`, `connect`, `accept`, `sendto`, `recvfrom`, `mkdir`, `unlinkat`, `kill`, `fchmodat` |
-| **Ransomware detection** | 1-second sliding window per PID; alerts when file-open rate exceeds configurable threshold |
+| **Ransomware detection** | 1-second sliding window per PID plus always-on composite evidence (marker extensions, destructive activity, persistence, egress, directory/extension spread); alerts at the threshold or early when several signals agree |
 | **Automated response** | `--auto-kill` sends `SIGKILL` to the offending process on alert verdict |
 | **Network egress tracking** | Parses `sockaddr` in-kernel — captures IPv4/IPv6/Unix addresses on connect/accept/send/recv |
 | **Event pipeline** | Kernel perf buffer → zero-copy ring → detection engine → TUI / JSON / WebSocket / Prometheus |
@@ -371,6 +371,40 @@ sudo talus-monitor monitor --ignore-comm rsync --ignore-comm cc1plus
 Only ignore programs you trust: an attacker who can rename their binary to an ignored name
 would not be alerted on.
 
+### Composite early verdict (always on)
+
+The open-rate window is the trigger, not the whole detector. Every active 1-second
+window also accumulates independent evidence:
+
+- known ransomware-marker extensions (`.locked`, `.enc`, `.akira`, …),
+- distinctive ransom-note filenames from the Externum database,
+- `unlink`/`chmod`/`rename`/`truncate` activity (the delete-and-replace half
+  of encryption),
+- writes under autostart / persistence paths,
+- network egress while files are being touched,
+- activity spread across directories and file extensions.
+
+The filesystem probes cover both modern and legacy entry points: `openat`,
+`open`, `openat2`, `unlinkat`, `unlink`, `fchmodat` and `chmod`. A direct
+syscall or a libc wrapper that picks the older variant is not a blind spot.
+
+These signals produce a transparent 0–100 score. A process can receive an
+**early verdict** after 12 opens/s instead of the configured 50 only when the
+score reaches 65, which requires several strong signals at once — for example
+a marker-extension burst plus a destructive burst. A clean file scan still
+waits for the open-rate threshold. The alert carries its score and reasons in
+JSON (`score`, `early`, `reasons`), plain-text output and the TUI, so an
+operator can audit the verdict instead of trusting an opaque number.
+
+This logic lives in the shared monitor core: it applies identically to the MIT
+and Enterprise builds, whether or not `--memlp` is enabled. The family-specific
+marker set comes from [the Externum knowledge base](data/ransomware/knowledge.ext)
+(76 families, 82 family-specific extensions). Externum exports a 635-byte
+sorted marker artifact and a 303-byte ransom-note artifact, which the shared
+core embeds and binary-searches using only `std`; the full JSON stays outside
+the binary. Production needs neither an Externum runtime nor a JSON parser for
+this path.
+
 ### Updating (opt-in)
 
 ```bash
@@ -422,9 +456,11 @@ Beyond the heuristic window, Talus embeds **MeMLP** — a **M**odular **e**mbedd
 | `lateral` | 10 → 12 → 2 | lateral-movement suspect |
 | `persistence` | 10 → 12 → 2 | autostart-persistence suspect |
 
-Every module consumes the same **10-feature behavioural embedding** per PID (open rate, exec+network rate, filename Shannon entropy, ransomware-marker extension fraction, extension diversity, fs-mutation rate, destructive fraction, distinct-file spread, autostart-path hits, network fraction). Windows decay with a 1-second half-life, mirroring the heuristic window.
+Every module consumes the same **10-feature behavioural embedding** per PID (open rate, exec+network rate, filename Shannon entropy, ransomware-marker extension fraction, extension/artifact diversity, fs-mutation rate, destructive fraction, distinct-file spread, autostart-path hits, network fraction). A distinctive ransom-note name saturates artifact diversity. Windows decay with a 1-second half-life, mirroring the heuristic window; `/proc`, `/sys` and `/dev` opens are excluded.
 
-The engine **trains online**: every alert performs a backpropagation step (cross-entropy loss, gradient clipping, bounded updates) against transparent heuristic teachers, then scores the process. Checkpoints persist as JSON and reload on the next run, so the model keeps learning across restarts.
+The shipped ransomware head is trained offline on 48,040 behavioural windows from seven ransomware families plus goodware, derived from the public CSU-Ransomware-Data corpus, mixed with teacher-labelled synthetic samples and the built-in anchors. On the held-out drift phase it scores **AUC 0.9965**, **90.3% ransomware recall**, and **0% benign class-2 false positives**; all 11 anchors keep their intended verdict. The 18 KB checkpoint is embedded in the binary, so no data file is needed at runtime. Reproduction, provenance, the 10-feature mapping and its limits are in [`data/training/README.md`](data/training/README.md).
+
+The engine **scores every alert** and **continues training online**: one backpropagation step (cross-entropy loss, gradient clipping, bounded updates) against transparent heuristic teachers on every tenth alert, plus up to four active-PID background samples per second. A user checkpoint still overrides the embedded weights; without one, the agent starts from the trained model. Checkpoints persist as JSON and reload on the next run, so the model keeps learning across restarts.
 
 ```bash
 # Enable the neural engine (checkpoint auto-saves every 30s)

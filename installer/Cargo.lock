@@ -1900,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "talus-installer"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1919,7 +1919,7 @@ dependencies = [
 
 [[package]]
 name = "talus-process-monitor"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "aya",

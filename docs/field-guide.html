@@ -149,11 +149,12 @@ WantedBy=multi-user.target</code></pre>
 journalctl -u talus -f                            # watch the NDJSON stream</code></pre>
 
   <h2>5. MeMLP — the neural layer, when to switch it on</h2>
-  <p><code>--memlp</code> enables the online-training detection engine. It learns from live events and saves a checkpoint every 30 seconds:</p>
+  <p><code>--memlp</code> enables the online-training detection engine. The shipped model starts from an offline-trained checkpoint (seven ransomware families plus goodware, held-out AUC 0.9965), then learns from live events and saves a checkpoint every 30 seconds:</p>
   <pre><code>sudo process-monitor monitor --memlp --memlp-checkpoint /var/lib/talus/memlp.json</code></pre>
   <ul>
-    <li>Switch it on <b>after</b> the threshold is sane — it learns from the stream you give it.</li>
-    <li>The checkpoint persists across restarts: the model you trained stays yours.</li>
+    <li>No checkpoint path is required: a missing file falls back to the embedded trained model.</li>
+    <li>Switch it on <b>after</b> the threshold is sane — online learning still follows the stream you give it.</li>
+    <li>The checkpoint persists across restarts: the model you trained stays yours and overrides the embedded one.</li>
   </ul>
 
   <h2>6. Enterprise wiring (license → dashboard → exports)</h2>

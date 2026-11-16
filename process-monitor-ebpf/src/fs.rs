@@ -57,6 +57,46 @@ unsafe fn raw_copy(dst: *mut u8, src: *const u8, len: usize) {
     }
 }
 
+#[inline(always)]
+fn emit_path_event(ctx: &TracePointContext, event_type: u8, path_arg: usize) -> u32 {
+    let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+    let uid = bpf_get_current_uid_gid() as u32;
+
+    let mut event = unsafe { zero_fs_event() };
+    event.event_type = event_type;
+    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
+    event.pid = pid;
+    event.uid = uid;
+
+    if let Ok(comm) = bpf_get_current_comm() {
+        let n = comm.len().min(15);
+        unsafe { raw_copy(event.comm.as_mut_ptr(), comm.as_ptr(), n) };
+    }
+
+    let ptr_size = core::mem::size_of::<*const c_char>();
+    let pathname_offset = 16 + path_arg * ptr_size;
+    if let Ok(pathname_ptr) = unsafe { ctx.read_at::<*const c_char>(pathname_offset) } {
+        if !pathname_ptr.is_null() {
+            let dst = unsafe { slice::from_raw_parts_mut(event.filename.as_mut_ptr(), 64) };
+            if let Ok(bytes) =
+                unsafe { bpf_probe_read_user_str_bytes(pathname_ptr.cast::<u8>(), dst) }
+            {
+                let n = bytes.len().min(63);
+                unsafe { raw_copy(event.filename.as_mut_ptr(), bytes.as_ptr(), n) };
+            }
+        }
+    }
+
+    unsafe {
+        EVENTS.output(
+            ctx,
+            &*(&event as *const _ as *const super::ProcessEvent),
+            0,
+        );
+    }
+    0
+}
+
 /// Write signal name bytes into dst at pos using pointer arithmetic. Returns new pos.
 #[inline(always)]
 unsafe fn write_sig_ptr(dst: *mut u8, mut pos: usize, sig: i32) -> usize {
@@ -102,82 +142,43 @@ unsafe fn write_sig_ptr(dst: *mut u8, mut pos: usize, sig: i32) -> usize {
 /// Trace `mkdir` — directory creation.
 #[tracepoint(name = "sys_enter_mkdir", category = "syscalls")]
 pub fn sys_enter_mkdir(ctx: TracePointContext) -> u32 {
-    let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-    let uid = bpf_get_current_uid_gid() as u32;
-
-    let mut event = unsafe { zero_fs_event() };
-    event.event_type = EVENT_MKDIR;
-    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
-    event.pid = pid;
-    event.uid = uid;
-
-    if let Ok(comm) = bpf_get_current_comm() {
-        let n = comm.len().min(15);
-        unsafe { raw_copy(event.comm.as_mut_ptr(), comm.as_ptr(), n) };
-    }
-
-    let pathname_offset = 16;
-    if let Ok(pathname_ptr) = unsafe { ctx.read_at::<*const c_char>(pathname_offset) } {
-        if !pathname_ptr.is_null() {
-            let dst = unsafe { slice::from_raw_parts_mut(event.filename.as_mut_ptr(), 64) };
-            if let Ok(bytes) =
-                unsafe { bpf_probe_read_user_str_bytes(pathname_ptr.cast::<u8>(), dst) }
-            {
-                let n = bytes.len().min(63);
-                unsafe { raw_copy(event.filename.as_mut_ptr(), bytes.as_ptr(), n) };
-            }
-        }
-    }
-
-    unsafe {
-        EVENTS.output(
-            &ctx,
-            &*(&event as *const _ as *const super::ProcessEvent),
-            0,
-        );
-    }
-    0
+    emit_path_event(&ctx, EVENT_MKDIR, 0)
 }
 
 /// Trace `unlink` — file deletion.
 #[tracepoint(name = "sys_enter_unlinkat", category = "syscalls")]
 pub fn sys_enter_unlinkat(ctx: TracePointContext) -> u32 {
-    let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-    let uid = bpf_get_current_uid_gid() as u32;
+    emit_path_event(&ctx, EVENT_UNLINK, 1)
+}
 
-    let mut event = unsafe { zero_fs_event() };
-    event.event_type = EVENT_UNLINK;
-    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
-    event.pid = pid;
-    event.uid = uid;
+/// Trace legacy `unlink` — used by libc wrappers and direct syscallers.
+#[tracepoint(name = "sys_enter_unlink", category = "syscalls")]
+pub fn sys_enter_unlink(ctx: TracePointContext) -> u32 {
+    emit_path_event(&ctx, EVENT_UNLINK, 0)
+}
 
-    if let Ok(comm) = bpf_get_current_comm() {
-        let n = comm.len().min(15);
-        unsafe { raw_copy(event.comm.as_mut_ptr(), comm.as_ptr(), n) };
-    }
+/// Trace legacy `rename` — destructive replace/rename path.
+#[tracepoint(name = "sys_enter_rename", category = "syscalls")]
+pub fn sys_enter_rename(ctx: TracePointContext) -> u32 {
+    emit_path_event(&ctx, EVENT_UNLINK, 0)
+}
 
-    let ptr_size = core::mem::size_of::<*const c_char>();
-    let pathname_offset = 16 + 1 * ptr_size;
-    if let Ok(pathname_ptr) = unsafe { ctx.read_at::<*const c_char>(pathname_offset) } {
-        if !pathname_ptr.is_null() {
-            let dst = unsafe { slice::from_raw_parts_mut(event.filename.as_mut_ptr(), 64) };
-            if let Ok(bytes) =
-                unsafe { bpf_probe_read_user_str_bytes(pathname_ptr.cast::<u8>(), dst) }
-            {
-                let n = bytes.len().min(63);
-                unsafe { raw_copy(event.filename.as_mut_ptr(), bytes.as_ptr(), n) };
-            }
-        }
-    }
+/// Trace `renameat` — directory-relative rename.
+#[tracepoint(name = "sys_enter_renameat", category = "syscalls")]
+pub fn sys_enter_renameat(ctx: TracePointContext) -> u32 {
+    emit_path_event(&ctx, EVENT_UNLINK, 1)
+}
 
-    unsafe {
-        EVENTS.output(
-            &ctx,
-            &*(&event as *const _ as *const super::ProcessEvent),
-            0,
-        );
-    }
-    0
+/// Trace `renameat2` — newer rename variant.
+#[tracepoint(name = "sys_enter_renameat2", category = "syscalls")]
+pub fn sys_enter_renameat2(ctx: TracePointContext) -> u32 {
+    emit_path_event(&ctx, EVENT_UNLINK, 1)
+}
+
+/// Trace `truncate` — destructive file shortening.
+#[tracepoint(name = "sys_enter_truncate", category = "syscalls")]
+pub fn sys_enter_truncate(ctx: TracePointContext) -> u32 {
+    emit_path_event(&ctx, EVENT_UNLINK, 0)
 }
 
 /// Trace `kill` — signal delivery to process.
@@ -257,40 +258,11 @@ pub fn sys_enter_kill(ctx: TracePointContext) -> u32 {
 /// Trace `chmod` — file permission change.
 #[tracepoint(name = "sys_enter_fchmodat", category = "syscalls")]
 pub fn sys_enter_fchmodat(ctx: TracePointContext) -> u32 {
-    let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-    let uid = bpf_get_current_uid_gid() as u32;
+    emit_path_event(&ctx, EVENT_CHMOD, 1)
+}
 
-    let mut event = unsafe { zero_fs_event() };
-    event.event_type = EVENT_CHMOD;
-    event.ktime_ns = unsafe { bpf_ktime_get_ns() };
-    event.pid = pid;
-    event.uid = uid;
-
-    if let Ok(comm) = bpf_get_current_comm() {
-        let n = comm.len().min(15);
-        unsafe { raw_copy(event.comm.as_mut_ptr(), comm.as_ptr(), n) };
-    }
-
-    let ptr_size = core::mem::size_of::<*const c_char>();
-    let pathname_offset = 16 + 1 * ptr_size;
-    if let Ok(pathname_ptr) = unsafe { ctx.read_at::<*const c_char>(pathname_offset) } {
-        if !pathname_ptr.is_null() {
-            let dst = unsafe { slice::from_raw_parts_mut(event.filename.as_mut_ptr(), 64) };
-            if let Ok(bytes) =
-                unsafe { bpf_probe_read_user_str_bytes(pathname_ptr.cast::<u8>(), dst) }
-            {
-                let n = bytes.len().min(63);
-                unsafe { raw_copy(event.filename.as_mut_ptr(), bytes.as_ptr(), n) };
-            }
-        }
-    }
-
-    unsafe {
-        EVENTS.output(
-            &ctx,
-            &*(&event as *const _ as *const super::ProcessEvent),
-            0,
-        );
-    }
-    0
+/// Trace legacy `chmod` — some programs use it instead of `fchmodat`.
+#[tracepoint(name = "sys_enter_chmod", category = "syscalls")]
+pub fn sys_enter_chmod(ctx: TracePointContext) -> u32 {
+    emit_path_event(&ctx, EVENT_CHMOD, 0)
 }

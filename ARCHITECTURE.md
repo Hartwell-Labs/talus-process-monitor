@@ -248,14 +248,25 @@ runtime. One JSON checkpoint holds three specialist heads:
 | `lateral` | 10 → 12 → 2 | normal / suspect |
 | `persistence` | 10 → 12 → 2 | normal / suspect |
 
-Pipeline: every eBPF event feeds a per-PID `PidFeatures` accumulator (10
-normalised behavioural features, 1-second half-life decay). When the heuristic
-fires an alert, the current embedding is (a) scored by all three heads and
-attached to the `Alert`, and (b) used as an online training sample against
-transparent heuristic teachers — one backprop step, gradient-clipped and
-update-bounded so no single sample can explode the weights (non-finite
-weights are sanitised to 0.0 instead of poisoning the checkpoint with JSON
-`null`).
+Pipeline: every data-file eBPF event feeds a per-PID `PidFeatures` accumulator
+(10 normalised behavioural features, 1-second half-life decay; `/proc`, `/sys`
+and `/dev` are excluded). Every alert is scored by all three heads and attached
+to the `Alert`. Training is separate and bounded: one online step per ten
+alerts globally, plus up to four active-PID background samples per second,
+against transparent heuristic teachers — gradient-clipped and update-bounded so
+no single sample can explode the weights (non-finite weights are sanitised to
+0.0 instead of poisoning the checkpoint with JSON `null`).
+
+The ransomware head shipped in the binary starts from an offline checkpoint
+(`data/memlp/ransomware-v1.json`, 18 KB, 1,031 parameters) trained on 48,040
+windows from seven ransomware families plus goodware, derived from
+CSU-Ransomware-Data, plus teacher-labelled
+synthetic samples and anchor copies. It is embedded with `include_str!`, so the
+agent needs no data file; a user checkpoint still overrides it. Held-out drift
+phase 3c: AUC 0.9965, class-2 recall 90.3%, benign class-2 FP 0.0%, anchors
+11/11. The 19-column Windows ETW projection is a proxy for Linux syscalls, not
+an equivalence; see `data/training/README.md` for the mapping, metrics and
+licence constraint.
 
 Checkpoints autosave every 30 s from the monitor poll loop (the TUI and web
 server own the `Monitor`, so a shutdown hook is not always reachable) and

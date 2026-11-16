@@ -24,6 +24,12 @@ import { is_canonical, is_pretty, decode_pretty } from './format.js';
 import { resolve_key } from './store-bridge.js';
 
 const DOWNLOAD_HOST = 'download.hartwell-labs.pl';
+// The configurator is not a Talus line and never lands in R2: the page links
+// straight at the GitHub release asset, so there is no upload, no manifest and
+// no retention story to keep. `talus-config` is a companion tool that edits the
+// agent's config file — not the agent (see the card's wording).
+const CONFIGURATOR_REPO = 'https://github.com/Hartwell-Labs/Configurator-For-Talus';
+const CONFIGURATOR_DOWNLOAD = `${CONFIGURATOR_REPO}/releases/latest/download/talus-config`;
 const ALLOWED_LINES = new Set(['mit', 'enterprise']);
 const MAX_LICENSE_LEN = 8192;
 const MAX_KEY_LEN = 256;
@@ -80,9 +86,30 @@ function escape_html(value) {
     .replaceAll('"', '&quot;');
 }
 
+function version_sort_key(version) {
+  return String(version)
+    .split('.')
+    .map((part) => Number.parseInt(part, 10) || 0);
+}
+
+/// Release order for display. Publishing appends, but a hand-restored
+/// manifest may be newest-first, so the stored order is never trusted.
+function ordered_versions(manifest, newest_first = true) {
+  const direction = newest_first ? -1 : 1;
+  return (manifest?.versions || []).slice().sort((a, b) => {
+    const left = version_sort_key(a.version);
+    const right = version_sort_key(b.version);
+    for (let i = 0; i < 3; i++) {
+      if ((left[i] || 0) !== (right[i] || 0)) {
+        return direction * ((left[i] || 0) - (right[i] || 0));
+      }
+    }
+    return 0;
+  });
+}
+
 function latest_version(manifest) {
-  const versions = manifest?.versions || [];
-  return versions.length ? versions[versions.length - 1] : null;
+  return ordered_versions(manifest)[0] || null;
 }
 
 function format_size(bytes) {
@@ -92,37 +119,93 @@ function format_size(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function file_rows(line, entry) {
-  if (!entry?.files?.length) return '<p class="empty">No artifacts published yet.</p>';
-  return `<ul class="files">${entry.files
-    .map((file) => {
-      const name = escape_html(file.name);
-      const size = format_size(file.size);
-      if (line === 'mit') {
-        return `<li><a href="/mit/${encodeURIComponent(entry.version)}/${encodeURIComponent(
-          file.name,
-        )}">${name}</a><span class="size">${size}</span></li>`;
-      }
-      // The licensed binary needs a header, so a plain link cannot work. The
-      // page fetches it with the key and hands the browser a blob instead.
-      return `<li><span class="file">${name}</span><span class="size">${size}</span><button class="dl" type="button" data-version="${escape_html(
-        entry.version,
-      )}" data-file="${name}">Download</button></li>`;
-    })
-    .join('')}</ul>`;
-}
-
 function release_date(entry) {
   const raw = entry.published_at || entry.uploaded_at;
   const date = raw ? new Date(raw) : null;
   return date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : '';
 }
 
-/// Release history for one line, newest first. The binaries for older versions
-/// are already gone from storage once retention prunes them, so this list is
-/// intentionally limited to what the manifest still holds.
+/// Files of one version, as a table, with that version's changes underneath.
+function files_table(line, entry) {
+  const rows = (entry?.files?.length ? entry.files : [])
+    .map((file) => {
+      const name = escape_html(file.name);
+      const size = format_size(file.size);
+      // The licensed binary needs a header, so a plain link cannot work. The
+      // page fetches it with the key and hands the browser a blob instead.
+      const action =
+        line === 'mit'
+          ? `<a class="dl-link" href="/mit/${encodeURIComponent(
+              entry.version,
+            )}/${encodeURIComponent(file.name)}">Download</a>`
+          : `<button class="dl" type="button" data-version="${escape_html(
+              entry.version,
+            )}" data-file="${name}">Download</button>`;
+      return `<tr>
+          <td class="fname">${name}</td>
+          <td class="size">${size}</td>
+          <td class="action">${action}</td>
+        </tr>`;
+    })
+    .join('');
+  const empty = entry?.files?.length
+    ? ''
+    : '<tr><td colspan="3" class="empty">No artifacts published yet.</td></tr>';
+  return `<table class="files-table">
+        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+        <tbody>${rows}${empty}</tbody>
+      </table>`;
+}
+
+/// What changed in one version, as its own table: change, the file or folder
+/// it touched, and what it does. Manifests may carry `changes` entries; when
+/// they only have a free-text `notes` line, that becomes a single row covering
+/// the version's own folder.
+/// A change description reads as short sentences, one per line, instead of one
+/// dense run-on line. Wording is untouched: only sentence casing and breaks.
+function describe_change(text) {
+  const parts = String(text || '')
+    .split(/\s*;\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const sentence = part.charAt(0).toUpperCase() + part.slice(1);
+      return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+    });
+  if (!parts.length) return '<span class="muted">No changes recorded.</span>';
+  if (parts.length === 1) return `<p class="c-text">${escape_html(parts[0])}</p>`;
+  return `<ul class="c-list">${parts
+    .map((part) => `<li>${escape_html(part)}</li>`)
+    .join('')}</ul>`;
+}
+
+function changes_table(line, entry) {
+  const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+  const rows = changes
+    .map(
+      (change) => `<tr>
+          <td class="c-name">${escape_html(change.name || '—')}</td>
+          <td class="c-file">${escape_html(change.file || '—')}</td>
+          <td class="c-desc">${change.description ? describe_change(change.description) : '—'}</td>
+        </tr>`,
+    )
+    .join('');
+  const fallback = changes.length
+    ? ''
+    : `<tr>
+          <td class="c-name">v${escape_html(entry?.version || '')}</td>
+          <td class="c-file">${escape_html(`${line}/${entry?.version || ''}/`)}</td>
+          <td class="c-desc">${describe_change(entry?.notes)}</td>
+        </tr>`;
+  return `<table class="changes-table">
+        <thead><tr><th>Change</th><th>File / subfolder</th><th>Description</th></tr></thead>
+        <tbody>${rows}${fallback}</tbody>
+      </table>`;
+}
+
+/// Release history for one line, newest first, one visible release at a time.
 function release_list(line, manifest) {
-  const versions = (manifest?.versions || []).slice().reverse();
+  const versions = ordered_versions(manifest);
   if (!versions.length) return '<p class="empty">No releases published yet.</p>';
 
   const options = versions
@@ -139,7 +222,6 @@ function release_list(line, manifest) {
     .map((entry, index) => {
       const date = release_date(entry);
       const latest = index === 0 ? '<span class="badge info">Latest</span>' : '';
-      const notes = entry.notes ? `<p class="release-notes">${escape_html(entry.notes)}</p>` : '';
       return `<div class="release" data-release-version="${escape_html(entry.version)}"${
         index === 0 ? '' : ' hidden'
       }>
@@ -147,8 +229,8 @@ function release_list(line, manifest) {
           <span class="ver">v${escape_html(entry.version)}</span>${latest}
           ${date ? `<time datetime="${date}">${date}</time>` : ''}
         </div>
-        ${file_rows(line, entry)}
-        ${notes}
+        ${files_table(line, entry)}
+        ${changes_table(line, entry)}
       </div>`;
     })
     .join('');
@@ -157,7 +239,7 @@ function release_list(line, manifest) {
       <label for="release-${line}">Release</label>
       <select id="release-${line}" class="release-select" data-line="${line}">${options}</select>
     </div>
-    <div class="releases" data-releases="${line}">${releases}</div>`;
+    <div class="release-list" data-releases="${line}">${releases}</div>`;
 }
 
 async function landing_page(env, ctx) {
@@ -227,33 +309,69 @@ async function landing_page(env, ctx) {
   .prod h2 { font-size:20px; letter-spacing:-.02em; line-height:1.2; margin-top:4px; }
   .prod .lang { font-size:11.5px; font-weight:600; color:var(--txt-3); border:1px solid var(--border); border-radius:5px; padding:2px 8px; white-space:nowrap; }
   .prod p { margin-top:10px; font-size:14px; line-height:1.6; color:var(--txt-2); }
-  .files { list-style:none; margin-top:14px; border-top:1px solid var(--border); }
-  .files li { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); font-size:14px; }
-  .files li:last-child { border-bottom:0; }
-  .files a { color:var(--accent); font-weight:600; text-decoration:none; }
-  .files a:hover { text-decoration:underline; }
-  .files .file { font-weight:600; }
-  .files .size { color:var(--txt-3); font-size:12.5px; white-space:nowrap; }
-  .files .empty { color:var(--txt-3); padding:12px 0; }
   .prod .note { margin-top:14px; font-size:13px; color:var(--txt-3); }
   .prod .note code { background:var(--bg-subtle); border:1px solid var(--border); border-radius:5px; padding:1px 5px; font-size:12px; color:var(--txt); }
   .prod .btn { margin-top:16px; height:38px; padding:0 16px; font-size:13.5px; }
+  .prod .empty { color:var(--txt-3); padding:12px 0; font-size:14px; }
 
   .release-picker { display:flex; align-items:center; gap:10px; margin-top:16px; }
   .release-picker label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--txt-3); }
   .release-select { flex:1; height:38px; border:1px solid var(--border-strong); border-radius:8px; padding:0 10px; background:var(--bg); color:var(--txt); font:500 13.5px "Inter",sans-serif; cursor:pointer; }
   .release-select:focus { outline:2px solid var(--accent-soft); border-color:var(--accent); }
-  .releases { margin-top:10px; border-top:1px solid var(--border); }
+  .release-list { margin-top:10px; border-top:1px solid var(--border); }
   .release { padding:13px 0 0; }
   .release[hidden] { display:none; }
   .release:last-child { border-bottom:0; padding-bottom:0; }
   .release-head { display:flex; align-items:center; gap:10px; }
   .release-head .ver { font-weight:700; font-size:14.5px; letter-spacing:-.01em; }
   .release-head time { margin-left:auto; font-size:12.5px; color:var(--txt-3); }
+  .release .files-table { margin-top:10px; }
+  .files-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .files-table th { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--txt-3); padding:0 8px 6px 0; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .files-table td { padding:8px 8px 8px 0; border-bottom:1px solid var(--border); vertical-align:middle; }
+  .files-table tr:last-child td { border-bottom:0; }
+  .files-table .fname { font-weight:600; overflow-wrap:anywhere; }
+  .files-table .size { color:var(--txt-3); font-size:12px; white-space:nowrap; width:1%; }
+  .files-table .action { text-align:right; white-space:nowrap; width:1%; }
+  .dl-link { font:600 12.5px "Inter",sans-serif; color:var(--accent); text-decoration:none; }
+  .dl-link:hover { text-decoration:underline; }
+  .files-table .muted { color:var(--txt-3); }
+  .files-table .empty { color:var(--txt-3); padding:8px 0; }
+  .changes-table { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:18px; }
+  .changes-table th { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--txt-3); padding:0 8px 6px 0; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .changes-table td { padding:8px 8px 8px 0; border-bottom:1px solid var(--border); vertical-align:top; }
+  .changes-table tr:last-child td { border-bottom:0; }
+  .changes-table .c-name { font-weight:600; white-space:nowrap; }
+  .changes-table .c-file { font-family:"JetBrains Mono",monospace; font-size:11.5px; color:var(--txt-2); overflow-wrap:anywhere; }
+  .changes-table .c-desc { color:var(--txt-2); line-height:1.6; }
+  .changes-table .c-desc .c-text { margin:0; }
+  .changes-table .c-desc .c-list { margin:0; padding-left:16px; list-style:disc; }
+  .changes-table .c-desc .c-list li { margin:2px 0; }
+  .changes-table .c-desc .c-list li::marker { color:var(--txt-3); }
+  .changes-table .muted { color:var(--txt-3); }
+
+  /* Phones: no room for three columns, so each row becomes a small stacked
+     block and the column headers step aside. */
+  @media (max-width:560px) {
+    .prod { padding:18px 16px; }
+    .files-table thead, .changes-table thead { display:none; }
+    .files-table, .files-table tbody { display:block; }
+    .files-table tr { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+    .files-table tr:last-child { border-bottom:0; }
+    .files-table td { display:block; padding:0; border:0; }
+    .files-table td.fname { grid-row:1 / span 2; align-self:center; }
+    .files-table td.size { grid-column:2; grid-row:1; text-align:right; }
+    .files-table td.action { grid-column:2; grid-row:2; text-align:right; }
+    .files-table .empty { grid-column:1 / -1; }
+    .changes-table, .changes-table tbody { display:block; }
+    .changes-table tr { display:block; padding:10px 0; border-bottom:1px solid var(--border); }
+    .changes-table tr:last-child { border-bottom:0; }
+    .changes-table td { display:block; padding:0; border:0; }
+    .changes-table td.c-file { margin:2px 0 6px; color:var(--txt-3); }
+    pre.block { font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  }
   .badge { display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; border-radius:5px; padding:2px 7px; }
   .badge.info { background:var(--accent-soft); color:var(--accent); }
-  .release .files { margin-top:8px; border-top:0; }
-  .release .files li { padding:5px 0; border-bottom:0; font-size:13.5px; }
   .dl { font:600 11.5px/1 "Inter",sans-serif; color:var(--accent); background:var(--accent-soft); border:1px solid #c7d2fe; border-radius:6px; padding:5px 9px; cursor:pointer; }
   .dl:hover { background:#e0e7ff; }
   .dl:disabled { opacity:.55; cursor:wait; }
@@ -302,7 +420,7 @@ async function landing_page(env, ctx) {
 <div class="container hero">
   <div class="eyebrow">Talus downloads</div>
   <h1>Two lines. <span class="dim">One verified build at a time.</span></h1>
-  <p class="lede">The community build is MIT and public. The licensed build is signed, gated by a live license, and never cached on a shared edge.</p>
+  <p class="lede">The community build is MIT and public. The licensed build is signed, gated by a live license, and never cached on a shared edge. There is also a <a href="#configurator">configurator</a> — a separate tool, linked straight to its GitHub release.</p>
   <div class="hero-actions">
     <a class="btn btn-primary" href="#mit">Downloads</a>
     <a class="btn btn-secondary" href="https://hartwell-labs.pl/talus-process-monitor/">About talus</a>
@@ -340,9 +458,21 @@ async function landing_page(env, ctx) {
       <pre class="block">curl -fLO \\
   -H "X-Talus-License: $TALUS_LICENSE" \\
   https://download.hartwell-labs.pl/enterprise/${
-    enterprise_latest ? encodeURIComponent(enterprise_latest.version) : '0.8.4'
+    enterprise_latest ? encodeURIComponent(enterprise_latest.version) : '0.8.5'
   }/talus-monitor-enterprise</pre>
       <a class="btn btn-primary" href="https://hartwell-labs.pl/company">Get a license</a>
+    </div>
+
+    <div class="prod" id="configurator">
+      <div class="row">
+        <div class="kicker">Companion tool</div>
+        <span class="lang">Not an agent</span>
+      </div>
+      <h2>Configurator for Talus</h2>
+      <p><strong>This is not Talus.</strong> It is the full-screen TUI that edits the <code class="inline">config.conf</code> the agent reads at start-up: palette, alert threshold, output mode, ignored processes, eBPF object, Enterprise sinks.</p>
+      <p>Served straight from the GitHub release — no copy on this host, no license key, no R2 object. Verify it with the <code class="inline">.sha256</code> beside it.</p>
+      <a class="btn btn-primary" href="${CONFIGURATOR_DOWNLOAD}">Download talus-config ↗</a>
+      <a class="btn btn-secondary" href="${CONFIGURATOR_REPO}">Source ↗</a>
     </div>
   </div>
 </div>
@@ -362,6 +492,7 @@ async function landing_page(env, ctx) {
       <h5>Products</h5>
       <a href="https://hartwell-labs.pl/products">Products</a>
       <a href="https://hartwell-labs.pl/talus-process-monitor/">talus-process-monitor</a>
+      <a href="https://github.com/Hartwell-Labs/Configurator-For-Talus">Configurator for Talus</a>
       <a href="https://hartwell-labs.pl/externum/">externum</a>
       <a href="https://hartwell-labs.pl/hack-the-lab/">hack-the-lab</a>
     </div>

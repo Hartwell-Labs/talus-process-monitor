@@ -18,10 +18,18 @@ export const AlertsPanel = memo(function AlertsPanel({
         {alerts.map((a, i) => (
           <div key={i} className="event-row">
             <span className="ts">{a.ts}</span>
-            <span className="tag tag-alert">⚠ ALERT</span>
+            <span className="tag tag-alert">
+              {a.early ? "⚠ EARLY" : "⚠ ALERT"}
+            </span>
             <span className="pid">[{a.pid}]</span>
             <span className="comm">{a.comm}</span>
-            <span className="file">{a.opens} opens/s</span>
+            <span
+              className="file"
+              title={a.reasons?.length ? a.reasons.join(", ") : undefined}
+            >
+              {a.opens} opens/s
+              {a.score ? ` · score ${a.score}` : ""}
+            </span>
           </div>
         ))}
       </div>

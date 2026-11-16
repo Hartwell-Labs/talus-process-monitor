@@ -14,7 +14,7 @@
 //!   ReLU hidden layers, a softmax output and online gradient-descent
 //!   training (backprop + cross-entropy loss).
 //!
-//! Architecture of the default model ([`MeMLP::new`]):
+//! Architecture of the default model ([`MeMLP::pretrained`]):
 //!
 //! | Module        | Shape             | Task                                    |
 //! |---------------|-------------------|-----------------------------------------|
@@ -40,8 +40,10 @@
 //!   when nothing was learned since the last save.
 //!
 //! **Strong**
-//! * A fresh model is pre-fitted on a small set of behavioural anchors, so it
-//!   gives sensible verdicts from the first event instead of random noise.
+//! * The shipped model is trained offline on family-labelled behavioural
+//!   windows and embedded in the binary; a fresh model ([`MeMLP::new`]) is
+//!   pre-fitted on behavioural anchors, so either gives sensible verdicts from
+//!   the first event instead of random noise.
 //! * Online training mixes in a replay of recent samples plus a rotating
 //!   anchor, and uses a decaying learning rate — the net keeps learning from
 //!   live alerts without forgetting what benign looks like.
@@ -53,8 +55,10 @@
 //!   panicking inside the agent.
 //! * Ransomware-extension matching is case-insensitive (`.LOCKED`).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -93,6 +97,11 @@ const SYNTH_SAMPLES: usize = 256;
 const SYNTH_EPOCHS: usize = 20;
 const SYNTH_LR: f32 = 0.05;
 
+/// Offline-trained checkpoint embedded in the agent (~18 KB). Reproduce it with
+/// `data/training/prepare.py` + `data/training/train.py`; the unit tests check
+/// that every benign/ransomware anchor still lands in the right class.
+const EMBEDDED_CHECKPOINT: &str = include_str!("../data/memlp/ransomware-v1.json");
+
 /* ================================================================ */
 /*  Behavioural feature extraction                                   */
 /* ================================================================ */
@@ -115,6 +124,8 @@ pub struct PidFeatures {
     destructive: f32,
     suspicious_ext: f32,
     persistence_hits: f32,
+    /// Distinctive ransom-note basenames seen this window.
+    note_hits: f32,
     entropy_sum: f32,
     entropy_n: u32,
     /// 64-bit bitmap of distinct extensions seen this second.
@@ -331,17 +342,52 @@ pub const PERSISTENCE_PATHS: &[&str] = &[
     "/etc/init.d",
     "/etc/rc.local",
     "/etc/profile.d",
+    "/etc/profile",
+    "/etc/environment",
     "/etc/ld.so.preload",
+    "/etc/ld.so.conf.d",
+    "/etc/sudoers.d",
+    "/etc/pam.d",
+    "/etc/xdg/autostart",
     "/lib/systemd",
     "/usr/lib/systemd",
     "/var/spool/cron",
     "/.config/autostart",
+    "/.config/systemd/user",
+    "/.config/environment.d",
     "/.bashrc",
     "/.bash_profile",
     "/.zshrc",
     "/.profile",
     "/.ssh/authorized_keys",
 ];
+
+/// O(1) membership for the always-on detector. The table is static and small,
+/// but it is consulted for every counted file open, so a linear scan over
+/// ~180 entries would show up in the hot path.
+static RANSOMWARE_EXT_SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+/// Whether `ext` is a known ransomware marker (case-insensitive).
+///
+/// The monitor lowercases extensions before calling this, so the common path
+/// is a hash lookup plus a binary search in the Externum marker artifact. The
+/// family-specific artifact is std-only and adds no new dependency.
+pub(crate) fn is_ransomware_extension(ext: &str) -> bool {
+    if ext.is_empty() {
+        return false;
+    }
+    let set = RANSOMWARE_EXT_SET.get_or_init(|| RANSOMWARE_EXTS.iter().copied().collect());
+    if set.contains(ext) {
+        return true;
+    }
+    if ext.bytes().any(|b| b.is_ascii_uppercase()) {
+        let lower = ext.to_ascii_lowercase();
+        if set.contains(lower.as_str()) {
+            return true;
+        }
+    }
+    crate::knowledge::is_ransomware_extension(ext)
+}
 
 /// Features below this are treated as "no activity" (map-retention criterion).
 const ACTIVITY_EPS: f32 = 0.02;
@@ -352,7 +398,7 @@ const SNAP_EPS: f32 = 1e-3;
 /// FNV-1a over bytes, optionally ASCII-case-folded, followed by a finaliser so
 /// the top bits are well mixed.
 #[inline]
-fn hash_bytes(bytes: &[u8], fold_case: bool) -> u64 {
+pub(crate) fn hash_bytes(bytes: &[u8], fold_case: bool) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
         let b = if fold_case { b.to_ascii_lowercase() } else { b };
@@ -370,7 +416,7 @@ fn hash_bytes(bytes: &[u8], fold_case: bool) -> u64 {
 /// `persistence_matcher_agrees_with_naive` test) but dispatches on the byte
 /// after each `/`, so ordinary paths cost one scan instead of a dozen.
 #[inline]
-fn is_persistence_path(path: &str) -> bool {
+pub(crate) fn is_persistence_path(path: &str) -> bool {
     let b = path.as_bytes();
     for (i, &c) in b.iter().enumerate() {
         if c != b'/' {
@@ -384,14 +430,21 @@ fn is_persistence_path(path: &str) -> bool {
                     || rest.starts_with("/etc/systemd")
                     || rest.starts_with("/etc/init.d")
                     || rest.starts_with("/etc/rc.local")
-                    || rest.starts_with("/etc/profile.d")
+                    || rest.starts_with("/etc/profile")
+                    || rest.starts_with("/etc/environment")
                     || rest.starts_with("/etc/ld.so.preload")
+                    || rest.starts_with("/etc/ld.so.conf.d")
+                    || rest.starts_with("/etc/sudoers.d")
+                    || rest.starts_with("/etc/pam.d")
+                    || rest.starts_with("/etc/xdg/autostart")
             }
             Some(b'l') => rest.starts_with("/lib/systemd"),
             Some(b'u') => rest.starts_with("/usr/lib/systemd"),
             Some(b'v') => rest.starts_with("/var/spool/cron"),
             Some(b'.') => {
                 rest.starts_with("/.config/autostart")
+                    || rest.starts_with("/.config/systemd/user")
+                    || rest.starts_with("/.config/environment.d")
                     || rest.starts_with("/.bashrc")
                     || rest.starts_with("/.bash_profile")
                     || rest.starts_with("/.zshrc")
@@ -432,13 +485,16 @@ impl PidFeatures {
             if !ext.is_empty() {
                 let bit = hash_bytes(ext.as_bytes(), true) >> 58; // 0..=63
                 self.ext_bits |= 1u64 << bit;
-                if RANSOMWARE_EXTS.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
+                if is_ransomware_extension(ext) {
                     self.suspicious_ext += 1.0;
                 }
             }
         }
         if is_persistence_path(path) {
             self.persistence_hits += 1.0;
+        }
+        if crate::knowledge::is_ransom_note(path) {
+            self.note_hits += 1.0;
         }
     }
 
@@ -471,15 +527,16 @@ impl PidFeatures {
         halve(&mut self.destructive);
         halve(&mut self.suspicious_ext);
         halve(&mut self.persistence_hits);
+        halve(&mut self.note_hits);
         halve(&mut self.entropy_sum);
         self.entropy_n = (self.entropy_n / 2).max(1);
         self.file_bits = [0; 4];
         self.ext_bits = 0;
     }
 
-    /// Whether this PID has generated enough signal to train on.
-    /// Reserved for policy gating; exercised in unit tests.
-    #[allow(dead_code)]
+    /// Whether this PID has generated enough signal to train on. Background
+    /// training samples only PIDs above this threshold, so idle processes do
+    /// not flood the replay buffer with empty vectors.
     pub fn is_trainable(&self) -> bool {
         self.opens >= 5.0
     }
@@ -510,7 +567,7 @@ impl PidFeatures {
     /// | 1 | exec + network rate (normalised to 20/s)       |
     /// | 2 | mean filename Shannon entropy                  |
     /// | 3 | ransomware-marker extension fraction           |
-    /// | 4 | extension diversity (normalised to 8)          |
+    /// | 4 | extension/artifact diversity (note hit = 1.0)  |
     /// | 5 | filesystem-mutation rate (normalised to 50/s)  |
     /// | 6 | destructive fraction (unlink/chmod of fs ops)  |
     /// | 7 | distinct-file fraction (mass-encryption shape) |
@@ -526,12 +583,15 @@ impl PidFeatures {
             0.0
         };
         let ext_div = self.ext_bits.count_ones() as f32;
+        // A distinctive ransom-note name is a stronger artefact than raw
+        // extension diversity; either one saturates this feature.
+        let artefact_div = (ext_div / 8.0).max(self.note_hits.min(1.0));
         [
             (self.opens / 100.0).min(1.0),
             (self.execs / 20.0).min(1.0),
             entropy_mean.clamp(0.0, 1.0),
             (self.suspicious_ext / opens).min(1.0),
-            (ext_div / 8.0).min(1.0),
+            artefact_div.min(1.0),
             (self.fs / 50.0).min(1.0),
             (self.destructive / fs).min(1.0),
             (self.distinct_files() / opens).min(1.0),
@@ -583,7 +643,7 @@ pub fn persistence_heuristic_target(f: &[f32; N_FEATURES]) -> usize {
 /// fresh model and are replayed during online training so the live stream
 /// (which only produces *alert-time*, i.e. high-activity, samples) can never
 /// make the net forget what quiet and benign look like.
-const ANCHORS: [[f32; N_FEATURES]; 10] = [
+const ANCHORS: [[f32; N_FEATURES]; 11] = [
     // idle desktop process
     [0.02, 0.0, 0.2, 0.0, 0.1, 0.0, 0.0, 0.3, 0.0, 0.0],
     // busy but benign (editor / indexer)
@@ -604,6 +664,8 @@ const ANCHORS: [[f32; N_FEATURES]; 10] = [
     [0.05, 0.05, 0.4, 0.0, 0.1, 0.5, 0.4, 0.5, 0.8, 0.0],
     // ordinary network client
     [0.05, 0.3, 0.25, 0.0, 0.1, 0.0, 0.0, 0.2, 0.0, 0.8],
+    // distinctive ransom-note creation during otherwise quiet activity
+    [0.15, 0.0, 0.4, 0.0, 1.0, 0.1, 0.0, 0.3, 0.0, 0.0],
 ];
 
 /* ================================================================ */
@@ -1049,6 +1111,15 @@ impl MeMLP {
         m
     }
 
+    /// The shipped model: the offline-trained checkpoint from
+    /// `data/memlp/ransomware-v1.json`, validated exactly like a file
+    /// checkpoint. Panics only if the compiled-in asset is invalid, which the
+    /// test suite makes impossible to ship.
+    pub fn pretrained() -> Self {
+        Self::from_json_bytes(EMBEDDED_CHECKPOINT.as_bytes(), "embedded checkpoint")
+            .expect("embedded MeMLP checkpoint must validate")
+    }
+
     /// Deterministic pre-fit: anchors first, then a pass over synthetic
     /// samples drawn across the whole feature space (teacher-labelled), then
     /// the anchors once more. Does not touch `training_samples`.
@@ -1073,8 +1144,8 @@ impl MeMLP {
         }
     }
 
-    /// Load a checkpoint from disk. Returns a fresh model if the file is
-    /// missing, and rejects (with an error) unreadable, structurally invalid
+    /// Load a checkpoint from disk. Returns the embedded trained model if the
+    /// file is missing, and rejects (with an error) unreadable, structurally invalid
     /// or wrong-version checkpoints so a corrupted file never silently resets
     /// training and a tampered one can never crash the agent.
     ///
@@ -1084,7 +1155,7 @@ impl MeMLP {
     /// validation, or if the checkpoint version differs from [`MEMLP_VERSION`].
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         if !path.exists() {
-            return Ok(Self::new());
+            return Ok(Self::pretrained());
         }
         let raw = std::fs::read(path)
             .with_context(|| format!("failed to read MeMLP checkpoint {}", path.display()))?;
@@ -1225,7 +1296,7 @@ impl MeMLP {
 
 impl Default for MeMLP {
     fn default() -> Self {
-        Self::new()
+        Self::pretrained()
     }
 }
 
@@ -1481,7 +1552,7 @@ mod tests {
     }
 
     #[test]
-    fn memlp_load_missing_file_returns_fresh_model() {
+    fn memlp_load_missing_file_returns_pretrained_model() {
         let model = MeMLP::load(Path::new("/nonexistent/talus/memlp.json")).unwrap();
         assert_eq!(model.version, MEMLP_VERSION);
         assert_eq!(model.training_samples, 0);
@@ -1632,12 +1703,40 @@ mod tests {
     }
 
     #[test]
+    fn pid_features_flags_a_distinctive_ransom_note() {
+        let mut pf = PidFeatures::default();
+        for i in 0..5 {
+            pf.observe_open(&format!("/home/u/docs/f{i}.txt"), Some("txt"), 0.2);
+        }
+        pf.observe_open("/home/u/docs/Restore-My-Files.txt", Some("txt"), 0.4);
+        let f = pf.features();
+        assert!(
+            f[4] >= 1.0,
+            "a known ransom note must saturate artefact diversity: {}",
+            f[4]
+        );
+        assert!(
+            ransomware_heuristic_target(&f) >= 1,
+            "note should at least read suspicious: {f:?}"
+        );
+    }
+
+    #[test]
     fn ransomware_extension_match_is_case_insensitive() {
         let mut pf = PidFeatures::default();
         for i in 0..10 {
             pf.observe_open(&format!("/d/f{i}.LOCKED"), Some("LOCKED"), 0.5);
         }
         assert!(pf.features()[3] > 0.9);
+    }
+
+    #[test]
+    fn always_on_marker_lookup_is_case_insensitive_and_safe() {
+        assert!(is_ransomware_extension("locked"));
+        assert!(is_ransomware_extension("LOCKED"));
+        assert!(is_ransomware_extension("LockBit3"));
+        assert!(!is_ransomware_extension("pdf"));
+        assert!(!is_ransomware_extension(""));
     }
 
     #[test]
@@ -1761,6 +1860,14 @@ mod tests {
             "/home/u/.profile",
             "/chroot/etc/rc.local",
             "/etc/ld.so.preload",
+            "/etc/ld.so.conf.d/evil.conf",
+            "/etc/sudoers.d/evil",
+            "/etc/pam.d/sshd",
+            "/etc/xdg/autostart/x.desktop",
+            "/etc/environment",
+            "/etc/profile",
+            "/home/u/.config/systemd/user/x.service",
+            "/home/u/.config/environment.d/x.conf",
             "/home/u/docs/report.txt",
             "/usr/bin/ls",
             "/tmp/etcetera/cronos",
@@ -1859,6 +1966,40 @@ mod tests {
                 "{a:?}"
             );
         }
+    }
+
+    #[test]
+    fn embedded_checkpoint_keeps_every_anchor_verdict() {
+        let model = MeMLP::pretrained();
+        assert_eq!(model.training_samples, 0);
+        assert_eq!(model.param_count(), 1031);
+        for a in &ANCHORS {
+            let v = model.assess(a);
+            assert_eq!(v.ransomware.class, ransomware_heuristic_target(a), "{a:?}");
+            assert_eq!(v.lateral.class, lateral_heuristic_target(a), "{a:?}");
+            assert_eq!(
+                v.persistence.class,
+                persistence_heuristic_target(a),
+                "{a:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_checkpoint_scores_pid_feature_shapes() {
+        let model = MeMLP::pretrained();
+
+        let mut quiet = PidFeatures::default();
+        for i in 0..6 {
+            quiet.observe_open(&format!("/home/u/notes/note{i}.txt"), Some("txt"), 0.2);
+        }
+        assert_eq!(model.assess(&quiet.features()).ransomware.class, 0);
+
+        let mut mass = PidFeatures::default();
+        for i in 0..50 {
+            mass.observe_open(&format!("/home/u/docs/f{i}.locked"), Some("locked"), 0.9);
+        }
+        assert_eq!(model.assess(&mass.features()).ransomware.class, 2);
     }
 
     #[test]

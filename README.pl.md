@@ -71,9 +71,10 @@ Oczekiwany wynik: w ciągu **~1 sekundy** Talus odpala alert i wysyła `SIGKILL`
 | **Telemetria sieci** | Parsowanie `sockaddr` w jądrze — IPv4/IPv6/Unix na connect/accept/send/recv |
 | **Potok zdarzeń** | Perf buffer jądra → zero-copy → silnik detekcji → TUI / JSON / WebSocket / Prometheus |
 | **Ranking plików** | Najczęściej otwierane pliki z entropią Shannona (wykrywa losowe/szyfrowane nazwy) |
-| **Pojedyncza binarka** | Pełne LTO, `panic = "abort"`, bez symboli — 1,7 MB TUI, 2,5 MB z webem |
+| **Pojedyncza binarka** | Pełne LTO, `panic = "abort"`, bez symboli — 6,7 MB TUI, ~20 MB Enterprise |
 | **SIEM** | Kafka (lz4), ClickHouse (MergeTree), MemGraph (grafy procesów, Cypher) |
-| **Silnik neuronowy MeMLP** | Opcjonalny `--memlp`: MLP budowany od zera, trening online, checkpointy JSON |
+| **Silnik neuronowy MeMLP** | Opcjonalny `--memlp`: wbudowany wytrenowany checkpoint (7 rodzin + goodware), trening online, checkpointy JSON |
+| **Konfigurator** | `talus-config` / `talus config`: trwałe ustawienia monitora i motywu TUI |
 
 ## Wymagania
 

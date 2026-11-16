@@ -39,6 +39,7 @@ use crate::license::LicenseState;
 use crate::monitor::{
     is_system_comm, FileRank, Monitor, Output, ProcStats, RateSample, TUI_SNAPSHOT_EVENT_CAP,
 };
+use crate::theme::{self, Background};
 
 /// Processes that produce too many events to display (polling, IPC, etc.)
 const NOISY_COMMS: &[&str] = &[
@@ -65,26 +66,11 @@ const NOISY_COMMS: &[&str] = &[
     "mako",
 ];
 
-// ── Palette — cohesive cyberpunk ─────────────────────────────────────────
+// ── Palette ──────────────────────────────────────────────────────────────────────
 
-/// Base background: deep matte navy (#1a1b26).
-const BG: PackedRgba = PackedRgba::rgb(26, 27, 38);
-const BLUE: PackedRgba = PackedRgba::rgb(122, 162, 247);
-
-const GREEN: PackedRgba = PackedRgba::rgb(80, 200, 120);
-/// Blood red — reserved for emergency alerts (high-entropy ransomware markers).
-const RED: PackedRgba = PackedRgba::rgb(220, 20, 45);
-const AMBER: PackedRgba = PackedRgba::rgb(250, 180, 50);
-const PURPLE: PackedRgba = PackedRgba::rgb(160, 120, 240);
-
-const CYAN: PackedRgba = PackedRgba::rgb(100, 210, 245);
-const DIM: PackedRgba = PackedRgba::rgb(86, 95, 137);
-const FG: PackedRgba = PackedRgba::rgb(169, 177, 214);
-const BRIGHT: PackedRgba = PackedRgba::rgb(192, 202, 245);
-const BORDER: PackedRgba = PackedRgba::rgb(41, 46, 66);
-const BORDER_HI: PackedRgba = PackedRgba::rgb(122, 162, 247);
-/// Selected process row background (muted navy, above the panel background).
-const SELECT_BG: PackedRgba = PackedRgba::rgb(48, 56, 92);
+// Colours come from the active theme (navy, black, gray or white), chosen by
+// `talus config set background=...` or `--theme`. The palette itself lives in
+// `crate::theme`; nothing here hard-codes a colour.
 
 // ── Layout / gateway constants ────────────────────────────────────────────
 
@@ -217,6 +203,9 @@ struct Evt {
     file: Option<String>,
     is_alert: bool,
     opens: u64,
+    score: u8,
+    early: bool,
+    reasons: Vec<&'static str>,
     memlp: Option<crate::memlp::Assessment>,
 }
 
@@ -522,12 +511,20 @@ impl App_ {
                         format!("  [MeMLP {summary}]")
                     }
                 });
+                let early_part = if e.early { " EARLY" } else { "" };
+                let reason_part = if e.reasons.is_empty() {
+                    String::new()
+                } else {
+                    format!("  [score {}: {}]", e.score, e.reasons.join(", "))
+                };
                 format!(
-                    "{} *** ALERT  [{}] {} opened {} files/s{}",
+                    "{} *** ALERT{}  [{}] {} opened {} files/s{}{}",
                     e.ts,
+                    early_part,
                     e.pid,
                     e.comm,
                     e.opens,
+                    reason_part,
                     memlp_part.as_deref().unwrap_or("")
                 )
             } else {
@@ -981,7 +978,7 @@ impl Model for App_ {
         // `with_mouse()` the runtime can redraw on every mouse-motion event, so
         // this O(W*H) loop was a direct contributor to the 200-300% CPU spin.
         let mut bg_cell = ftui_render::cell::Cell::from_char(' ');
-        bg_cell.bg = BG;
+        bg_cell.bg = theme::bg();
         frame.buffer.fill(area, bg_cell);
 
         if self.gateway {
@@ -1037,9 +1034,9 @@ impl Model for App_ {
 impl App_ {
     fn border(&self, idx: usize) -> PackedRgba {
         if self.focused == idx {
-            BORDER_HI
+            theme::border_hi()
         } else {
-            BORDER
+            theme::border()
         }
     }
 
@@ -1056,17 +1053,21 @@ impl App_ {
         let styled_title = StyledText::new(title)
             .bold()
             .effect(TextEffect::ColorWave {
-                color1: BLUE,
-                color2: CYAN,
+                color1: theme::accent(),
+                color2: theme::accent2(),
                 speed: 1.2,
                 wavelength: 8.0,
             })
-            .base_color(BLUE)
+            .base_color(theme::accent())
             .time(self.time);
         styled_title.render(row0, f);
 
         // Row 1: Status badges (license tier + eBPF + alerts + lost)
-        let tier_color = if self.is_activated { GREEN } else { AMBER };
+        let tier_color = if self.is_activated {
+            theme::green()
+        } else {
+            theme::amber()
+        };
         let tier_badge = if self.is_activated {
             "ENTERPRISE"
         } else {
@@ -1076,9 +1077,23 @@ impl App_ {
         let lost_label = format!("{} LOST", self.lost);
         let badges_data: [(&str, PackedRgba); 4] = [
             (tier_badge, tier_color),
-            ("eBPF", GREEN),
-            ("LIVE", if self.alert_count > 0 { RED } else { GREEN }),
-            (&lost_label, if self.lost > 0 { AMBER } else { DIM }),
+            ("eBPF", theme::green()),
+            (
+                "LIVE",
+                if self.alert_count > 0 {
+                    theme::red()
+                } else {
+                    theme::green()
+                },
+            ),
+            (
+                &lost_label,
+                if self.lost > 0 {
+                    theme::amber()
+                } else {
+                    theme::dim()
+                },
+            ),
         ];
         let mut x = area.x;
         for &(label, color) in &badges_data {
@@ -1109,7 +1124,7 @@ impl App_ {
             if !data.is_empty() {
                 let spark_area = Rect::new(x, area.y + 1, spark_w as u16, 1);
                 Sparkline::new(&data)
-                    .style(Style::new().fg(BLUE))
+                    .style(Style::new().fg(theme::accent()))
                     .render(spark_area, f);
             }
         }
@@ -1152,42 +1167,50 @@ impl App_ {
             .title(" TELEMETRY ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(BORDER));
+            .border_style(Style::new().fg(theme::border()));
         let inner = b.inner(area);
         b.render(area, f);
 
         let (eps, cpu, src, src_color) = if self.demo {
-            (DEMO_EPS, DEMO_CPU, "DEMO", AMBER)
+            (DEMO_EPS, DEMO_CPU, "DEMO", theme::amber())
         } else {
-            (self.eps, self.cpu_pct, "LIVE", GREEN)
+            (self.eps, self.cpu_pct, "LIVE", theme::green())
         };
         let (tier, tier_color) = if self.is_activated {
-            ("ENTERPRISE", GREEN)
+            ("ENTERPRISE", theme::green())
         } else {
-            ("COMMUNITY", AMBER)
+            ("COMMUNITY", theme::amber())
         };
         let row = |label: &str, value: String, color: PackedRgba| {
             Line::from_spans(vec![
-                Span::styled(format!(" {label:<9}"), Style::new().fg(DIM)),
+                Span::styled(format!(" {label:<9}"), Style::new().fg(theme::dim())),
                 Span::styled(value, Style::new().fg(color).attrs(StyleFlags::BOLD)),
             ])
         };
         let lines = vec![
             row("source", src.to_string(), src_color),
-            row("events/s", fmt_rate(eps), BRIGHT),
-            row("cpu", format!("{cpu:.1}%"), BRIGHT),
-            row("total", self.total.to_string(), FG),
+            row("events/s", fmt_rate(eps), theme::bright()),
+            row("cpu", format!("{cpu:.1}%"), theme::bright()),
+            row("total", self.total.to_string(), theme::fg()),
             row(
                 "lost",
                 self.lost.to_string(),
-                if self.lost > 0 { AMBER } else { FG },
+                if self.lost > 0 {
+                    theme::amber()
+                } else {
+                    theme::fg()
+                },
             ),
             row(
                 "alerts",
                 self.alert_count.to_string(),
-                if self.alert_count > 0 { RED } else { FG },
+                if self.alert_count > 0 {
+                    theme::red()
+                } else {
+                    theme::fg()
+                },
             ),
-            row("uptime", fmt_dur(self.uptime), FG),
+            row("uptime", fmt_dur(self.uptime), theme::fg()),
             row("status", tier.to_string(), tier_color),
         ];
         Paragraph::new(ftui_text::Text::from_lines(lines)).render(inner, f);
@@ -1205,7 +1228,7 @@ impl App_ {
             .title(" talus ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(BORDER_HI));
+            .border_style(Style::new().fg(theme::border_hi()));
         let inner = b.inner(frame_area);
         b.render(frame_area, f);
 
@@ -1215,28 +1238,30 @@ impl App_ {
         if inner.height > 1 {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 "  talus  eBPF process monitor",
-                Style::new().fg(BRIGHT).attrs(StyleFlags::BOLD),
+                Style::new().fg(theme::bright()).attrs(StyleFlags::BOLD),
             )]))
             .render(row_rect(1), f);
         }
         if inner.height > 2 {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 "  Hartwell Labs",
-                Style::new().fg(DIM),
+                Style::new().fg(theme::dim()),
             )]))
             .render(row_rect(2), f);
         }
         if inner.height > 4 {
             let link_style = if sel == 0 {
                 Style::new()
-                    .fg(CYAN)
+                    .fg(theme::accent2())
                     .attrs(StyleFlags::BOLD | StyleFlags::UNDERLINE)
             } else {
-                Style::new().fg(BLUE).attrs(StyleFlags::UNDERLINE)
+                Style::new()
+                    .fg(theme::accent())
+                    .attrs(StyleFlags::UNDERLINE)
             };
             let marker = if sel == 0 { "> " } else { "  " };
             Paragraph::new(Line::from_spans(vec![
-                Span::styled(format!("  {marker}"), Style::new().fg(CYAN)),
+                Span::styled(format!("  {marker}"), Style::new().fg(theme::accent2())),
                 Span::styled(GATEWAY_URL, link_style),
             ]))
             .render(row_rect(4), f);
@@ -1244,12 +1269,15 @@ impl App_ {
         }
         if inner.height > 5 {
             let (marker, style) = if sel == 1 {
-                ("> ", Style::new().fg(CYAN).attrs(StyleFlags::BOLD))
+                (
+                    "> ",
+                    Style::new().fg(theme::accent2()).attrs(StyleFlags::BOLD),
+                )
             } else {
-                ("  ", Style::new().fg(FG))
+                ("  ", Style::new().fg(theme::fg()))
             };
             Paragraph::new(Line::from_spans(vec![
-                Span::styled(format!("  {marker}"), Style::new().fg(CYAN)),
+                Span::styled(format!("  {marker}"), Style::new().fg(theme::accent2())),
                 Span::styled("Continue to monitor", style),
             ]))
             .render(row_rect(5), f);
@@ -1258,14 +1286,14 @@ impl App_ {
         if inner.height > 7 && !self.gateway_note.is_empty() {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 format!("  {}", self.gateway_note),
-                Style::new().fg(AMBER),
+                Style::new().fg(theme::amber()),
             )]))
             .render(row_rect(7), f);
         }
         if inner.height > 8 {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 "  up/down select  enter open  click  esc skip  q quit",
-                Style::new().fg(DIM),
+                Style::new().fg(theme::dim()),
             )]))
             .render(row_rect(inner.height - 1), f);
         }
@@ -1296,7 +1324,7 @@ impl App_ {
             if inner.height > 0 {
                 Paragraph::new(Line::from_spans(vec![Span::styled(
                     "  [space] to expand",
-                    Style::new().fg(DIM),
+                    Style::new().fg(theme::dim()),
                 )]))
                 .render(Rect::new(inner.x, inner.y, inner.width, 1), f);
             }
@@ -1317,7 +1345,7 @@ impl App_ {
         if self.alert_count == 0 {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 "  no alerts — system quiet",
-                Style::new().fg(DIM),
+                Style::new().fg(theme::dim()),
             )]))
             .render(inner, f);
             return;
@@ -1363,7 +1391,12 @@ impl App_ {
         };
         // Keep one blank column between the bar and the panel border.
         let text_w = inner.width as usize - bar_w;
-        let colors = MiniBarColors::new(BLUE, GREEN, AMBER, RED);
+        let colors = MiniBarColors::new(
+            theme::accent(),
+            theme::green(),
+            theme::amber(),
+            theme::red(),
+        );
         let rows = inner.height as usize;
         let scroll = self.proc_scroll.min(self.tree.len().saturating_sub(rows));
 
@@ -1385,15 +1418,15 @@ impl App_ {
                 width = comm_w
             );
             let label_c = if alerts > 0 {
-                RED
+                theme::red()
             } else if opens > 10 {
-                AMBER
+                theme::amber()
             } else {
-                BRIGHT
+                theme::bright()
             };
             let mut style = Style::new().fg(label_c);
             if self.proc_sel == Some(pid) {
-                style = style.bg(SELECT_BG).attrs(StyleFlags::BOLD);
+                style = style.bg(theme::select_bg()).attrs(StyleFlags::BOLD);
             }
             Paragraph::new(Line::from_spans(vec![Span::styled(label, style)]))
                 .render(Rect::new(inner.x, y, text_w as u16, 1), f);
@@ -1419,14 +1452,19 @@ impl App_ {
         if self.exts.is_empty() {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 "  no file activity yet",
-                Style::new().fg(DIM),
+                Style::new().fg(theme::dim()),
             )]))
             .render(inner, f);
             return;
         }
 
         let max = self.exts.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
-        let colors = MiniBarColors::new(BLUE, GREEN, AMBER, RED);
+        let colors = MiniBarColors::new(
+            theme::accent(),
+            theme::green(),
+            theme::amber(),
+            theme::red(),
+        );
         let rows = inner.height as usize;
         let label_w = 10u16.min(inner.width);
         let count_w = 6u16.min(inner.width.saturating_sub(label_w));
@@ -1446,7 +1484,7 @@ impl App_ {
                 Span::styled(label, Style::new().fg(ext_color(ext))),
                 Span::styled(
                     format!("{count:>width$}", width = count_w as usize),
-                    Style::new().fg(BRIGHT),
+                    Style::new().fg(theme::bright()),
                 ),
             ]))
             .render(Rect::new(inner.x, y, label_w + count_w, 1), f);
@@ -1473,11 +1511,11 @@ impl App_ {
             Paragraph::new(ftui_text::Text::from_lines(vec![
                 Line::from_spans(vec![Span::styled(
                     "  no network events captured",
-                    Style::new().fg(DIM),
+                    Style::new().fg(theme::dim()),
                 )]),
                 Line::from_spans(vec![Span::styled(
                     "  (kernel may lack sockaddr capture)",
-                    Style::new().fg(DIM),
+                    Style::new().fg(theme::dim()),
                 )]),
             ]))
             .render(inner, f);
@@ -1514,15 +1552,15 @@ impl App_ {
             if ts_w > 0 {
                 spans.push(Span::styled(
                     format!("{:<ts_w$} ", trunc(&e.ts, ts_w)),
-                    Style::new().fg(DIM),
+                    Style::new().fg(theme::dim()),
                 ));
             }
             let (kind, kind_c) = match e.kind.as_str() {
-                "Connect" => ("CONN", CYAN),
-                "Accept" => ("ACPT", PURPLE),
-                "SendTo" => ("SEND", BLUE),
-                "RecvFrom" => ("RECV", BLUE),
-                other => (other, FG),
+                "Connect" => ("CONN", theme::accent2()),
+                "Accept" => ("ACPT", theme::purple()),
+                "SendTo" => ("SEND", theme::accent()),
+                "RecvFrom" => ("RECV", theme::accent()),
+                other => (other, theme::fg()),
             };
             spans.push(Span::styled(
                 format!("{:<kind_w$} ", trunc(kind, kind_w)),
@@ -1530,9 +1568,12 @@ impl App_ {
             ));
             spans.push(Span::styled(
                 format!("{:<comm_w$} ", trunc(&e.comm, comm_w)),
-                Style::new().fg(BRIGHT),
+                Style::new().fg(theme::bright()),
             ));
-            spans.push(Span::styled(trunc(&e.addr, addr_w), Style::new().fg(FG)));
+            spans.push(Span::styled(
+                trunc(&e.addr, addr_w),
+                Style::new().fg(theme::fg()),
+            ));
             Paragraph::new(Line::from_spans(spans))
                 .render(Rect::new(inner.x, y, inner.width, 1), f);
         }
@@ -1556,13 +1597,18 @@ impl App_ {
         } else {
             0
         };
-        let colors = MiniBarColors::new(BLUE, GREEN, AMBER, RED);
+        let colors = MiniBarColors::new(
+            theme::accent(),
+            theme::green(),
+            theme::amber(),
+            theme::red(),
+        );
 
         for (i, r) in self.files.iter().take(rows).enumerate() {
             let y = inner.y + i as u16;
             let value = (r.count as f64 / max as f64).clamp(0.0, 1.0);
 
-            let rank_c = if i < 3 { AMBER } else { DIM };
+            let rank_c = if i < 3 { theme::amber() } else { theme::dim() };
             // Show rank + filename; when width is tight drop the bar and shrink the label.
             if bar_w == 0 {
                 let label = format!(
@@ -1583,11 +1629,11 @@ impl App_ {
                 );
                 let ext_c = ext_color(&r.ext);
                 let entropy_c = if r.entropy > 0.7 {
-                    RED
+                    theme::red()
                 } else if r.entropy > 0.4 {
-                    AMBER
+                    theme::amber()
                 } else {
-                    GREEN
+                    theme::green()
                 };
 
                 let label_w = (inner.width - bar_w as u16 - 1).max(1);
@@ -1679,7 +1725,7 @@ impl App_ {
             let label = format!("{:<12}", trunc(&row.label, 12));
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 label,
-                Style::new().fg(BRIGHT),
+                Style::new().fg(theme::bright()),
             )]))
             .render(Rect::new(inner.x, y, label_w, 1), f);
 
@@ -1724,7 +1770,7 @@ impl App_ {
         if self.rate_chart.len() <= 2 {
             Paragraph::new(Line::from_spans(vec![Span::styled(
                 "  collecting rate samples...",
-                Style::new().fg(DIM),
+                Style::new().fg(theme::dim()),
             )]))
             .render(inner, f);
             return;
@@ -1740,7 +1786,7 @@ impl App_ {
 
         // Exec/s chart
         if self.rate_chart.len() > 2 {
-            let series = vec![Series::new("exec/s", &self.rate_chart, GREEN)];
+            let series = vec![Series::new("exec/s", &self.rate_chart, theme::green())];
             let max_y = self
                 .rate_chart
                 .iter()
@@ -1748,15 +1794,15 @@ impl App_ {
                 .fold(0.0f64, f64::max)
                 .max(1.0);
             LineChart::new(series)
-                .style(Style::new().fg(GREEN))
+                .style(Style::new().fg(theme::green()))
                 .y_bounds(0.0, max_y)
                 .render(charts_layout[0], f);
-            chart_label(f, charts_layout[0], "exec/s", GREEN);
+            chart_label(f, charts_layout[0], "exec/s", theme::green());
         }
 
         // Open/s chart
         if self.open_chart.len() > 2 {
-            let series = vec![Series::new("open/s", &self.open_chart, BLUE)];
+            let series = vec![Series::new("open/s", &self.open_chart, theme::accent())];
             let max_y = self
                 .open_chart
                 .iter()
@@ -1764,15 +1810,15 @@ impl App_ {
                 .fold(0.0f64, f64::max)
                 .max(1.0);
             LineChart::new(series)
-                .style(Style::new().fg(BLUE))
+                .style(Style::new().fg(theme::accent()))
                 .y_bounds(0.0, max_y)
                 .render(charts_layout[1], f);
-            chart_label(f, charts_layout[1], "open/s", BLUE);
+            chart_label(f, charts_layout[1], "open/s", theme::accent());
         }
 
         // Alert/s chart
         if self.alert_chart.len() > 2 {
-            let series = vec![Series::new("alert/s", &self.alert_chart, RED)];
+            let series = vec![Series::new("alert/s", &self.alert_chart, theme::red())];
             let max_y = self
                 .alert_chart
                 .iter()
@@ -1780,10 +1826,10 @@ impl App_ {
                 .fold(0.0f64, f64::max)
                 .max(1.0);
             LineChart::new(series)
-                .style(Style::new().fg(RED))
+                .style(Style::new().fg(theme::red()))
                 .y_bounds(0.0, max_y)
                 .render(charts_layout[2], f);
-            chart_label(f, charts_layout[2], "alert/s", RED);
+            chart_label(f, charts_layout[2], "alert/s", theme::red());
         }
     }
 
@@ -1804,7 +1850,7 @@ impl App_ {
         let line = format!(" /{}{}", self.search_buf, hits_text);
         Paragraph::new(Line::from_spans(vec![Span::styled(
             line,
-            Style::new().fg(CYAN).attrs(StyleFlags::BOLD),
+            Style::new().fg(theme::accent2()).attrs(StyleFlags::BOLD),
         )]))
         .render(bar_area, f);
     }
@@ -1968,12 +2014,12 @@ impl App_ {
         let lines = vec![
             Line::from_spans(vec![Span::styled(
                 " talus — keyboard shortcuts",
-                Style::new().fg(BLUE).attrs(StyleFlags::BOLD),
+                Style::new().fg(theme::accent()).attrs(StyleFlags::BOLD),
             )]),
             Line::raw(""),
             Line::from_spans(vec![Span::styled(
                 " NAV",
-                Style::new().fg(AMBER).attrs(StyleFlags::BOLD),
+                Style::new().fg(theme::amber()).attrs(StyleFlags::BOLD),
             )]),
             Line::raw("   Tab/Shift+Tab   cycle panels"),
             Line::raw("   1-7             jump to panel"),
@@ -1983,7 +2029,7 @@ impl App_ {
             Line::raw(""),
             Line::from_spans(vec![Span::styled(
                 " ACT",
-                Style::new().fg(AMBER).attrs(StyleFlags::BOLD),
+                Style::new().fg(theme::amber()).attrs(StyleFlags::BOLD),
             )]),
             Line::raw("   p               pause/resume"),
             Line::raw("   r               cycle rate limit (5/15/50)"),
@@ -1999,7 +2045,7 @@ impl App_ {
             .title(" help ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(BLUE));
+            .border_style(Style::new().fg(theme::accent()));
         let inner = b.inner(area);
         b.render(area, f);
         Paragraph::new(ftui_text::Text::from_lines(lines)).render(inner, f);
@@ -2042,7 +2088,7 @@ fn chart_label(f: &mut Frame, area: Rect, name: &str, color: PackedRgba) {
     let rect = Rect::new(area.right() - w, area.y, w, 1);
     Paragraph::new(Line::from_spans(vec![Span::styled(
         text,
-        Style::new().fg(color).bg(BG),
+        Style::new().fg(color).bg(theme::bg()),
     )]))
     .render(rect, f);
 }
@@ -2120,18 +2166,25 @@ fn fmt_dur(s: u64) -> String {
 
 fn ext_color(ext: &str) -> PackedRgba {
     match ext {
-        "enc" | "locked" | "crypto" => RED,
-        "rs" | "py" | "js" | "ts" | "c" | "cpp" | "go" | "java" => GREEN,
-        "pdf" | "doc" | "docx" | "txt" | "md" => AMBER,
-        "jpg" | "png" | "mp4" | "mp3" => PURPLE,
-        "json" | "toml" | "yaml" | "yml" => CYAN,
-        _ => BLUE,
+        "enc" | "locked" | "crypto" => theme::red(),
+        "rs" | "py" | "js" | "ts" | "c" | "cpp" | "go" | "java" => theme::green(),
+        "pdf" | "doc" | "docx" | "txt" | "md" => theme::amber(),
+        "jpg" | "png" | "mp4" | "mp3" => theme::purple(),
+        "json" | "toml" | "yaml" | "yml" => theme::accent2(),
+        _ => theme::accent(),
     }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
+pub fn run(
+    mut monitor: Monitor,
+    license: LicenseState,
+    background: Background,
+) -> anyhow::Result<()> {
+    // Select the palette before the first frame is drawn; every draw call below
+    // reads it through `crate::theme`.
+    theme::install(background);
     let (tx, rx) = mpsc::channel::<Snapshot>();
     let mut last_heavy: Option<Instant> = None;
     let h = thread::Builder::new()
@@ -2149,6 +2202,9 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                         file: ev.file,
                         is_alert: false,
                         opens: 0,
+                        score: 0,
+                        early: false,
+                        reasons: Vec::new(),
                         memlp: None,
                     }),
                     Output::Alert(a) => Some(Evt {
@@ -2159,6 +2215,9 @@ pub fn run(mut monitor: Monitor, license: LicenseState) -> anyhow::Result<()> {
                         file: None,
                         is_alert: true,
                         opens: a.opens,
+                        score: a.score,
+                        early: a.early,
+                        reasons: a.reasons,
                         memlp: a.memlp,
                     }),
                     Output::Action(_) => None,
@@ -2480,6 +2539,9 @@ mod tests {
                 }),
                 is_alert: false,
                 opens: 0,
+                score: 0,
+                early: false,
+                reasons: Vec::new(),
                 memlp: None,
             });
         }
@@ -2491,6 +2553,9 @@ mod tests {
             file: None,
             is_alert: true,
             opens: 812,
+            score: 85,
+            early: false,
+            reasons: vec!["ransomware-marker extension burst"],
             memlp: None,
         });
         let mut exts = std::collections::HashMap::new();
@@ -2517,6 +2582,7 @@ mod tests {
                 total_execs: 1,
                 alerts: 3,
                 extensions: pext.clone(),
+                ..Default::default()
             },
             ProcStats {
                 pid: 3311,
@@ -2527,6 +2593,7 @@ mod tests {
                 total_execs: 2,
                 alerts: 0,
                 extensions: pext.clone(),
+                ..Default::default()
             },
             ProcStats {
                 pid: 2100,
@@ -2537,6 +2604,7 @@ mod tests {
                 total_execs: 5,
                 alerts: 0,
                 extensions: pext.clone(),
+                ..Default::default()
             },
             ProcStats {
                 pid: 9001,
@@ -2547,6 +2615,7 @@ mod tests {
                 total_execs: 1,
                 alerts: 0,
                 extensions: pext,
+                ..Default::default()
             },
         ];
         let tree = vec![

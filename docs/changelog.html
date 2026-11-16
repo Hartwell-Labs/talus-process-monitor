@@ -29,11 +29,13 @@
   "name": "Talus",
   "applicationCategory": "SecurityApplication",
   "operatingSystem": "Linux 5.8+",
-  "softwareVersion": "0.8.1",
+  "softwareVersion": "0.8.5",
   "codeRepository": "https://github.com/BartoszOsiej/talus-process-monitor",
   "releaseNotes": "https://hartwell-labs.pl/talus-process-monitor/changelog.html",
   "softwareRequirements": "eBPF with BTF/CO-RE",
   "release": [
+    { "@type": "SoftwareSourceCode", "name": "0.8.5", "datePublished": "2026-11-16", "description": "Offline-trained MeMLP checkpoint, Externum ransomware knowledge base, persistent configurator, wider syscall coverage" },
+    { "@type": "SoftwareSourceCode", "name": "0.8.4", "datePublished": "2026-11-11", "description": "Burst detection ignores /proc, /sys and /dev" },
     { "@type": "SoftwareSourceCode", "name": "0.8.0", "datePublished": "2026-09-17", "description": "Secure licensing backend, key rotation, activation server" },
     { "@type": "SoftwareSourceCode", "name": "0.7.0", "datePublished": "2026-08-30", "description": "Enterprise licensing system, keygen CLI, feature gating" },
     { "@type": "SoftwareSourceCode", "name": "0.6.0", "datePublished": "2026-08-28", "description": "Enterprise maturity: supply chain, provenance, SBOM, hardening" },
@@ -72,6 +74,20 @@
   <div class="navline"><a href="index.html">&larr; Talus home</a> &middot; <a href="comparison.html">Comparison</a> &middot; <a href="field-guide.html">Field Guide</a></div>
   <h1>Talus <span>changelog</span></h1>
   <p class="sub">Every release, honestly documented. The full technical detail lives in the <a style="color:var(--blue);text-decoration:none" href="https://github.com/BartoszOsiej/talus-process-monitor/blob/master/CHANGELOG.md">CHANGELOG.md</a> in the repository.</p>
+
+  <h2>0.8.5 — trained MeMLP and Externum knowledge</h2>
+  <div class="date">2026-11-16</div>
+  <div class="entry">
+    <h3>Trained detection instead of a heuristic pre-fit <span class="badge">detection</span></h3>
+    <ul>
+      <li><b>Shipped MeMLP checkpoint:</b> 1,031 parameters trained on 48,040 family-labelled windows from seven ransomware families plus goodware; held-out AUC 0.9965, ransomware recall 90.3%, benign class-2 false positives 0.0%, and 11/11 behavioural anchors correct</li>
+      <li><b>Ransomware knowledge in Externum:</b> 76 families and 82 family-specific marker extensions; only the compact marker and ransom-note sets are embedded, using std-only binary search</li>
+      <li><b>Persistent configurator:</b> <span class="mono">talus-config</span> / <span class="mono">talus config</span> saves monitor flags and TUI background, with command-line flags still winning for that run</li>
+      <li><b>Wider eBPF coverage:</b> legacy <span class="mono">unlink</span>, <span class="mono">chmod</span>, <span class="mono">open</span>, <span class="mono">rename*</span>, <span class="mono">openat2</span> and <span class="mono">truncate</span>, so direct syscalls cannot bypass destructive/open detection</li>
+      <li><b>Composite verdicts:</b> score, early-verdict flag and reasons are exposed in JSON, plain text and the TUI; alert-time MeMLP verdicts now run on every alert</li>
+      <li><b>Smaller deployment:</b> release profiles strip symbols; measured 6.68 MiB (MIT) and 20.15 MiB (Enterprise)</li>
+    </ul>
+  </div>
 
   <h2>Distribution expansion (September 2026)</h2>
   <div class="date">2026-09-22 &middot; v0.8.0 line</div>

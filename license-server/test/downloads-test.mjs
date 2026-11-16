@@ -236,15 +236,52 @@ test('landing page lists both lines with the latest versions', async () => {
   assert.match(html, /talus-monitor-enterprise/);
   // The licensed binary is described, never linked without a license header.
   assert.doesNotMatch(html, /href="\/enterprise\//);
+  // The configurator is not a Talus line: it links straight at its GitHub
+  // release asset and is never served from this host (no R2 copy).
+  assert.match(html, /id="configurator"/);
+  assert.match(html, /This is not Talus\./);
+  assert.match(
+    html,
+    /https:\/\/github\.com\/Hartwell-Labs\/Configurator-For-Talus\/releases\/latest\/download\/talus-config/,
+  );
+  assert.doesNotMatch(html, /href="\/[^"]*talus-config/);
   // The history is newest first and licensed files use the key-aware button.
   assert.ok(html.indexOf('v0.8.4') < html.indexOf('v0.8.3'));
   assert.match(html, /button class="dl" type="button" data-version="0\.8\.4"/);
   assert.match(html, /Latest/);
-  // A dropdown selects the release; only the newest is visible initially.
+  // The release picker is still there: one release visible at a time.
   assert.match(html, /<select id="release-enterprise"[^>]*>/);
   assert.match(html, /data-release-version="0\.8\.3" hidden/);
+  // Every version gets its own file table, right under that version's header.
+  assert.equal((html.match(/<table class="files-table">/g) || []).length, 3);
+  assert.match(html, /<th>File<\/th><th>Size<\/th><th><\/th>/);
+  assert.match(
+    html,
+    /data-release-version="0\.8\.4">\s*<div class="release-head">[\s\S]*?<table class="files-table">/,
+  );
+  // Changes are their own table per version: change, file, description.
+  assert.equal((html.match(/<table class="changes-table">/g) || []).length, 3);
+  assert.equal(
+    (html.match(/<th>Change<\/th><th>File \/ subfolder<\/th><th>Description<\/th>/g) || [])
+      .length,
+    3,
+  );
+  assert.doesNotMatch(html, /class="release-notes"/);
+  assert.ok(
+    html.indexOf('data-release-version="0.8.3"') <
+      html.indexOf('Enterprise licensing system with Ed25519'),
+  );
+  assert.match(html, /<td class="c-name">v0\.8\.3<\/td>/);
+  assert.match(html, /<td class="c-file">mit\/0\.8\.4\/<\/td>/);
+  assert.match(html, /<td class="c-file">enterprise\/0\.8\.4\/<\/td>/);
+  // No second, detached table block at the bottom of the card.
+  assert.doesNotMatch(html, /data-tables=/);
+  assert.ok(html.indexOf('<table class="files-table">') < html.indexOf('Source ↗'));
+  assert.match(html, /data-version="0\.8\.3" data-file="talus-monitor-enterprise"/);
+  assert.match(html, /data-version="0\.8\.4" data-file="talus-monitor-enterprise\.sig"/);
+  assert.match(html, /talus-monitor-enterprise\.sig<\/td>/);
   // Small verification files get a real unit instead of a rounded-down 0.0 MB.
-  assert.match(html, /talus-monitor-enterprise\.sig<\/span><span class="size">96 B</);
+  assert.match(html, /96 B/);
   assert.doesNotMatch(html, />0\.0 MB</);
 
   // The inline downloader must at least parse: a broken script would leave
@@ -252,6 +289,104 @@ test('landing page lists both lines with the latest versions', async () => {
   const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
   assert.ok(script);
   assert.doesNotThrow(() => new Function(script));
+});
+
+test('a newest-first manifest still reports the real latest release', async () => {
+  const env = {
+    ...fake_env(),
+    DOWNLOADS: {
+      async get(key) {
+        if (key !== 'mit/index.json') return null;
+        return {
+          async text() {
+            return JSON.stringify({
+              line: 'mit',
+              versions: [
+                { version: '0.9.0', files: [{ name: 'talus-monitor', size: 10 }] },
+                { version: '0.8.4', files: [{ name: 'talus-monitor', size: 10 }] },
+              ],
+            });
+          },
+        };
+      },
+      async head() {
+        return null;
+      },
+    },
+  };
+  const res = await handle_download_request(new Request(`${base}/`), env);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /Community edition · v0\.9\.0/);
+  assert.ok(html.indexOf('v0.9.0') < html.indexOf('v0.8.4'));
+});
+
+test('structured changes render one row per change', async () => {
+  const env = {
+    ...fake_env(),
+    DOWNLOADS: {
+      async get(key) {
+        if (key !== 'mit/index.json') return null;
+        return {
+          async text() {
+            return JSON.stringify({
+              line: 'mit',
+              versions: [
+                {
+                  version: '0.9.0',
+                  files: [{ name: 'talus-monitor', size: 10 }],
+                  changes: [
+                    {
+                      name: 'Burst detection',
+                      file: 'src/monitor.rs',
+                      description: 'Skips /proc, /sys and /dev in the alert window.',
+                    },
+                    {
+                      name: 'Retention',
+                      file: 'license-server/scripts/r2-publish.sh',
+                      description: 'Keeps five versions per line.',
+                    },
+                  ],
+                },
+              ],
+            });
+          },
+        };
+      },
+      async head() {
+        return null;
+      },
+    },
+  };
+  const res = await handle_download_request(new Request(`${base}/`), env);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  const table = html.match(/<table class="changes-table">([\s\S]*?)<\/table>/)?.[1];
+  assert.ok(table);
+  assert.equal((table.match(/<tr[>]/g) || []).length, 3); // head row + two changes, no fallback
+  assert.match(table, /Burst detection/);
+  assert.match(table, /src\/monitor\.rs/);
+  assert.match(table, /Keeps five versions per line\./);
+  assert.doesNotMatch(table, /class="c-name">v0\.9\.0/);
+});
+
+test('landing page still renders when a manifest is missing', async () => {
+  const env = {
+    ...fake_env(),
+    DOWNLOADS: {
+      async get() {
+        return null;
+      },
+      async head() {
+        return null;
+      },
+    },
+  };
+  const res = await handle_download_request(new Request(`${base}/`), env);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /No releases published yet\./);
+  assert.doesNotMatch(html, /undefined/);
 });
 
 test('publishing requires a GitHub OIDC bearer token', async () => {

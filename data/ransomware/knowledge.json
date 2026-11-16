@@ -1,0 +1,3552 @@
+{
+  "alias_index": {
+    "8base": "eightbase",
+    "abcd": "lockbit",
+    "abyss": "abyss",
+    "abyss ransomware": "abyss",
+    "agenda": "qilin",
+    "akira": "akira",
+    "akira_v2": "akira",
+    "alphv": "alphv",
+    "avaddon": "avaddon",
+    "avaddon ransomware": "avaddon",
+    "avoslocker": "avoslocker",
+    "avoslocker ransomware": "avoslocker",
+    "babuk": "babuk",
+    "babuk locker": "babuk",
+    "babyk": "babuk",
+    "badrabbit": "badrabbit",
+    "bianlian": "bianlian",
+    "bianlian ransomware": "bianlian",
+    "blackbasta": "blackbasta",
+    "blackbyte": "blackbyte",
+    "blackbyte ransomware": "blackbyte",
+    "blackcat": "alphv",
+    "blackmatter": "blackmatter",
+    "blackmatter ransomware": "blackmatter",
+    "blacksuit": "blacksuit",
+    "blacksuit ransomware": "blacksuit",
+    "cactus": "cactus",
+    "cactus ransomware": "cactus",
+    "chaos": "chaos",
+    "chaos ransomware": "chaos",
+    "checkmate": "checkmate",
+    "checkmate ransomware": "checkmate",
+    "cicada 3301": "cicada3301",
+    "cicada3301": "cicada3301",
+    "cl0p": "clop",
+    "clop": "clop",
+    "colddraw": "cuba",
+    "conti": "conti",
+    "conti ransomware": "conti",
+    "cring": "ghost",
+    "critroni": "ctblocker",
+    "cryptolocker": "cryptolocker",
+    "cryptowall": "cryptowall",
+    "ctblocker": "ctblocker",
+    "cuba": "cuba",
+    "cuba ransomware": "cuba",
+    "curve-tor-bitcoin locker": "ctblocker",
+    "cyclops": "knight",
+    "darkside": "darkside",
+    "darkside ransomware": "darkside",
+    "defray777": "ransomexx",
+    "devman": "devman",
+    "devman ransomware": "devman",
+    "doppelpaymer": "doppelpaymer",
+    "doppelpaymer ransomware": "doppelpaymer",
+    "dragonforce": "dragonforce",
+    "dragonforce ransomware": "dragonforce",
+    "egregor": "egregor",
+    "egregor ransomware": "egregor",
+    "eight": "phobos",
+    "eightbase": "eightbase",
+    "eking": "phobos",
+    "erebus": "erebus",
+    "erebus ransomware": "erebus",
+    "esxiargs": "esxiargs",
+    "esxiargs ransomware": "esxiargs",
+    "everest": "everest",
+    "everest ransomware": "everest",
+    "expetr": "notpetya",
+    "fog": "fog",
+    "fog ransomware": "fog",
+    "gandcrab": "gandcrab",
+    "ghost": "ghost",
+    "gonnacry": "gonnacry",
+    "gunra": "gunra",
+    "gunra ransomware": "gunra",
+    "hades": "hades",
+    "hades ransomware": "hades",
+    "hellokitty": "hellokitty",
+    "hellokitty ransomware": "hellokitty",
+    "hive": "hive",
+    "hive ransomware": "hive",
+    "hunters": "hunters",
+    "hunters international": "hunters",
+    "icefire": "icefire",
+    "icefire ransomware": "icefire",
+    "inc ransom": "inc_lynx_sinobi",
+    "inc_lynx_sinobi": "inc_lynx_sinobi",
+    "interlock": "interlock",
+    "interlock ransomware": "interlock",
+    "killsecurity": "killsecurity",
+    "knight": "knight",
+    "knight ransomware": "knight",
+    "lockbit": "lockbit",
+    "lockbit 2.0": "lockbit",
+    "lockbit 3.0": "lockbit",
+    "lockbit 5.0": "lockbit",
+    "lockbit black": "lockbit",
+    "locky": "locky",
+    "locky ransomware": "locky",
+    "lorenz": "lorenz",
+    "lorenz ransomware": "lorenz",
+    "lynx": "inc_lynx_sinobi",
+    "mailto": "netwalker",
+    "makop": "makop",
+    "makop ransomware": "makop",
+    "mallox": "mallox",
+    "mallox ransomware": "mallox",
+    "maze": "maze",
+    "maze ransomware": "maze",
+    "medusa": "medusa",
+    "medusa locker": "medusa",
+    "medusa ransomware": "medusa",
+    "megazord": "akira",
+    "mountlocker": "mountlocker",
+    "nefilim": "nefilim",
+    "nefilim ransomware": "nefilim",
+    "nephilim": "nefilim",
+    "netwalker": "netwalker",
+    "netwalker ransomware": "netwalker",
+    "nightspire": "nightspire",
+    "nightspire ransomware": "nightspire",
+    "noberus": "alphv",
+    "notpetya": "notpetya",
+    "petya.a": "notpetya",
+    "phobos": "phobos",
+    "phobos ransomware": "phobos",
+    "play": "play",
+    "playcrypt": "play",
+    "powerranges": "akira",
+    "qilin": "qilin",
+    "quantum": "quantum",
+    "quantum ransomware": "quantum",
+    "ragnar": "ragnar",
+    "ragnar locker": "ragnar",
+    "ragnarok": "ragnar",
+    "ransomexx": "ransomexx",
+    "ransomhub": "ransomhub",
+    "revil": "revil",
+    "rhysida": "rhysida",
+    "royal": "royal",
+    "royal ransomware": "royal",
+    "ryuk": "ryuk",
+    "ryuk ransomware": "ryuk",
+    "safepay": "safepay",
+    "safepay ransomware": "safepay",
+    "sinobi": "inc_lynx_sinobi",
+    "sodin": "revil",
+    "sodinokibi": "revil",
+    "storm-1811": "blackbasta",
+    "suncrypt": "suncrypt",
+    "suncrypt ransomware": "suncrypt",
+    "ta505": "clop",
+    "targetcompany": "mallox",
+    "teslacrypt": "teslacrypt",
+    "thegentlemen": "thegentlemen",
+    "trigona": "trigona",
+    "trigona ransomware": "trigona",
+    "vice society": "vicesociety",
+    "vicesociety": "vicesociety",
+    "wanacrypt0r": "wannacry",
+    "wannacry": "wannacry",
+    "wcry": "wannacry",
+    "worldleaks": "worldleaks"
+  },
+  "extension_index": {
+    "1nt3rlock": [
+      "interlock"
+    ],
+    "8base": [
+      "eightbase"
+    ],
+    "abyss": [
+      "abyss"
+    ],
+    "aki": [
+      "akira"
+    ],
+    "akira": [
+      "akira"
+    ],
+    "akiranew": [
+      "akira"
+    ],
+    "alphv": [
+      "alphv"
+    ],
+    "args": [
+      "esxiargs"
+    ],
+    "avaddon": [
+      "avaddon"
+    ],
+    "avdn": [
+      "avaddon"
+    ],
+    "avoslocker": [
+      "avoslocker"
+    ],
+    "babuk": [
+      "babuk"
+    ],
+    "basta": [
+      "blackbasta"
+    ],
+    "bianlian": [
+      "bianlian"
+    ],
+    "blackbasta": [
+      "blackbasta"
+    ],
+    "blackbyte": [
+      "blackbyte"
+    ],
+    "blackcat": [
+      "alphv"
+    ],
+    "blackmatter": [
+      "blackmatter"
+    ],
+    "blacksuit": [
+      "blacksuit"
+    ],
+    "c0rtez": [
+      "conti"
+    ],
+    "c_i_0p": [
+      "clop"
+    ],
+    "cactus": [
+      "cactus"
+    ],
+    "ccc": [
+      "teslacrypt"
+    ],
+    "chaos": [
+      "chaos"
+    ],
+    "checkmate": [
+      "checkmate"
+    ],
+    "cicada3301": [
+      "cicada3301"
+    ],
+    "clop": [
+      "clop"
+    ],
+    "conti": [
+      "conti"
+    ],
+    "cryptolocker": [
+      "cryptolocker"
+    ],
+    "cryptowall": [
+      "cryptowall"
+    ],
+    "cuba": [
+      "cuba"
+    ],
+    "darkside": [
+      "darkside"
+    ],
+    "doppelpaymer": [
+      "doppelpaymer"
+    ],
+    "egregor": [
+      "egregor"
+    ],
+    "encrt": [
+      "gunra"
+    ],
+    "encrypted": [
+      "badrabbit"
+    ],
+    "erebus": [
+      "erebus"
+    ],
+    "everest": [
+      "everest"
+    ],
+    "fog": [
+      "fog"
+    ],
+    "gandcrab": [
+      "gandcrab"
+    ],
+    "gonnacry": [
+      "gonnacry"
+    ],
+    "hades": [
+      "hades"
+    ],
+    "hellokitty": [
+      "hellokitty"
+    ],
+    "hive": [
+      "hive"
+    ],
+    "ifire": [
+      "icefire"
+    ],
+    "interlock": [
+      "interlock"
+    ],
+    "keepcalm": [
+      "cryptolocker"
+    ],
+    "knight_l": [
+      "knight"
+    ],
+    "lockbit": [
+      "lockbit"
+    ],
+    "lockbit3": [
+      "lockbit"
+    ],
+    "lockbitblack": [
+      "lockbit"
+    ],
+    "locked": [
+      "hunters"
+    ],
+    "locky": [
+      "locky"
+    ],
+    "lorenz": [
+      "lorenz"
+    ],
+    "makop": [
+      "makop"
+    ],
+    "mallox": [
+      "mallox"
+    ],
+    "maze": [
+      "maze"
+    ],
+    "medusa": [
+      "medusa"
+    ],
+    "mountlocker": [
+      "mountlocker"
+    ],
+    "nefilim": [
+      "nefilim"
+    ],
+    "nephilim": [
+      "nefilim"
+    ],
+    "netwalker": [
+      "netwalker"
+    ],
+    "noberus": [
+      "alphv"
+    ],
+    "nspire": [
+      "nightspire"
+    ],
+    "phobos": [
+      "phobos"
+    ],
+    "play": [
+      "play"
+    ],
+    "powerranges": [
+      "akira"
+    ],
+    "qilin": [
+      "qilin"
+    ],
+    "quantum": [
+      "quantum"
+    ],
+    "ragnar": [
+      "ragnar"
+    ],
+    "ransomexx": [
+      "ransomexx"
+    ],
+    "revil": [
+      "revil"
+    ],
+    "rhysida": [
+      "rhysida"
+    ],
+    "royal": [
+      "royal"
+    ],
+    "ryk": [
+      "ryuk"
+    ],
+    "sodinokibi": [
+      "revil"
+    ],
+    "sse": [
+      "revil"
+    ],
+    "suncrypt": [
+      "suncrypt"
+    ],
+    "trigona": [
+      "trigona"
+    ],
+    "vvv": [
+      "teslacrypt"
+    ],
+    "wncry": [
+      "wannacry"
+    ],
+    "xtbl": [
+      "teslacrypt"
+    ]
+  },
+  "families": [
+    {
+      "aliases": [
+        "LockBit 2.0",
+        "LockBit 3.0",
+        "LockBit Black",
+        "LockBit 5.0",
+        "ABCD"
+      ],
+      "description": "High-volume RaaS known for fast encryption, affiliate autonomy and repeated leaks of its builder.",
+      "double_extortion": true,
+      "extensions": [
+        "lockbit",
+        "lockbit3",
+        "lockbitblack"
+      ],
+      "first_seen": 2019,
+      "id": "lockbit",
+      "initial_access": [
+        "RDP",
+        "VPN",
+        "exploited public-facing services",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "LockBit",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "Restore-My-Files.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-165a"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1562.001",
+        "T1078",
+        "T1133",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Akira_v2",
+        "Megazord",
+        "PowerRanges"
+      ],
+      "description": "RaaS that moved from Windows-only encryption to Linux and ESXi variants, with a Rust Megazord encryptor.",
+      "double_extortion": true,
+      "extensions": [
+        "akira",
+        "akiranew",
+        "aki",
+        "powerranges"
+      ],
+      "first_seen": 2023,
+      "id": "akira",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Akira",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi",
+        "Hyper-V"
+      ],
+      "ransom_notes": [
+        "akira_readme.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-109a"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1562.001",
+        "T1133",
+        "T1078",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Clop",
+        "CL0P",
+        "TA505"
+      ],
+      "description": "Data-theft-first operation best known for mass exploitation of managed file-transfer products.",
+      "double_extortion": true,
+      "extensions": [
+        "clop",
+        "c_i_0p"
+      ],
+      "first_seen": 2019,
+      "id": "clop",
+      "initial_access": [
+        "zero-day exploitation",
+        "file-transfer appliances",
+        "web shells"
+      ],
+      "model": "RaaS",
+      "name": "Cl0p",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "ClopReadMe.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-158a"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "financial",
+        "government",
+        "education"
+      ],
+      "ttps": [
+        "T1190",
+        "T1505.003",
+        "T1486",
+        "T1567",
+        "T1041"
+      ]
+    },
+    {
+      "aliases": [
+        "Playcrypt"
+      ],
+      "description": "Closed ransomware group with custom encryption and double extortion, active across government and enterprise.",
+      "double_extortion": true,
+      "extensions": [
+        "play"
+      ],
+      "first_seen": 2022,
+      "id": "play",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Play",
+      "platforms": [
+        "Windows",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt",
+        "ReadMe.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-352a"
+      ],
+      "status": "active",
+      "targets": [
+        "government",
+        "critical infrastructure",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1003.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [],
+      "description": "RaaS that absorbed affiliates from disrupted operations; no stable file extension is reliable for identification.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2024,
+      "id": "ransomhub",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "RansomHub",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-242a"
+      ],
+      "status": "unknown",
+      "targets": [
+        "enterprise",
+        "critical infrastructure",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1562.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "BlackCat",
+        "Noberus",
+        "ALPHV"
+      ],
+      "description": "Rust-based RaaS associated with high-impact healthcare and critical-infrastructure intrusions.",
+      "double_extortion": true,
+      "extensions": [
+        "blackcat",
+        "alphv",
+        "noberus"
+      ],
+      "first_seen": 2021,
+      "id": "alphv",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "ALPHV / BlackCat",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi",
+        "NAS"
+      ],
+      "ransom_notes": [
+        "RECOVER-FILES.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-353a"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "healthcare",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Medusa Locker",
+        "Medusa ransomware"
+      ],
+      "description": "RaaS with a long-lived leak site, broad targeting and repeated use of vulnerable internet-facing services.",
+      "double_extortion": true,
+      "extensions": [
+        "medusa"
+      ],
+      "first_seen": 2021,
+      "id": "medusa",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "phishing",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Medusa",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "!!!READ_ME_MEDUSA!!!.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-071a"
+      ],
+      "status": "active",
+      "targets": [
+        "critical infrastructure",
+        "healthcare",
+        "education",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1562.001",
+        "T1078",
+        "T1190"
+      ]
+    },
+    {
+      "aliases": [
+        "BlackBasta",
+        "Storm-1811"
+      ],
+      "description": "RaaS that combined email bombing and vishing with fast enterprise-wide encryption; activity declined after 2024.",
+      "double_extortion": true,
+      "extensions": [
+        "basta",
+        "blackbasta"
+      ],
+      "first_seen": 2022,
+      "id": "blackbasta",
+      "initial_access": [
+        "phishing",
+        "vishing",
+        "VPN",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "Black Basta",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "readme.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-131a"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "critical infrastructure",
+        "SMB"
+      ],
+      "ttps": [
+        "T1566",
+        "T1486",
+        "T1490",
+        "T1562.001",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [],
+      "description": "RaaS known for healthcare and education intrusions and a short dwell time before encryption.",
+      "double_extortion": true,
+      "extensions": [
+        "rhysida"
+      ],
+      "first_seen": 2023,
+      "id": "rhysida",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Rhysida",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "CriticalBreachDetected.pdf",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-319a"
+      ],
+      "status": "active",
+      "targets": [
+        "healthcare",
+        "education",
+        "government",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Agenda"
+      ],
+      "description": "RaaS formerly tracked as Agenda, with cross-platform encryptors and high leak-site volume.",
+      "double_extortion": true,
+      "extensions": [
+        "qilin"
+      ],
+      "first_seen": 2022,
+      "id": "qilin",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Qilin",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt",
+        "qilin_readme.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "healthcare",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Royal ransomware"
+      ],
+      "description": "Predecessor/related brand to BlackSuit, with partial encryption and service-stop techniques.",
+      "double_extortion": true,
+      "extensions": [
+        "royal"
+      ],
+      "first_seen": 2022,
+      "id": "royal",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "phishing",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Royal",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.TXT",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-061a"
+      ],
+      "status": "rebranded",
+      "targets": [
+        "enterprise",
+        "manufacturing",
+        "healthcare"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1562.001",
+        "T1078",
+        "T1133"
+      ]
+    },
+    {
+      "aliases": [
+        "Conti ransomware"
+      ],
+      "description": "High-impact RaaS whose internal leaks exposed much of the affiliate playbook still reused today.",
+      "double_extortion": true,
+      "extensions": [
+        "conti",
+        "c0rtez"
+      ],
+      "first_seen": 2020,
+      "id": "conti",
+      "initial_access": [
+        "phishing",
+        "RDP",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Conti",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "readme.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa21-265a"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "healthcare",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1003",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Hive ransomware"
+      ],
+      "description": "RaaS dismantled by law enforcement in 2023; its encryptors and affiliate playbook remain in use.",
+      "double_extortion": true,
+      "extensions": [
+        "hive"
+      ],
+      "first_seen": 2021,
+      "id": "hive",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "phishing",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Hive",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi",
+        "FreeBSD"
+      ],
+      "ransom_notes": [
+        "HOW_TO_DECRYPT.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-321a"
+      ],
+      "status": "disrupted",
+      "targets": [
+        "healthcare",
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "REvil",
+        "Sodinokibi",
+        "Sodin"
+      ],
+      "description": "RaaS that popularised large-scale double extortion and supply-chain-style attacks.",
+      "double_extortion": true,
+      "extensions": [
+        "revil",
+        "sodinokibi",
+        "sse"
+      ],
+      "first_seen": 2019,
+      "id": "revil",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "phishing",
+        "RDP"
+      ],
+      "model": "RaaS",
+      "name": "REvil / Sodinokibi",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "readme.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa21-131a"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "managed service providers",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1190",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Ryuk ransomware"
+      ],
+      "description": "Legacy big-game ransomware distributed through TrickBot and Emotet infrastructure.",
+      "double_extortion": false,
+      "extensions": [
+        "ryk"
+      ],
+      "first_seen": 2018,
+      "id": "ryuk",
+      "initial_access": [
+        "phishing",
+        "RDP",
+        "TrickBot",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Ryuk",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "RyukReadMe.txt",
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa20-275a"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "healthcare",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1059",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "WanaCrypt0r",
+        "WCry"
+      ],
+      "description": "Self-propagating worm that caused global disruption in 2017; still useful as a detection regression case.",
+      "double_extortion": false,
+      "extensions": [
+        "wncry"
+      ],
+      "first_seen": 2017,
+      "id": "wannacry",
+      "initial_access": [
+        "SMB exploitation",
+        "EternalBlue"
+      ],
+      "model": "worm",
+      "name": "WannaCry",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "@Please_Read_Me@.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "opportunistic",
+        "healthcare",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1210",
+        "T1486",
+        "T1490"
+      ]
+    },
+    {
+      "aliases": [
+        "Locky ransomware"
+      ],
+      "description": "Early mass-distribution encryptor that normalised ransomware delivery through malicious attachments.",
+      "double_extortion": false,
+      "extensions": [
+        "locky"
+      ],
+      "first_seen": 2016,
+      "id": "locky",
+      "initial_access": [
+        "phishing",
+        "malicious documents"
+      ],
+      "model": "affiliate",
+      "name": "Locky",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "_Locky_recover_instructions.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "opportunistic",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1566",
+        "T1204.002",
+        "T1486"
+      ]
+    },
+    {
+      "aliases": [
+        "Phobos ransomware",
+        "EKING",
+        "Eight"
+      ],
+      "description": "Long-running family with many variants and a low-cost affiliate model aimed at smaller victims.",
+      "double_extortion": true,
+      "extensions": [
+        "phobos"
+      ],
+      "first_seen": 2019,
+      "id": "phobos",
+      "initial_access": [
+        "RDP",
+        "phishing",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "Phobos",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "info.hta",
+        "info.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-060a"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "government",
+        "healthcare"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1021.001",
+        "T1562.001"
+      ]
+    },
+    {
+      "aliases": [
+        "8base"
+      ],
+      "description": "RaaS focused on data theft and double extortion, often using Phobos-derived encryptors.",
+      "double_extortion": true,
+      "extensions": [
+        "8base"
+      ],
+      "first_seen": 2022,
+      "id": "eightbase",
+      "initial_access": [
+        "phishing",
+        "RDP",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "8Base",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-125a"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "BianLian ransomware"
+      ],
+      "description": "Group that shifted toward data-only extortion while retaining encryptor capability.",
+      "double_extortion": true,
+      "extensions": [
+        "bianlian"
+      ],
+      "first_seen": 2022,
+      "id": "bianlian",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts",
+        "exploited vulnerabilities"
+      ],
+      "model": "closed group",
+      "name": "BianLian",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-136a"
+      ],
+      "status": "active",
+      "targets": [
+        "healthcare",
+        "financial",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567",
+        "T1078",
+        "T1133"
+      ]
+    },
+    {
+      "aliases": [
+        "BlackSuit ransomware"
+      ],
+      "description": "Successor brand to Royal, using partial encryption and service disruption.",
+      "double_extortion": true,
+      "extensions": [
+        "blacksuit"
+      ],
+      "first_seen": 2023,
+      "id": "blacksuit",
+      "initial_access": [
+        "RDP",
+        "VPN",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "BlackSuit",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt",
+        "readme.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "disrupted",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1078",
+        "T1133"
+      ]
+    },
+    {
+      "aliases": [
+        "Cactus ransomware"
+      ],
+      "description": "RaaS that uses double extortion and encrypts large virtualised estates.",
+      "double_extortion": true,
+      "extensions": [
+        "cactus"
+      ],
+      "first_seen": 2023,
+      "id": "cactus",
+      "initial_access": [
+        "VPN",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Cactus",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "manufacturing",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1562.001",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Chaos ransomware"
+      ],
+      "description": "RaaS active against Windows, Linux and NAS systems, with a focus on smaller victims.",
+      "double_extortion": true,
+      "extensions": [
+        "chaos"
+      ],
+      "first_seen": 2024,
+      "id": "chaos",
+      "initial_access": [
+        "VPN",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Chaos",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi",
+        "NAS"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "enterprise",
+        "NAS"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1078",
+        "T1133"
+      ]
+    },
+    {
+      "aliases": [
+        "NightSpire ransomware"
+      ],
+      "description": "Newer RaaS brand observed in 2025 with double extortion and ESXi support.",
+      "double_extortion": true,
+      "extensions": [
+        "nspire"
+      ],
+      "first_seen": 2025,
+      "id": "nightspire",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "NightSpire",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Interlock ransomware"
+      ],
+      "description": "RaaS documented by CISA in 2025, using double extortion and data-theft pressure.",
+      "double_extortion": true,
+      "extensions": [
+        "interlock",
+        "1nt3rlock"
+      ],
+      "first_seen": 2024,
+      "id": "interlock",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Interlock",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-203a"
+      ],
+      "status": "active",
+      "targets": [
+        "critical infrastructure",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1562.001",
+        "T1190",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "SafePay ransomware"
+      ],
+      "description": "High-volume 2026 RaaS; no stable extension is reliable, so detection is behavioural.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2024,
+      "id": "safepay",
+      "initial_access": [
+        "stolen credentials",
+        "phishing",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "SafePay",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa26-293a"
+      ],
+      "status": "active",
+      "targets": [
+        "critical infrastructure",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1566",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Gunra ransomware"
+      ],
+      "description": "RaaS that expanded in 2026, targeting government and critical infrastructure with double extortion.",
+      "double_extortion": true,
+      "extensions": [
+        "encrt"
+      ],
+      "first_seen": 2025,
+      "id": "gunra",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "Gunra",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa26-222a"
+      ],
+      "status": "active",
+      "targets": [
+        "government",
+        "critical infrastructure",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1190",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Ghost",
+        "Cring"
+      ],
+      "description": "Long-running operation that exploits outdated internet-facing software and rotates encryptor variants.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2021,
+      "id": "ghost",
+      "initial_access": [
+        "outdated internet-facing services",
+        "known vulnerabilities"
+      ],
+      "model": "closed group",
+      "name": "Ghost (Cring)",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-050a"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "government",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1190",
+        "T1486",
+        "T1490",
+        "T1059",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "INC Ransom",
+        "Lynx",
+        "Sinobi"
+      ],
+      "description": "Related/overlapping RaaS brands tracked together in 2026 reporting; extensions vary by affiliate.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2024,
+      "id": "inc_lynx_sinobi",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "INC / Lynx / Sinobi",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "healthcare",
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "DragonForce ransomware"
+      ],
+      "description": "RaaS that became one of the more active leak-site operations in 2026.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2024,
+      "id": "dragonforce",
+      "initial_access": [
+        "valid accounts",
+        "VPN",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "DragonForce",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "TheGentlemen"
+      ],
+      "description": "New RaaS brand with high 2026 leak-site volume and affiliate-driven targeting.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2025,
+      "id": "thegentlemen",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "The Gentlemen",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Fog ransomware"
+      ],
+      "description": "RaaS observed targeting virtualised environments and education.",
+      "double_extortion": true,
+      "extensions": [
+        "fog"
+      ],
+      "first_seen": 2024,
+      "id": "fog",
+      "initial_access": [
+        "VPN",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Fog",
+      "platforms": [
+        "Windows",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "education"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133"
+      ]
+    },
+    {
+      "aliases": [
+        "Everest ransomware"
+      ],
+      "description": "Long-running group with data-leak extortion and a smaller encryption footprint.",
+      "double_extortion": true,
+      "extensions": [
+        "everest"
+      ],
+      "first_seen": 2021,
+      "id": "everest",
+      "initial_access": [
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Everest",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "KillSecurity"
+      ],
+      "description": "Smaller RaaS brand with data-theft extortion and affiliate activity.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2024,
+      "id": "killsecurity",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Kill Security",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "WorldLeaks"
+      ],
+      "description": "Data-theft extortion operation; may not deploy an encryptor, so file extensions are not a reliable signal.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2025,
+      "id": "worldleaks",
+      "initial_access": [
+        "valid accounts",
+        "exploited vulnerabilities"
+      ],
+      "model": "data extortion",
+      "name": "World Leaks",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1567",
+        "T1078",
+        "T1190"
+      ]
+    },
+    {
+      "aliases": [
+        "Devman ransomware"
+      ],
+      "description": "RaaS with data-leak extortion; no stable extension is known.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2024,
+      "id": "devman",
+      "initial_access": [
+        "VPN",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Devman",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Hunters",
+        "Hunters International"
+      ],
+      "description": "Group linked to former Hive affiliates; uses generic .locked markers, so family attribution is weak from extension alone.",
+      "double_extortion": true,
+      "extensions": [
+        "locked"
+      ],
+      "first_seen": 2023,
+      "id": "hunters",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Hunters International",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "healthcare"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1133",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Cicada 3301"
+      ],
+      "description": "RaaS using a Rust-based cross-platform encryptor; overlaps with ALPHV affiliate tradecraft.",
+      "double_extortion": true,
+      "extensions": [
+        "cicada3301"
+      ],
+      "first_seen": 2024,
+      "id": "cicada3301",
+      "initial_access": [
+        "VPN",
+        "valid accounts",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "Cicada3301",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Mallox ransomware",
+        "TargetCompany"
+      ],
+      "description": "Long-running family with frequent variants and vulnerable-service initial access.",
+      "double_extortion": true,
+      "extensions": [
+        "mallox"
+      ],
+      "first_seen": 2021,
+      "id": "mallox",
+      "initial_access": [
+        "RDP",
+        "exploited vulnerabilities",
+        "phishing"
+      ],
+      "model": "RaaS",
+      "name": "Mallox",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1190"
+      ]
+    },
+    {
+      "aliases": [
+        "Makop ransomware"
+      ],
+      "description": "Commodity family with many variants and a low-complexity affiliate model.",
+      "double_extortion": false,
+      "extensions": [
+        "makop"
+      ],
+      "first_seen": 2020,
+      "id": "makop",
+      "initial_access": [
+        "RDP",
+        "phishing"
+      ],
+      "model": "RaaS",
+      "name": "Makop",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Trigona ransomware"
+      ],
+      "description": "RaaS with double extortion and a broad Windows/Linux target set.",
+      "double_extortion": true,
+      "extensions": [
+        "trigona"
+      ],
+      "first_seen": 2022,
+      "id": "trigona",
+      "initial_access": [
+        "RDP",
+        "VPN",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Trigona",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Abyss ransomware"
+      ],
+      "description": "Smaller RaaS brand with double extortion and commodity initial access.",
+      "double_extortion": true,
+      "extensions": [
+        "abyss"
+      ],
+      "first_seen": 2022,
+      "id": "abyss",
+      "initial_access": [
+        "RDP",
+        "phishing"
+      ],
+      "model": "RaaS",
+      "name": "Abyss",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "SMB",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Cuba ransomware",
+        "COLDDRAW"
+      ],
+      "description": "Group known for high-value financial targets and exploitation of internet-facing appliances.",
+      "double_extortion": true,
+      "extensions": [
+        "cuba"
+      ],
+      "first_seen": 2019,
+      "id": "cuba",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Cuba",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "financial",
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1190",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Ragnar Locker",
+        "Ragnarok"
+      ],
+      "description": "Group known for manual intrusion and virtual-machine-aware encryption; disrupted in 2023.",
+      "double_extortion": true,
+      "extensions": [
+        "ragnar"
+      ],
+      "first_seen": 2020,
+      "id": "ragnar",
+      "initial_access": [
+        "RDP",
+        "VPN",
+        "exploited vulnerabilities"
+      ],
+      "model": "closed group",
+      "name": "Ragnar",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "disrupted",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1562.001"
+      ]
+    },
+    {
+      "aliases": [
+        "SunCrypt ransomware"
+      ],
+      "description": "RaaS that combined encryption with DDoS pressure; activity faded after 2021.",
+      "double_extortion": true,
+      "extensions": [
+        "suncrypt"
+      ],
+      "first_seen": 2020,
+      "id": "suncrypt",
+      "initial_access": [
+        "RDP",
+        "phishing"
+      ],
+      "model": "RaaS",
+      "name": "SunCrypt",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Vice Society"
+      ],
+      "description": "Group focused on schools and hospitals, often using data theft and intermittent encryption.",
+      "double_extortion": true,
+      "extensions": [],
+      "first_seen": 2021,
+      "id": "vicesociety",
+      "initial_access": [
+        "phishing",
+        "exploited vulnerabilities",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Vice Society",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "education",
+        "healthcare",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1566",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "BlackByte ransomware"
+      ],
+      "description": "RaaS with recurring variants and ESXi support, including a 2023 CISA advisory.",
+      "double_extortion": true,
+      "extensions": [
+        "blackbyte"
+      ],
+      "first_seen": 2021,
+      "id": "blackbyte",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities"
+      ],
+      "model": "RaaS",
+      "name": "BlackByte",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-059a"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1562.001",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Quantum ransomware"
+      ],
+      "description": "RaaS associated with Conti/Diavol affiliates and fast encryption.",
+      "double_extortion": true,
+      "extensions": [
+        "quantum"
+      ],
+      "first_seen": 2021,
+      "id": "quantum",
+      "initial_access": [
+        "RDP",
+        "phishing",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Quantum",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "healthcare"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Avaddon ransomware"
+      ],
+      "description": "RaaS that shut down in 2021 and released decryption keys.",
+      "double_extortion": true,
+      "extensions": [
+        "avaddon",
+        "avdn"
+      ],
+      "first_seen": 2020,
+      "id": "avaddon",
+      "initial_access": [
+        "phishing",
+        "RDP"
+      ],
+      "model": "RaaS",
+      "name": "Avaddon",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1566",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "Egregor ransomware"
+      ],
+      "description": "RaaS linked to Maze and Sekhmet, known for printing ransom notes on victim printers.",
+      "double_extortion": true,
+      "extensions": [
+        "egregor"
+      ],
+      "first_seen": 2020,
+      "id": "egregor",
+      "initial_access": [
+        "RDP",
+        "phishing",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Egregor",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "retail"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Nefilim ransomware",
+        "Nephilim"
+      ],
+      "description": "Group that combined encryption with data-leak extortion and large-file targeting.",
+      "double_extortion": true,
+      "extensions": [
+        "nefilim",
+        "nephilim"
+      ],
+      "first_seen": 2020,
+      "id": "nefilim",
+      "initial_access": [
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Nefilim",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "industrial"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Maze ransomware"
+      ],
+      "description": "Group that popularised publishing stolen data when victims refused to pay.",
+      "double_extortion": true,
+      "extensions": [
+        "maze"
+      ],
+      "first_seen": 2019,
+      "id": "maze",
+      "initial_access": [
+        "RDP",
+        "phishing",
+        "exploited vulnerabilities"
+      ],
+      "model": "closed group",
+      "name": "Maze",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "industrial"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "NetWalker ransomware",
+        "Mailto"
+      ],
+      "description": "Group disrupted in 2021; targeted healthcare and education during the pandemic.",
+      "double_extortion": true,
+      "extensions": [
+        "netwalker"
+      ],
+      "first_seen": 2019,
+      "id": "netwalker",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "phishing"
+      ],
+      "model": "closed group",
+      "name": "NetWalker",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "disrupted",
+      "targets": [
+        "healthcare",
+        "education",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "DarkSide ransomware"
+      ],
+      "description": "RaaS that shut down after the Colonial Pipeline incident; predecessor to BlackMatter.",
+      "double_extortion": true,
+      "extensions": [
+        "darkside"
+      ],
+      "first_seen": 2020,
+      "id": "darkside",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "phishing"
+      ],
+      "model": "RaaS",
+      "name": "DarkSide",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "critical infrastructure",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "BlackMatter ransomware"
+      ],
+      "description": "RaaS that succeeded DarkSide and was linked to ALPHV/BlackCat.",
+      "double_extortion": true,
+      "extensions": [
+        "blackmatter"
+      ],
+      "first_seen": 2021,
+      "id": "blackmatter",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "BlackMatter",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "HelloKitty ransomware"
+      ],
+      "description": "Group that exploits internet-facing vulnerabilities and uses double extortion.",
+      "double_extortion": true,
+      "extensions": [
+        "hellokitty"
+      ],
+      "first_seen": 2021,
+      "id": "hellokitty",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "VPN"
+      ],
+      "model": "closed group",
+      "name": "HelloKitty",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1190",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Knight ransomware",
+        "Cyclops"
+      ],
+      "description": "RaaS successor to Cyclops, with cross-platform encryption and data theft.",
+      "double_extortion": true,
+      "extensions": [
+        "knight_l"
+      ],
+      "first_seen": 2023,
+      "id": "knight",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Knight",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Lorenz ransomware"
+      ],
+      "description": "Group known for exfiltration-first operations and use of legitimate remote-access tooling.",
+      "double_extortion": true,
+      "extensions": [
+        "lorenz"
+      ],
+      "first_seen": 2022,
+      "id": "lorenz",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Lorenz",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1003",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Checkmate ransomware"
+      ],
+      "description": "Ransomware that targets NAS shares, often with low-and-slow encryption across many extensions.",
+      "double_extortion": false,
+      "extensions": [
+        "checkmate"
+      ],
+      "first_seen": 2022,
+      "id": "checkmate",
+      "initial_access": [
+        "SMB",
+        "NAS exposure",
+        "weak credentials"
+      ],
+      "model": "closed group",
+      "name": "Checkmate",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "NAS"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "NAS",
+        "SMB",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.002",
+        "T1110"
+      ]
+    },
+    {
+      "aliases": [
+        "RansomExx",
+        "Defray777"
+      ],
+      "description": "Cross-platform family known for Linux and ESXi variants and high-value targets.",
+      "double_extortion": true,
+      "extensions": [
+        "ransomexx"
+      ],
+      "first_seen": 2020,
+      "id": "ransomexx",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "exploited vulnerabilities"
+      ],
+      "model": "closed group",
+      "name": "RansomEXX",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "government",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1489",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "IceFire ransomware"
+      ],
+      "description": "Linux-focused encryptor observed in 2023, with a smaller Windows footprint.",
+      "double_extortion": false,
+      "extensions": [
+        "ifire"
+      ],
+      "first_seen": 2023,
+      "id": "icefire",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "VPN"
+      ],
+      "model": "closed group",
+      "name": "IceFire",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "media",
+        "technology"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1190"
+      ]
+    },
+    {
+      "aliases": [
+        "GonnaCry"
+      ],
+      "description": "Linux encryptor derived from an open-source project, useful as a lab and regression case.",
+      "double_extortion": false,
+      "extensions": [
+        "gonnacry"
+      ],
+      "first_seen": 2021,
+      "id": "gonnacry",
+      "initial_access": [
+        "exposed services",
+        "weak credentials"
+      ],
+      "model": "open-source derivative",
+      "name": "Gonnacry",
+      "platforms": [
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "Linux servers",
+        "SMB"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1190"
+      ]
+    },
+    {
+      "aliases": [
+        "Erebus ransomware"
+      ],
+      "description": "Early cross-platform family known for compromising Linux web servers.",
+      "double_extortion": false,
+      "extensions": [
+        "erebus"
+      ],
+      "first_seen": 2017,
+      "id": "erebus",
+      "initial_access": [
+        "exploited vulnerabilities",
+        "web servers"
+      ],
+      "model": "closed group",
+      "name": "Erebus",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "web hosting"
+      ],
+      "ttps": [
+        "T1190",
+        "T1486",
+        "T1490"
+      ]
+    },
+    {
+      "aliases": [
+        "Babuk Locker",
+        "Babyk"
+      ],
+      "description": "Family whose source leak seeded many ESXi encryptors still seen in later campaigns.",
+      "double_extortion": true,
+      "extensions": [
+        "babuk"
+      ],
+      "first_seen": 2021,
+      "id": "babuk",
+      "initial_access": [
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "Babuk",
+      "platforms": [
+        "Windows",
+        "Linux",
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "ESXiArgs ransomware"
+      ],
+      "description": "Mass-exploitation campaign that encrypted ESXi datastores and left .args files.",
+      "double_extortion": false,
+      "extensions": [
+        "args"
+      ],
+      "first_seen": 2023,
+      "id": "esxiargs",
+      "initial_access": [
+        "CVE-2021-21974",
+        "exposed OpenSLP"
+      ],
+      "model": "opportunistic",
+      "name": "ESXiArgs",
+      "platforms": [
+        "ESXi"
+      ],
+      "ransom_notes": [
+        "ransom.html"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "ESXi",
+        "virtual infrastructure"
+      ],
+      "ttps": [
+        "T1190",
+        "T1486",
+        "T1490",
+        "T1489"
+      ]
+    },
+    {
+      "aliases": [
+        "CryptoLocker"
+      ],
+      "description": "Historical family that established the modern ransomware payment model.",
+      "double_extortion": false,
+      "extensions": [
+        "cryptolocker",
+        "keepcalm"
+      ],
+      "first_seen": 2013,
+      "id": "cryptolocker",
+      "initial_access": [
+        "phishing",
+        "Gameover ZeuS"
+      ],
+      "model": "closed group",
+      "name": "CryptoLocker",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "DECRYPT_INSTRUCTIONS.html"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "opportunistic",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1566",
+        "T1486"
+      ]
+    },
+    {
+      "aliases": [
+        "CryptoWall"
+      ],
+      "description": "Mass-distribution family from the exploit-kit era; useful for regression testing.",
+      "double_extortion": false,
+      "extensions": [
+        "cryptowall"
+      ],
+      "first_seen": 2014,
+      "id": "cryptowall",
+      "initial_access": [
+        "phishing",
+        "exploit kits"
+      ],
+      "model": "affiliate",
+      "name": "CryptoWall",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "DECRYPT_INSTRUCTIONS.html"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "opportunistic",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1566",
+        "T1204.002",
+        "T1486"
+      ]
+    },
+    {
+      "aliases": [
+        "TeslaCrypt"
+      ],
+      "description": "Historical family that targeted gaming files and later released its keys.",
+      "double_extortion": false,
+      "extensions": [
+        "ccc",
+        "vvv",
+        "xtbl"
+      ],
+      "first_seen": 2015,
+      "id": "teslacrypt",
+      "initial_access": [
+        "phishing",
+        "exploit kits"
+      ],
+      "model": "affiliate",
+      "name": "TeslaCrypt",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "RECOVERY_KEY.TXT"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "gaming",
+        "consumer"
+      ],
+      "ttps": [
+        "T1566",
+        "T1486"
+      ]
+    },
+    {
+      "aliases": [
+        "Critroni",
+        "Curve-Tor-Bitcoin Locker"
+      ],
+      "description": "Early Tor-based locker; no single reliable extension across variants.",
+      "double_extortion": false,
+      "extensions": [],
+      "first_seen": 2014,
+      "id": "ctblocker",
+      "initial_access": [
+        "phishing",
+        "exploit kits"
+      ],
+      "model": "closed group",
+      "name": "CTB-Locker",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "DecryptAllFiles.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "opportunistic",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1566",
+        "T1486"
+      ]
+    },
+    {
+      "aliases": [
+        "ExPetr",
+        "Petya.A"
+      ],
+      "description": "Destructive wiper disguised as ransomware; included because behaviour overlaps with encryption attacks.",
+      "double_extortion": false,
+      "extensions": [],
+      "first_seen": 2017,
+      "id": "notpetya",
+      "initial_access": [
+        "supply-chain compromise",
+        "EternalBlue",
+        "credential theft"
+      ],
+      "model": "wiper",
+      "name": "NotPetya",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1195.002",
+        "T1210",
+        "T1485",
+        "T1561"
+      ]
+    },
+    {
+      "aliases": [
+        "BadRabbit"
+      ],
+      "description": "Worm-like encryptor that spread through fake updates and network shares.",
+      "double_extortion": false,
+      "extensions": [
+        "encrypted"
+      ],
+      "first_seen": 2017,
+      "id": "badrabbit",
+      "initial_access": [
+        "fake Flash update",
+        "credential theft",
+        "SMB"
+      ],
+      "model": "worm",
+      "name": "Bad Rabbit",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "media",
+        "government",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1189",
+        "T1210",
+        "T1486"
+      ]
+    },
+    {
+      "aliases": [
+        "GandCrab"
+      ],
+      "description": "High-volume RaaS that retired in 2019 after claiming large payouts.",
+      "double_extortion": false,
+      "extensions": [
+        "gandcrab"
+      ],
+      "first_seen": 2018,
+      "id": "gandcrab",
+      "initial_access": [
+        "phishing",
+        "exploit kits",
+        "RDP"
+      ],
+      "model": "RaaS",
+      "name": "GandCrab",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "GANDCRAB.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "opportunistic",
+        "enterprise"
+      ],
+      "ttps": [
+        "T1566",
+        "T1486",
+        "T1021.001"
+      ]
+    },
+    {
+      "aliases": [
+        "DoppelPaymer ransomware"
+      ],
+      "description": "BitPaymer-derived group active in big-game and healthcare incidents.",
+      "double_extortion": true,
+      "extensions": [
+        "doppelpaymer"
+      ],
+      "first_seen": 2019,
+      "id": "doppelpaymer",
+      "initial_access": [
+        "RDP",
+        "phishing",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "DoppelPaymer",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "healthcare",
+        "government"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "AvosLocker ransomware"
+      ],
+      "description": "RaaS known for remote-access tooling and affiliate support.",
+      "double_extortion": true,
+      "extensions": [
+        "avoslocker"
+      ],
+      "first_seen": 2021,
+      "id": "avoslocker",
+      "initial_access": [
+        "VPN",
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "RaaS",
+      "name": "AvosLocker",
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "active",
+      "targets": [
+        "enterprise",
+        "critical infrastructure"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1078",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "MountLocker"
+      ],
+      "description": "RaaS that evolved into the Astro team and used data-leak extortion.",
+      "double_extortion": true,
+      "extensions": [
+        "mountlocker"
+      ],
+      "first_seen": 2020,
+      "id": "mountlocker",
+      "initial_access": [
+        "RDP",
+        "phishing"
+      ],
+      "model": "RaaS",
+      "name": "Mount Locker",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "healthcare"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1567"
+      ]
+    },
+    {
+      "aliases": [
+        "Hades ransomware"
+      ],
+      "description": "Group linked to Wizard Spider tradecraft and big-game hunting.",
+      "double_extortion": true,
+      "extensions": [
+        "hades"
+      ],
+      "first_seen": 2020,
+      "id": "hades",
+      "initial_access": [
+        "RDP",
+        "valid accounts"
+      ],
+      "model": "closed group",
+      "name": "Hades",
+      "platforms": [
+        "Windows"
+      ],
+      "ransom_notes": [
+        "README.txt"
+      ],
+      "references": [
+        "https://www.cisa.gov/stopransomware"
+      ],
+      "status": "inactive",
+      "targets": [
+        "enterprise",
+        "manufacturing"
+      ],
+      "ttps": [
+        "T1486",
+        "T1490",
+        "T1021.001",
+        "T1567"
+      ]
+    }
+  ],
+  "license": "MIT",
+  "name": "Talus Ransomware Knowledge Base",
+  "schema_version": 1,
+  "sources": [
+    "CISA #StopRansomware advisories (2021-2026)",
+    "MITRE ATT&CK Enterprise techniques",
+    "Public vendor and incident-response reporting",
+    "Talus field observations and detection engineering notes"
+  ],
+  "stats": {
+    "extension_count": 82,
+    "families_with_extensions": 64,
+    "family_count": 76
+  },
+  "updated": "2026-11-16"
+}

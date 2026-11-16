@@ -2,6 +2,82 @@
 
 All notable changes to talus-process-monitor will be documented in this file.
 
+## [Unreleased]
+
+## [0.8.5] - 2026-11-16
+
+### Added
+- Offline-trained MeMLP ransomware checkpoint embedded in the agent
+  (`data/memlp/ransomware-v1.json`, 18 KB, 1,031 parameters). It is trained on
+  48,040 windows from seven ransomware families plus goodware, derived from
+  CSU-Ransomware-Data, mixed with
+  teacher-labelled synthetic samples and anchor copies. Held-out drift phase
+  3c: AUC 0.9965, ransomware recall 90.3%, benign class-2 false positives 0.0%,
+  and 11/11 anchors correct. Coverage is seven families, not all 64 in MLRan.
+  The reproducible pipeline, manifest, held-out report, feature mapping and
+  licence caveat live in `data/training/`; no raw corpus is committed.
+- Embedded ransomware knowledge base written in Externum at
+  `data/ransomware/knowledge.ext`. It covers 76 families and 82
+  family-specific marker extensions, with aliases, platforms, first-seen dates,
+  ransom notes, initial access, ATT&CK techniques, targets and references.
+  `generate.sh` exports deterministic JSON plus a 635-byte sorted marker set;
+  only the marker set is embedded, using a std-only binary search. The full
+  JSON stays outside the binary. This keeps MIT and Enterprise small, adds no
+  dependency, and needs no Externum or JSON parser in production.
+- Filesystem coverage now includes legacy `unlink`, `chmod` and `open`, plus
+  `openat2`, `rename`, `renameat`, `renameat2` and `truncate`, alongside the
+  existing `unlinkat`, `fchmodat` and `openat` tracepoints. Direct syscalls and
+  libc wrappers that choose an older variant no longer bypass destructive/open
+  detection.
+- Distinctive ransom-note basenames from the Externum database are a new
+  high-confidence signal. Generic names such as `README.txt` are excluded; the
+  runtime artifact is 303 bytes and uses the same std-only binary search.
+- Always-on composite verdicts in the shared monitor core. In addition to the
+  open-rate threshold, each 1-second window tracks known ransomware-marker
+  extensions, `unlink`/`chmod` activity, persistence-path writes, network
+  egress, and directory/extension spread. An early verdict can fire at 12
+  opens/s (instead of the configured threshold) only when independent signals
+  reach a score of 65. Alerts now expose `score`, `early` and `reasons` in JSON,
+  plain text and the TUI. This is shared by MIT and Enterprise and does not
+  require `--memlp`.
+- `talus-config` — a full-screen configurator (the same TUI as the dashboard)
+  for Talus and Talus Enterprise, shipped as its own binary so the monitor
+  carries no editor. It saves monitor flags (threshold, output mode, ignored
+  comms, MeMLP, eBPF object, dashboard and SIEM sinks) to `config.conf` in the
+  Talus config directory. The agent reads the file at start-up, so options are
+  applied permanently without running the configurator at boot; flags typed on
+  the command line still win for that run. `talus config` opens the same screen
+  on a terminal and keeps `show`/`path`/`set`/`unset`/`reset` for scripts.
+- TUI backgrounds: black, gray, white and navy (`--theme`, or
+  `background = …` via `talus config`). Each choice swaps the whole palette, not
+  only the fill, so text, borders and selection stay legible.
+
+### Fixed
+- MeMLP attached a neural verdict only when a per-PID alert counter reached a
+  multiple of ten. A process normally alerts once, so nearly every alert had
+  `memlp: null` and the model almost never trained. Verdicts now run on every
+  alert, while training uses a global throttle.
+- MeMLP feature extraction no longer counts `/proc`, `/sys` and `/dev` opens.
+  Those are kernel/device traffic; letting a daemon's housekeeping inflate the
+  open-rate feature could hide a real user-data burst.
+
+### Changed
+- MeMLP now starts from the embedded trained checkpoint instead of the
+  heuristic pre-fit. A missing `--memlp-checkpoint` file falls back to that
+  embedded model; an existing user checkpoint still overrides it. The old
+  pre-fit remains available as `MeMLP::new()` for tests and recovery.
+- MeMLP now trains from two sources: the global alert cadence (one step per ten
+  alerts, so low-rate hosts still learn) and a bounded background sample of
+  four active PIDs per second. Background samples teach ordinary benign
+  behaviour; alert samples keep the high-signal cases sharp.
+- A distinctive ransom-note basename now saturates MeMLP's artifact-diversity
+  feature, so the neural head sees the same high-confidence signal as the
+  heuristic.
+- Release builds now strip symbols (`strip = true`) in both the MIT and
+  Enterprise profiles. This removes debug/symbol payload without changing
+  runtime behaviour; measured deployment binaries were 6.7 MB (MIT) and 21 MB
+  (Enterprise) on the build host.
+
 ## [0.8.4] - 2026-11-11
 
 ### Fixed

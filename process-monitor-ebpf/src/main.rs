@@ -53,6 +53,18 @@ pub fn sys_enter_openat(ctx: TracePointContext) -> u32 {
     emit_event(&ctx, EVENT_OPENAT, 1)
 }
 
+/// Legacy `open` — direct-syscall malware sometimes avoids `openat`.
+#[tracepoint(name = "sys_enter_open", category = "syscalls")]
+pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
+    emit_event(&ctx, EVENT_OPENAT, 0)
+}
+
+/// `openat2` — newer kernels and newer malware can use this variant.
+#[tracepoint(name = "sys_enter_openat2", category = "syscalls")]
+pub fn sys_enter_openat2(ctx: TracePointContext) -> u32 {
+    emit_event(&ctx, EVENT_OPENAT, 1)
+}
+
 /// eBPF-safe byte copy — avoids LLVM memcpy builtin.
 #[inline(always)]
 unsafe fn raw_copy(dst: *mut u8, src: *const u8, len: usize) {
