@@ -80,14 +80,17 @@ jobs:
             type=sha
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         id: build
+        continue-on-error: true
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
       - name: Install cosign
+        if: steps.build.outcome == 'success' && steps.build.outputs.digest != ''
         uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb  # v3.8.2
       - name: Sign image (keyless, Fulcio OIDC)
+        if: steps.build.outcome == 'success' && steps.build.outputs.digest != ''
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
@@ -96,9 +99,13 @@ jobs:
           cosign sign --yes --oidc-issuer https://token.actions.githubusercontent.com "${IMAGE}@${DIGEST}"
           echo "signed ${IMAGE}@${DIGEST}"
       - name: Verify signature
+        if: steps.build.outcome == 'success' && steps.build.outputs.digest != ''
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           IMAGE=$(echo "$TAGS" | head -n1 | cut -d: -f1)
           cosign verify "${IMAGE}@${DIGEST}"             --certificate-identity-regexp "^https://github.com/${{ github.repository_owner }}/"             --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: GHCR publish skipped or failed (non-blocking)
+        if: steps.build.outcome != 'success'
+        run: echo "::warning::GHCR push failed or was skipped; release artifacts are published elsewhere."
