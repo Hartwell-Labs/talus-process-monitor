@@ -395,13 +395,40 @@ jobs:
           upload talus-monitor final/talus-tui
           upload talus-installer final/talus-installer
 
+          # Carry this version's changelog to the download page, so a release
+          # no longer lands there as "No changes recorded". The bullets become
+          # the description cells; the landing page splits on semicolons.
+          NOTES=$(awk -v ver="$VERSION" '
+            function finish() {
+              if (item == "") return
+              gsub(/`/, "", item)
+              gsub(/[[:space:]]+/, " ", item)
+              gsub(/;/, ",", item)
+              sub(/[.]$/, "", item)
+              if (out != "") out = out "; "
+              out = out item
+              item = ""
+            }
+            $0 ~ "^## \\[" ver "\\]" { in_section = 1; next }
+            in_section && /^## \\[/ { finish(); exit }
+            in_section && /^[[:space:]]*[-*][[:space:]]+/ {
+              finish()
+              sub(/^[[:space:]]*[-*][[:space:]]+/, "")
+              item = $0
+              next
+            }
+            in_section && item != "" && /^[[:space:]]+[^[:space:]]/ { item = item " " $0 }
+            END { finish(); print out }
+          ' CHANGELOG.md | cut -c1-1500)
+
           jq -n \
             --argjson monitor "$(stat -c%s final/talus-tui)" \
             --argjson installer "$(stat -c%s final/talus-installer)" \
+            --arg notes "$NOTES" \
             '{files:[
                 {name:"talus-monitor", size:$monitor},
                 {name:"talus-installer", size:$installer}
-             ]}' \
+             ], notes:$notes}' \
           | curl -fsS -X POST \
               -H "Authorization: Bearer ${TOKEN}" \
               -H "Content-Type: application/json" \

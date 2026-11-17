@@ -5,5 +5,5 @@ contact_links:
     url: https://github.com/BartoszOsiej
     about: Official documentation
   - name: Security
-    url: https://github.com/BartoszOsiej/talus-process-monitor/security/advisories/new
+    url: https://github.com/Hartwell-Labs/talus-process-monitor/security/advisories/new
     about: Private security reports (see SECURITY.md)

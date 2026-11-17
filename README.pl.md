@@ -22,26 +22,28 @@
 ## Szybki start (30 sekund)
 
 ```bash
-git clone https://github.com/BartoszOsiej/talus-process-monitor
-cd talus-process-monitor
-./build.sh                      # lub: ./install.sh --system
+# 1. Aktualna binarka (v0.8.6, wbudowany obiekt eBPF)
+curl -fLO https://download.hartwell-labs.pl/mit/0.8.6/talus-monitor
+chmod +x talus-monitor
 
 # tryb monitorowania (bez auto-kill)
-sudo ./target/release/talus-monitor monitor
+sudo ./talus-monitor monitor
 
 # pełny tryb EDR: detekcja + automatyczna odpowiedź
-sudo ./target/release/talus-monitor monitor --auto-kill
+sudo ./talus-monitor monitor --auto-kill
 ```
+
+Ze źródeł: `git clone https://github.com/Hartwell-Labs/talus-process-monitor && cd talus-process-monitor && ./build.sh`.
 
 **Docker (jedna linia):**
 
 ```bash
 # --privileged jest wymagany: tracepointy eBPF potrzebują dostępu do jądra (CAP_BPF/CAP_SYS_ADMIN)
 docker run --privileged --pid=host -v /sys/kernel/btf:/sys/kernel/btf:ro \
-  ghcr.io/bartoszosiej/talus-process-monitor:latest
+  ghcr.io/hartwell-labs/talus-process-monitor:latest
 ```
 
-Gotowe binarki: [Releases](https://github.com/BartoszOsiej/talus-process-monitor/releases).
+Gotowe binarki, sumy kontrolne i proweniencja: [Releases](https://github.com/Hartwell-Labs/talus-process-monitor/releases) oraz [strona pobierania](https://download.hartwell-labs.pl/).
 
 ---
 

@@ -447,6 +447,11 @@ async function landing_page(env, ctx) {
       </div>
       <h2>Licensed edition${enterprise_latest ? ` · v${escape_html(enterprise_latest.version)}` : ''}</h2>
       <p>Signed binary and verification material. The key must exist in the license database, be unrevoked and unexpired, with <code class="inline">tier = enterprise</code>.</p>
+      ${enterprise_latest && mit_latest && enterprise_latest.version !== mit_latest.version
+        ? `<p class="note">The licensed line ships on its own cadence. Its latest published build is <strong>v${escape_html(
+            enterprise_latest.version,
+          )}</strong>; the community line is at v${escape_html(mit_latest.version)}.</p>`
+        : ''}
       <div class="license">
         <label for="license">License key</label>
         <div class="license-row">
@@ -982,9 +987,27 @@ async function finalize_release(env, line, version, request) {
     files.push(entry);
   }
 
+  // Release prose travels with the artifacts, so the landing page never has to
+  // say "No changes recorded" for a release the publisher described. Both
+  // fields are optional: older workflows keep working unchanged.
+  const notes = typeof body?.notes === 'string' ? body.notes.trim().slice(0, 1500) : '';
+  const changes = Array.isArray(body?.changes)
+    ? body.changes
+        .slice(0, 12)
+        .map((change) => ({
+          name: String(change?.name || '').slice(0, 120),
+          file: String(change?.file || '').slice(0, 200),
+          description: String(change?.description || '').slice(0, 800),
+        }))
+        .filter((change) => change.name || change.file || change.description)
+    : [];
+
   const manifest = (await read_manifest(env, line)) || { line, versions: [] };
   const versions = (manifest.versions || []).filter((v) => v.version !== version);
-  versions.push({ version, published_at: new Date().toISOString(), files });
+  const entry = { version, published_at: new Date().toISOString(), files };
+  if (notes) entry.notes = notes;
+  if (changes.length) entry.changes = changes;
+  versions.push(entry);
 
   // Retention keeps storage inside the free tier (and bounds the landing page).
   while (versions.length > RETENTION_VERSIONS) {

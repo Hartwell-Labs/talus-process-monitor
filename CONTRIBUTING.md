@@ -43,7 +43,7 @@ contribution.
 
 Talus detects ransomware via eBPF — this is a security-focused project. If
 you discover a vulnerability, report it privately to `thethreadcalls@outlook.com`
-or via [GitHub Security Advisories](https://github.com/BartoszOsiej/talus-process-monitor/security/advisories/new)
+or via [GitHub Security Advisories](https://github.com/Hartwell-Labs/talus-process-monitor/security/advisories/new)
 (see [SECURITY.md](SECURITY.md)). Do not open a public issue for security
 vulnerabilities.
 

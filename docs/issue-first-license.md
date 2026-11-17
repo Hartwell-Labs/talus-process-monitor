@@ -150,7 +150,7 @@ Activate it with:
 
     talus license activate <KEY>
 
-Full activation guide: https://github.com/BartoszOsiej/talus-process-monitor/blob/master/docs/customer-activation-guide.md
+Full activation guide: https://github.com/Hartwell-Labs/talus-process-monitor/blob/master/docs/customer-activation-guide.md
 
 License details:
   License ID:  TALUS-XXXX-XXXX-XXXX

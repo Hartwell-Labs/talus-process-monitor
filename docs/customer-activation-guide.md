@@ -25,7 +25,7 @@ After payment you received an email containing:
 ## 2. Download the binary
 
 Grab the latest **Enterprise-capable** release from
-[GitHub Releases](https://github.com/BartoszOsiej/talus-process-monitor/releases).
+[GitHub Releases](https://github.com/Hartwell-Labs/talus-process-monitor/releases).
 Every release asset ships with SHA-256 checksums and Sigstore signatures —
 verify before running:
 
@@ -101,5 +101,5 @@ Notes:
 | `license is activated for a different machine` | fingerprint changed (hardware change, VM clone) | deactivate and re-activate, or contact support |
 
 Support: open a ticket via email (see your purchase email) or
-[GitHub issues](https://github.com/BartoszOsiej/talus-process-monitor/issues)
+[GitHub issues](https://github.com/Hartwell-Labs/talus-process-monitor/issues)
 for non-sensitive questions.

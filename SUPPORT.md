@@ -7,7 +7,7 @@ Thank you for using Talus Process Monitor!
 - **Documentation:** start with the [README](README.md), the
   [Architecture guide](ARCHITECTURE.md) and the
   [customer activation guide](docs/customer-activation-guide.md)
-- **Bugs & questions:** [GitHub Issues](https://github.com/BartoszOsiej/talus-process-monitor/issues)
+- **Bugs & questions:** [GitHub Issues](https://github.com/Hartwell-Labs/talus-process-monitor/issues)
   — please search before opening a new one
 - **Security vulnerabilities:** do **not** open a public issue — follow
   [SECURITY.md](SECURITY.md)

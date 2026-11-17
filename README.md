@@ -108,25 +108,26 @@ sudo talus-monitor run monitor --auto-kill
 ## Quick Start (30 seconds)
 
 ```bash
-# 1. Get it
-git clone https://github.com/BartoszOsiej/talus-process-monitor
-cd talus-process-monitor
-./build.sh                      # or: ./install.sh --system
+# 1. Get the current binary (v0.8.6, embedded eBPF object)
+curl -fLO https://download.hartwell-labs.pl/mit/0.8.6/talus-monitor
+chmod +x talus-monitor
 
 # 2. Run it — monitor-only mode
-sudo ./target/release/talus-monitor monitor
+sudo ./talus-monitor monitor
 
 # 3. Or full EDR mode: detect + auto-kill
-sudo ./target/release/talus-monitor monitor --auto-kill
+sudo ./talus-monitor monitor --auto-kill
 ```
 
-Pre-built binaries and container images: see [Releases](https://github.com/BartoszOsiej/talus-process-monitor/releases) (`process-monitor` static binary) and [Docker / Kubernetes](#docker--kubernetes).
+From source instead: `git clone https://github.com/Hartwell-Labs/talus-process-monitor && cd talus-process-monitor && ./build.sh`.
+
+Pre-built binaries, checksums and provenance: [Releases](https://github.com/Hartwell-Labs/talus-process-monitor/releases) and the [download page](https://download.hartwell-labs.pl/).
 
 > **Docker one-liner:**
 > ```bash
 > # --privileged is required: eBPF tracepoints need kernel access (CAP_BPF/CAP_SYS_ADMIN)
 > docker run --privileged --pid=host -v /sys/kernel/btf:/sys/kernel/btf:ro \
->   ghcr.io/bartoszosiej/talus-process-monitor:latest
+>   ghcr.io/hartwell-labs/talus-process-monitor:latest
 > ```
 
 ---
@@ -745,7 +746,7 @@ Talus follows a **20-level enterprise maturity model** — from open-source prot
 | L1 | Supply Chain Security (cargo-deny, SBOM, gitleaks) | ✅ |
 | L2 | Build Provenance (SLSA, cosign, attestation) | ✅ |
 | L3 | Security Hardening (seccomp, caps, Landlock, audit) | ✅ |
-| L4 | Quality Gates (78 tests, clippy clean) | ✅ |
+| L4 | Quality Gates (209 tests, clippy clean) | ✅ |
 | L5 | Agent Sandbox (seccomp-BPF, capability drop, Landlock) | ✅ |
 | L6 | Signed Audit Log (hash chain, SOC2 compliance) | ✅ |
 | L7 | Web Security (TLS, API auth, restricted CORS) | ✅ |

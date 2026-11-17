@@ -21,12 +21,12 @@ sudo talus-monitor run monitor --auto-kill    # EDR mode (Enterprise license)
 Prefer building from source?
 
 ```bash
-git clone https://github.com/BartoszOsiej/talus-process-monitor.git
+git clone https://github.com/Hartwell-Labs/talus-process-monitor.git
 cd talus-process-monitor && ./build.sh
 sudo ./target/release/talus-monitor monitor
 ```
 
-- Free agent, MIT: https://github.com/BartoszOsiej/talus-process-monitor
+- Free agent, MIT: https://github.com/Hartwell-Labs/talus-process-monitor
 - Deployment & tuning playbook: https://hartwell-labs.pl/talus-process-monitor/field-guide.html
 - Comparison vs Falco/Wazuh/Tracee: https://hartwell-labs.pl/talus-process-monitor/comparison.html
 
