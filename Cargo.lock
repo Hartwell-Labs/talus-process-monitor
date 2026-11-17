@@ -703,7 +703,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce3570c36c63707251170aff6778ce2336055ff1e47ad4f83453ab4ca0e05bcc"
 dependencies = [
- "ftui-core",
+ "ftui-core 0.6.0",
  "ftui-extras",
  "ftui-layout",
  "ftui-render",
@@ -720,7 +720,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d27f8c470f267a8480dc81d93c936682452b512dcaeab4b92215a2fa81aa72"
 dependencies = [
  "ahash",
- "ftui-core",
+ "ftui-core 0.6.0",
 ]
 
 [[package]]
@@ -729,7 +729,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b5e91b38270c2bf340c47ee6792f1aa15c3d2c63d67768f11c097cdaf0aa610"
 dependencies = [
- "ftui-core",
+ "ftui-core 0.6.0",
  "ftui-render",
 ]
 
@@ -754,12 +754,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "ftui-core"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d4c64843a160c4805bd5f277c818b241917c8f056e67e5b2424d5635db2f59"
+dependencies = [
+ "ahash",
+ "arc-swap",
+ "base64 0.23.1",
+ "bitflags",
+ "bumpalo",
+ "getrandom 0.3.4",
+ "getrandom 0.4.3",
+ "libc",
+ "signal-hook 0.4.5",
+ "unicode-display-width",
+ "unicode-segmentation",
+ "unicode-width",
+ "web-time",
+]
+
+[[package]]
 name = "ftui-extras"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b333c52b3fa031eddaff194a68a1b78924852fdb233154fc2686511bfeb185cc"
 dependencies = [
- "ftui-core",
+ "ftui-core 0.6.0",
  "ftui-render",
  "ftui-style",
  "ftui-text",
@@ -781,7 +802,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc61efaa1adadc14936d57e11942d34d61d88cf01f5622ae8350f42d33aea73e"
 dependencies = [
- "ftui-core",
+ "ftui-core 0.6.0",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -797,7 +818,7 @@ dependencies = [
  "ahash",
  "bitflags",
  "bumpalo",
- "ftui-core",
+ "ftui-core 0.6.0",
  "memchr",
  "smallvec",
  "unicode-segmentation",
@@ -812,7 +833,7 @@ checksum = "d6183b11343c07b86cedfbd4cb9be97804157a9cb3c3af22ebe82a7a3e8cffaa"
 dependencies = [
  "arc-swap",
  "ftui-backend",
- "ftui-core",
+ "ftui-core 0.6.0",
  "ftui-i18n",
  "ftui-layout",
  "ftui-render",
@@ -842,7 +863,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41f93c0914f3ee5b042c3ce0983a293f306b9953f8d6e7f2b09b394aab2d8eae"
 dependencies = [
- "ftui-core",
+ "ftui-core 0.6.0",
  "ftui-layout",
  "ftui-render",
  "ftui-style",
@@ -864,7 +885,7 @@ dependencies = [
  "ahash",
  "bitflags",
  "ftui-a11y",
- "ftui-core",
+ "ftui-core 0.6.0",
  "ftui-layout",
  "ftui-render",
  "ftui-runtime",
@@ -2147,7 +2168,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "ftui",
- "ftui-core",
+ "ftui-core 0.10.0",
  "ftui-extras",
  "ftui-layout",
  "ftui-render",
