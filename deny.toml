@@ -16,6 +16,12 @@ ignore = [
     #   RUSTSEC-2026-0248  im
     #   RUSTSEC-2026-0251  sized-chunks
     #   RUSTSEC-2026-0255  sized-chunks unsound
+    # chrono is unmaintained, not vulnerable: RUSTSEC-2026-0543 covers every
+    # version. It is used for RFC 3339 parsing and formatting on the licence
+    # and audit paths, where a silent behaviour change is worse than the
+    # maintenance status. Migration to jiff is tracked separately; remove this
+    # ignore when it lands.
+    "RUSTSEC-2026-0543",
     "RUSTSEC-2023-0126", # unwraps on client requests (build-only path)
     # Patched in rustls 0.23.45+ / webpki 0.103.x — kept here only if an
     # older lockfile is audited; remove after CI confirms the update.
