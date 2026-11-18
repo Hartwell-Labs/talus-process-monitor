@@ -252,7 +252,14 @@ export default {
         url.hostname === 'download.hartwell-labs.pl' ||
         env.DOWNLOAD_DEV_ALLOW_ANY === '1'
       ) {
-        return handle_download_request(request, env, ctx);
+        // Enterprise downloads verify the key against the same shared DB as
+        // activation. Attach the storage adapter here too, otherwise the
+        // download route sees no env.DB and returns 500 for every valid key.
+        return handle_download_request(
+          request,
+          { ...env, DB: createDB(env) },
+          ctx
+        );
       }
 
       // Attach the storage adapter once per request: native D1 if the binding
@@ -651,7 +658,7 @@ async function handle_activate(request, env) {
     expires_at: expires_at ?? null,
     tier,
     message: 'license activated',
-    license_key_display: await to_pretty(key, sha256_hex_bytes),
+    license_key_display: await to_pretty(effective_key, sha256_hex_bytes),
   });
 }
 

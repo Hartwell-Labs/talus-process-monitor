@@ -27,6 +27,10 @@ mod format;
 const KEY_FILE: &str = "signing_key.json";
 const LICENSES_FILE: &str = "issued_licenses.json";
 
+fn default_kid() -> String {
+    "v2".to_string()
+}
+
 /// Keys are NEVER stored inside the repository.
 /// Default location is `~/.secrets/talus/license-keys/` (owner-only, 0700).
 /// Override with the TALUS_KEYGEN_DIR environment variable.
@@ -68,6 +72,7 @@ struct SigningKeyData {
     /// Hex-encoded Ed25519 verifying key (public).
     public_key_hex: String,
     /// When the key was generated.
+    #[serde(default)]
     created_at: String,
 }
 
@@ -75,6 +80,8 @@ struct SigningKeyData {
 struct IssuedLicense {
     license_id: String,
     tier: String,
+    #[serde(default = "default_kid")]
+    kid: String,
     organization: Option<String>,
     expires_at: Option<String>,
     issued_at: String,
@@ -134,6 +141,10 @@ enum Commands {
         /// License tier: community or enterprise
         #[arg(long, default_value = "enterprise")]
         tier: String,
+
+        /// Signing key ID embedded in the payload. v1 is legacy, v2 is current.
+        #[arg(long, default_value = "v2", value_parser = ["v1", "v2"])]
+        kid: String,
 
         /// Organization name
         #[arg(long)]
@@ -198,6 +209,7 @@ fn main() -> Result<()> {
         Commands::Init => cmd_init()?,
         Commands::Issue {
             tier,
+            kid,
             organization,
             expires,
             license_id,
@@ -208,6 +220,7 @@ fn main() -> Result<()> {
             format,
         } => cmd_issue(
             tier,
+            kid,
             organization,
             expires,
             license_id,
@@ -272,6 +285,7 @@ fn cmd_init() -> Result<()> {
 
 fn cmd_issue(
     tier: String,
+    kid: String,
     organization: Option<String>,
     expires: Option<String>,
     license_id: Option<String>,
@@ -330,6 +344,7 @@ fn cmd_issue(
     let payload = serde_json::json!({
         "license_id": id,
         "tier": tier_lower,
+        "kid": kid,
         "features": features_list,
         "max_nodes": max_nodes,
         "expires_at": expires_at,
@@ -362,6 +377,7 @@ fn cmd_issue(
     registry.licenses.push(IssuedLicense {
         license_id: id.clone(),
         tier: tier_lower.clone(),
+        kid: kid.clone(),
         organization: organization.clone(),
         expires_at: expires_at.clone(),
         issued_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
@@ -376,6 +392,7 @@ fn cmd_issue(
         let out = serde_json::json!({
             "license_id": id,
             "tier": tier_lower,
+            "kid": kid,
             "organization": organization,
             "expires_at": expires_at,
             "max_nodes": max_nodes,
@@ -395,6 +412,7 @@ fn cmd_issue(
     println!();
     println!("  License ID:    {id}");
     println!("  Tier:          {tier}");
+    println!("  Key ID:        {kid}");
     if let Some(ref org) = organization {
         println!("  Organization:  {org}");
     }
@@ -491,6 +509,7 @@ fn cmd_verify(key_str: String) -> Result<()> {
             println!("✓ License key is VALID");
             println!("  License ID: {}", payload["license_id"]);
             println!("  Tier:       {}", payload["tier"]);
+            println!("  Key ID:     {}", payload["kid"]);
             if let Some(org) = payload["organization"].as_str() {
                 println!("  Organization: {org}");
             }

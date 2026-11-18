@@ -1700,24 +1700,23 @@ pub fn init_license() -> LicenseState {
             if let Some(ref org) = cache.payload.organization {
                 eprintln!("[talus] organization: {org}");
             }
-            // Expiry warnings
-            if let Some(ref exp) = cache.payload.expires_at {
+            // Expiry warnings. Use the timestamp, not whole days: a license
+            // expiring in two hours must not be reported as already expired
+            // just because num_days() truncates to zero.
+            if cache.payload.is_expired() {
+                eprintln!("[talus] ⚠ LICENSE EXPIRED — running in community mode");
+                LicenseState::community()
+            } else if let Some(ref exp) = cache.payload.expires_at {
                 if let Some(days) = days_remaining(exp) {
                     if days <= 0 {
-                        eprintln!("[talus] ⚠ LICENSE EXPIRED — running in community mode");
-                        LicenseState::community()
+                        eprintln!("[talus] ℹ license expires today");
                     } else if days <= 7 {
                         eprintln!("[talus] ⚠ WARNING: license expires in {days} days!");
-                        LicenseState::from_cache(&cache)
                     } else if days <= 30 {
                         eprintln!("[talus] ℹ license expires in {days} days");
-                        LicenseState::from_cache(&cache)
-                    } else {
-                        LicenseState::from_cache(&cache)
                     }
-                } else {
-                    LicenseState::from_cache(&cache)
                 }
+                LicenseState::from_cache(&cache)
             } else {
                 LicenseState::from_cache(&cache)
             }
@@ -2071,7 +2070,11 @@ pub fn show_license_info() -> Result<()> {
                         g
                     };
                     println!("  {tc}║{r}  Expires:      {dc}{exp}{r}                  {tc}║{r}");
-                    println!("  {tc}║{r}  Status:       {dc}✓ VALID — {days} days remaining{r}     {tc}║{r}");
+                    if days <= 0 {
+                        println!("  {tc}║{r}  Status:       {dc}✓ VALID — expires today{r}         {tc}║{r}");
+                    } else {
+                        println!("  {tc}║{r}  Status:       {dc}✓ VALID — {days} days remaining{r}     {tc}║{r}");
+                    }
                 } else {
                     println!("  {tc}║{r}  Expires:      {:<33}{tc}║{r}", exp);
                     println!("  {tc}║{r}  Status:       {g}✓ VALID{r}                            {tc}║{r}");
