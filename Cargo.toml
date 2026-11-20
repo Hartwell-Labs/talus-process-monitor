@@ -52,7 +52,7 @@ ftui-core = { version = "0.6" }
 ftui-render = { version = "0.6" }
 ftui-runtime = { version = "0.6", features = ["crossterm-compat"] }
 ftui-layout = { version = "0.6" }
-ftui-style = { version = "0.6" }
+ftui-style = { version = "0.10" }
 ftui-text = { version = "0.6" }
 ftui-widgets = { version = "0.6" }
 ftui-extras = { version = "0.6", features = ["charts", "canvas", "text-effects"] }
