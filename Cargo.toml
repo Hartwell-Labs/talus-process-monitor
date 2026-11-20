@@ -48,7 +48,7 @@ urlencoding = "2"
 
 # FrankenTUI (path dependencies — full kernel)
 ftui = { version = "0.6" }
-ftui-core = { version = "0.6" }
+ftui-core = { version = "0.10" }
 ftui-render = { version = "0.6" }
 ftui-runtime = { version = "0.6", features = ["crossterm-compat"] }
 ftui-layout = { version = "0.6" }
