@@ -271,6 +271,15 @@ export default {
       // Applied here instead: memoised per isolate, additive, idempotent.
       await ensure_stripe_schema(env.DB);
 
+      // The site calls the checkout endpoint from the browser, from
+      // hartwell-labs.pl. Without a preflight answer and an
+      // Access-Control-Allow-Origin header the fetch is refused, the page falls
+      // back to a static Payment Link, and the tier/currency the customer chose
+      // is thrown away. Only the storefront origins may call it.
+      if (request.method === 'OPTIONS' && pathname.startsWith('/api/v1/checkout-session')) {
+        return new Response(null, { status: 204, headers: cors_headers(request) });
+      }
+
       // Restrict methods per route family; everything else → 405.
       if (request.method !== 'GET' && request.method !== 'POST') {
         return json_response({ success: false, message: 'method not allowed' }, 405);
@@ -311,16 +320,19 @@ export default {
         return handle_stripe_webhook(request, env, env.DB);
       }
       if (pathname === '/api/v1/checkout-session' && request.method === 'POST') {
-        return handle_create_checkout_session(request, env);
+        return with_cors(await handle_create_checkout_session(request, env), request);
       }
       if (
         pathname.startsWith('/api/v1/checkout-session/') &&
         request.method === 'GET'
       ) {
-        return handle_checkout_status(
+        return with_cors(
+          await handle_checkout_status(
+            request,
+            env,
+            decodeURIComponent(pathname.slice('/api/v1/checkout-session/'.length)),
+          ),
           request,
-          env,
-          decodeURIComponent(pathname.slice('/api/v1/checkout-session/'.length)),
         );
       }
       if (pathname === '/api/v1/redeem-lookup' && request.method === 'POST') {
@@ -1976,6 +1988,29 @@ function timing_safe_equal(a, b) {
   let diff = a.length ^ b.length;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+const CORS_ORIGINS = new Set([
+  'https://hartwell-labs.pl',
+  'https://www.hartwell-labs.pl',
+]);
+
+function cors_headers(request) {
+  const origin = request.headers.get('origin');
+  if (!origin || !CORS_ORIGINS.has(origin)) return {};
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'POST, GET, OPTIONS',
+    'access-control-allow-headers': 'content-type, accept',
+    'access-control-max-age': '86400',
+    'vary': 'Origin',
+  };
+}
+
+function with_cors(res, request) {
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(cors_headers(request))) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 function json_response(obj, status = 200, extra_headers = null) {
